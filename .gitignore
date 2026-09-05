@@ -1,0 +1,32 @@
+# Secrets — never commit these
+.env
+.session_secret
+
+# Database (contains client/employee personal data)
+matiz.db
+matiz.db-journal
+matiz.db-wal
+matiz.db-shm
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Editor/OS cruft
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Never commit the real environment file (the example IS committed)
+.env
+*.env
+!.env.example
+.session_secret

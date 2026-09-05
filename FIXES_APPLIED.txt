@@ -1,0 +1,111 @@
+============================================================
+ FIXES APPLIED — Technical Manager & Journal Manager bugs
+============================================================
+
+1. "ADD TASK" SHOWED CLIENTS STILL IN MARKETING (Technical Manager)
+   ------------------------------------------------------------
+   The Technical Manager's "Add Task" client dropdown was built from
+   the full client list instead of the app's own scoping rule that
+   every other Technical Manager screen already uses. So a client
+   still sitting with Telecaller / Marketing TL / Marketing Manager
+   (i.e. not yet handed to the Technical team by Accounts) was
+   showing up as something you could assign a task against.
+   Fixed: the dropdown now uses the same "only clients Accounts has
+   approved" rule as the rest of the Technical Manager dashboard.
+   (index.html — admOpenAddTask)
+
+2. JOURNAL MANAGER DASHBOARD CARDS DIDN'T CLICK
+   ------------------------------------------------------------
+   The three stat cards on the Journal Manager's dashboard
+   ("Publications", "Pending Actions", "Journals") had no click
+   behaviour wired up at all — they were decorative only.
+   Fixed:
+     - "Publications" now opens a list of every under-publication
+       submission.
+     - "Pending Actions" now jumps to the Tasks > Work Validation tab.
+     - "Journals" now jumps to the Journals tab.
+   (index.html — jmStatCard, journalDashboardPanel)
+
+3. JOURNAL TEAM COULD SEE CLIENTS TECHNICAL HADN'T SENT YET
+   ------------------------------------------------------------
+   A client can save their own target journal name from their own
+   portal before Technical clicks "Send to Journal Team". The
+   Journal Manager/TL's "Journals" tab was filtering only on "has a
+   journal name", not on whether the client had actually been
+   handed over — so journal staff could see a client that Technical
+   hadn't sent them yet.
+   Fixed: the Journals tab now also requires the client to be in
+   journal scope (already handed off) when viewed by a Journal
+   Manager/TL. (Every other Journal tab — Clients, Projects — was
+   already correctly scoped this way; only Journals had the gap.)
+   (index.html — renderJournalsTable)
+
+4. "ADD TASK" TABLE DIDN'T ACTUALLY SHOW THE CLIENT NAME
+   ------------------------------------------------------------
+   The Tasks table's first column is headed "Client Name", but the
+   cell content showed the Project ID in bold with the client's
+   name in small text underneath it — backwards from the label.
+   Fixed: the client's name is now the bold/primary text, with the
+   Project ID shown underneath as a reference. (Applies to both the
+   Technical Manager and Journal Manager task tables.)
+   (index.html — mktTasksTableHtml, jmTasksTableHtml)
+
+5. JOURNAL TEAM TAB LOOKED DIFFERENT FROM TECHNICAL TEAM TAB
+   ------------------------------------------------------------
+   The Journal Manager's "Team" tab used an older card-based layout,
+   while Technical Manager's "Team" tab used the newer searchable
+   table + "Add Member" modal layout.
+   Fixed: Journal Manager's Team tab now uses the same modern
+   table + Add Member layout as Technical Manager (the Add Member
+   form already correctly limits Journal Manager/TL to adding only
+   Journal team roles — Proofreader, Proofread Coordinator,
+   Formatter, Format Coordinator, Submission).
+   Also: each manager's Team tab now only lists their own
+   department's employees (Technical sees Programmers/Paper
+   Writers, Journal sees Journal team, Marketing sees Telecallers),
+   matching the same "only what belongs to you" rule already used
+   for client lists.
+   (index.html — renderJMTeam, scopedEmployeesForCurrentView)
+
+6. ROOT CAUSE: ASSIGNED JOURNAL WORK NEVER SHOWED UP ANYWHERE,
+   AND COULDN'T BE VALIDATED
+   ------------------------------------------------------------
+   This was the underlying bug behind several of the symptoms above.
+   In server.py, every time a task was saved, its "task type" was
+   checked against an allow-list that only contained the Technical
+   team's types (Proposal / Code Implementation / Paper Writing).
+   Any Journal-team type (Proofreading / Formatting / Submission)
+   — which is exactly what the Journal Manager's "Add Task" form
+   creates — was silently wiped to blank before being saved.
+   Because the Journal task list (and the Journal Manager's task
+   totals) only show tasks that match a Journal type, every task
+   the Journal Manager created effectively vanished from their own
+   dashboard the moment it was saved.
+   On top of that, only Technical Manager/TL/Admin were allowed to
+   approve any task as fully "Completed" — a Journal Manager/TL
+   could not validate their own team's work even if it had shown up.
+   Fixed:
+     - The task-type allow-list (used when adding a task, editing a
+       task, and importing tasks from a spreadsheet) now includes
+       the Journal team's types too.
+     - Journal Manager/TL can now approve a task as Completed.
+     - The Journal Manager's "Work Validation" tab now has a new
+       "Work Updates — waiting on your approval" section at the top,
+       listing every Proofreading/Formatting/Submission task a team
+       member has marked done, with Approve / Needs correction
+       buttons — the same pattern the Technical Manager's dashboard
+       already used for their own team.
+     - As a side-effect fix: the Technical Manager's own "Work
+       Updates" queue was also tightened so it can never show a
+       Journal team member's submitted task by mistake (it could
+       have, before this fix, since nothing separated the two).
+   (server.py — VALID_TASK_TYPES, TASK_COMPLETION_ROLES;
+    index.html — jmWorkUpdatesQueue, jmWorkUpdatesHtml, journalWorkPanel,
+    tmWorkUpdatesQueue, TASK_COMPLETION_ROLES)
+
+------------------------------------------------------------
+All of the above was tested by starting server.py and confirming
+the app loads and the API responds correctly. As always, delete
+matiz.db and restart if you want a totally fresh database, or keep
+your existing matiz.db to keep your current data (these fixes don't
+change the database schema).

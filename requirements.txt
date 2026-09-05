@@ -1,0 +1,6 @@
+# Production deployment, local configuration, and the PostgreSQL driver.
+# Everything else the application uses is Python standard library.
+
+gunicorn==23.0.0        # production WSGI server (see Procfile / render.yaml)
+python-dotenv==1.0.1    # optional: loads .env locally; a built-in fallback exists
+psycopg2-binary>=2.9.11,<3.0  # PostgreSQL driver - 2.9.11+ is required for Python 3.14 support
