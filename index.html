@@ -2476,6 +2476,7 @@ function openEditClientModal(id){
       <div class="field"><label>University / College / Company</label><input id="ec_institution" value="${esc(c.institution||'')}"></div>
       <div class="field"><label>Topic</label><input id="ec_topic" value="${esc(c.topic||'')}"></div>
       <div class="field"><label>Domain name</label><input id="ec_domain" value="${esc(c.domain)}"></div>
+      <div class="field"><label>Service</label><select id="ec_service">${serviceOptionsHtml(c.serviceKey)}</select></div>
       <div class="field"><label>Technical person</label><input id="ec_techperson" value="${esc(c.technicalPerson||'')}"></div>
       <div class="field"><label>Base paper provided?</label>
         <select id="ec_basepaper"><option value="no" ${!c.basePaperProvided?'selected':''}>No</option><option value="yes" ${c.basePaperProvided?'selected':''}>Yes</option></select></div>
@@ -2495,6 +2496,7 @@ function openEditClientModal(id){
 async function submitEditClient(id){
   const payload = {clientId:id, name:$("ec_name").value.trim(), phone:$("ec_phone").value.trim(),
     email:$("ec_email").value.trim(), domain:$("ec_domain").value.trim(),
+    serviceKey: $("ec_service").value,
     designation:$("ec_designation").value.trim(), institution:$("ec_institution").value.trim(),
     topic:$("ec_topic").value.trim(), technicalPerson:$("ec_techperson").value.trim(),
     basePaperProvided: $("ec_basepaper").value==='yes', bdc:$("ec_bdc").value.trim(),
@@ -5418,6 +5420,10 @@ function admPubStatusLabel(c){
   return JOURNAL_STATUS_LABEL[c.journalStatus] || "Submitted";
 }
 function admInstallmentsText(c){
+  if(c.installments && c.installments.length){
+    const paid = c.installments.filter(it=>it.status==='paid').length;
+    return paid+"/"+c.installments.length;
+  }
   const keys = activePayKeys(c);
   if(!keys.length) return "0/0";
   const paid = keys.filter(k=>c.payments[k] && c.payments[k].status==="paid").length;
@@ -6514,6 +6520,8 @@ function admOpenUpdateProfile(id){
       <div class="field"><label>College / Workplace</label><input id="up_inst" value="${esc(c.institution||"")}"></div>
       <div class="field"><label>Department</label><input id="up_dept" value="${esc(c.department||"")}"></div>
       <div class="field"><label>Research Area / Domain</label><input id="up_domain" value="${esc(c.domain||"")}"></div>
+      <div class="field"><label>Service</label><select id="up_service">${serviceOptionsHtml(c.serviceKey)}</select></div>
+      <div class="field"><label>Total amount (Rs.)</label><input id="up_total" type="number" value="${esc(c.totalAmount||"")}"></div>
       <div class="field"><label>BDC</label><input id="up_bdc" value="${esc(c.bdc||"")}"></div>
       <div class="field"><label>Referred By</label><input id="up_ref" value="${esc(c.referredBy||"")}"></div>
     </div>
@@ -6522,6 +6530,7 @@ function admOpenUpdateProfile(id){
 async function admSaveUpdateProfile(id){
   try{
     await api("update_client", {clientId:id, name:$("up_name").value, phone:$("up_phone").value, email:$("up_email").value,
+      serviceKey: $("up_service").value, totalAmount: $("up_total").value,
       altMobile:$("up_alt").value, institutionalEmail:$("up_iemail").value, institution:$("up_inst").value,
       department:$("up_dept").value, domain:$("up_domain").value, bdc:$("up_bdc").value, referredBy:$("up_ref").value});
     closeModal(); await loadData(); rerenderCurrent(); toast("Client details updated");

@@ -372,8 +372,13 @@ ACTION_ROLES = {
     # ---- accounts / money ----
     "mark_paid": _R_ACCOUNTS,
     "mark_installment_paid": _R_ACCOUNTS,
-    "add_client_installments": _R_ACCOUNTS,
-    "delete_client_installment": _R_ACCOUNTS,
+    # BUGFIX: widened from _R_ACCOUNTS. The handler itself (see MARKETING_ROLES inside the
+    # add_client_installments/delete_client_installment actions below) has always allowed
+    # Telecaller/Marketing TL/Marketing Manager/Admin to manage the installment split-up,
+    # but this authorization gate ran first and silently rejected them with a 403 before
+    # the handler's own (correct) check ever ran.
+    "add_client_installments": _R_MARKETING,
+    "delete_client_installment": _R_MARKETING,
     "account_approve": _R_ACCOUNTS,
     "approve_writing_fee": _R_ACCOUNTS,
     "manager_approve": _R_MANAGERS,
@@ -745,6 +750,10 @@ STAFF_MGMT_ROLES = ("technical_manager", "technical_tl", "marketing_tl", "market
                      "journal_manager", "journal_tl", "md_admin", "super_admin")
 # SECURITY: roles allowed to administer logins/employees system-wide (Team & Access screen).
 ADMIN_ROLES = ("md_admin", "super_admin")
+# FEATURE: roles allowed to change a client's SERVICE and TOTAL AMOUNT after the client has
+# already been registered — a tighter set than "who can edit a client at all" (update_client
+# below), since the service drives the whole payment schedule.
+SERVICE_EDIT_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "md_admin", "super_admin")
 
 
 def service_conf(key):
@@ -3149,6 +3158,23 @@ def handle_action(action, d, ip=""):
                 if amt(new_total) != amt(c["total_amount"]):
                     numeric_changes.append(f"Total amount: \"{amt(c['total_amount']) or 0}\" -> \"{amt(new_total)}\"")
                 updates["total_amount"] = new_total
+
+            # FEATURE: allow Telecaller / Marketing TL / Marketing Manager / Admin to change
+            # a client's service (and, via the totalAmount block above, the total contract
+            # amount) after registration. Restricted to SERVICE_EDIT_ROLES since the service
+            # drives the whole payment schedule.
+            if "serviceKey" in d or ("totalAmount" in d and d.get("totalAmount") not in (None, "")):
+                actor_role = (d.get("role") or "").strip()
+                if actor_role not in SERVICE_EDIT_ROLES:
+                    raise ApiError("Only the Telecaller, Marketing TL/Manager, or an Admin can change the service or amount.")
+            if "serviceKey" in d:
+                new_service = (d.get("serviceKey") or "").strip().upper()
+                if new_service not in SERVICES:
+                    raise ApiError("Pick a valid service.")
+                if new_service != (c["service_key"] or DEFAULT_SERVICE):
+                    numeric_changes.append(
+                        f"Service: \"{service_conf(c['service_key'])['label']}\" -> \"{SERVICES[new_service]['label']}\"")
+                updates["service_key"] = new_service
 
             if "name" in updates and not updates["name"]:
                 raise ApiError("Name cannot be empty.")
