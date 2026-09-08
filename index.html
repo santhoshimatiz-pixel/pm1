@@ -1899,6 +1899,10 @@ let dashActiveSection = {};
 function isTelecaller(){ return role==="telecaller" || (role==="employee" && empRole==="TELECALLER"); }
 /* ---------- MD / Super Admin modern dashboard state ---------- */
 function isAdminModern(){ return role==="md_admin" || role==="super_admin"; }
+// Deleting a client is admin-only on the server (delete_client requires _R_ADMIN) — showing
+// the option to other roles (Technical Manager, Marketing Manager, ...) just gets a silent
+// 403 when clicked, so the UI only offers it to roles that can actually use it.
+function canDeleteClients(){ return role==="md_admin" || role==="super_admin"; }
 function isMktModern(){ return role==="marketing_manager"; }
 function isTechManagerModern(){ return role==="technical_manager" || role==="technical_tl"; }
 function isJournalModern(){ return role==="journal_manager" || role==="journal_tl"; }
@@ -3514,7 +3518,7 @@ function renderTMTasks(){
   if(tmTasksTab==="validation"){ $("content").innerHTML = html + tmWorkValidationTableHtml(); return; }
   if(tmTasksTab==="assign"){ $("content").innerHTML = html + tmAssignWorkHtml(); return; }
   if(tmTasksTab==="updates"){ $("content").innerHTML = html + tmWorkUpdatesHtml(); return; }
-  $("content").innerHTML = html + mktTasksTableHtml();
+  $("content").innerHTML = html + tmTasksTableHtml();
 }
 function renderTMTeam(){
   if(admTeamPage==="profile"){ renderTeamMemberProfile(); return; }
@@ -4566,7 +4570,7 @@ function admClientRegDate(c){ return c.regDate || c.createdAt || null; }
 function admIsOverdue(c){ return c.deadlineDate && c.stage!=="COMPLETED" && new Date(c.deadlineDate) < new Date(); }
 function admDaysOver(c){ if(!c.deadlineDate) return 0; return Math.max(0, Math.ceil((new Date() - new Date(c.deadlineDate))/86400000)); }
 function admClientStatus(c){
-  if(c.stage==="COMPLETED") return {label:"Good", cls:"good"};
+  if(c.stage==="COMPLETED") return {label:"Completed", cls:"good"};
   if(admIsOverdue(c)) return {label:"Overdue", cls:"bad"};
   const pending = PAY_KEYS.some(k=>c.payments && c.payments[k] && c.payments[k].status!=="paid" && activePayKeys(c).includes(k));
   if(c.deadlineDate){
@@ -5138,7 +5142,8 @@ function matchesAdminColSearch(c){
   if(s.status && !st.label.toLowerCase().includes(s.status.toLowerCase())) return false;
   if(searchQuery){
     const q = searchQuery.trim().toLowerCase();
-    const hay = ((c.name||"")+" "+(c.phone||"")+" "+(c.id||"")+" "+(c.displayId||"")+" "+(c.email||"")).toLowerCase();
+    const hay = ((c.name||"")+" "+(c.phone||"")+" "+(c.id||"")+" "+(c.displayId||"")+" "+(c.email||"")+" "
+      +(c.domain||"")+" "+(c.topic||"")+" "+(c.bdc||"")+" "+fmtDate(admClientRegDate(c))+" "+st.label).toLowerCase();
     if(!hay.includes(q)) return false;
   }
   return true;
@@ -5206,7 +5211,7 @@ function adminClientsTableHtml(){
           <button class="adm-dots" onclick="admToggleRowMenu(event,'cl-${c.id}')">&#8942;</button>
           <div class="adm-row-menu-pop" id="qmenu-cl-${c.id}">
             <button onclick="admToggleRowMenu(event,'cl-${c.id}');admOpenUpdateProfile(${jsq(c.id)})">Edit</button>
-            <button class="danger" onclick="admToggleRowMenu(event,'cl-${c.id}');admDeleteClient(${jsq(c.id)})">Delete</button>
+            ${canDeleteClients() ? `<button class="danger" onclick="admToggleRowMenu(event,'cl-${c.id}');admDeleteClient(${jsq(c.id)})">Delete</button>` : ""}
           </div>
         </div>
       </td>
@@ -5448,7 +5453,8 @@ function matchesAdminProjSearch(c){
   if(s.pub && !admPubStatusLabel(c).toLowerCase().includes(s.pub.toLowerCase())) return false;
   if(searchQuery){
     const q = searchQuery.trim().toLowerCase();
-    const hay = ((c.name||"")+" "+(c.id||"")+" "+(c.displayId||"")+" "+(c.domain||"")).toLowerCase();
+    const hay = ((c.name||"")+" "+(c.id||"")+" "+(c.displayId||"")+" "+(c.domain||"")+" "+(c.topic||"")+" "
+      +(c.bdc||"")+" "+fmtDate(admClientRegDate(c))+" "+admTechStatusLabel(c)).toLowerCase();
     if(!hay.includes(q)) return false;
   }
   return true;
@@ -5493,7 +5499,7 @@ function admNewProjectsTableHtml(scope){
         <button class="adm-dots" onclick="admToggleRowMenu(event,'np-${c.id}')">&#8942;</button>
         <div class="adm-row-menu-pop" id="qmenu-np-${c.id}">
           <button onclick="admToggleRowMenu(event,'np-${c.id}');admOpenUpdateProfile(${jsq(c.id)})">Edit</button>
-          <button class="danger" onclick="admToggleRowMenu(event,'np-${c.id}');admDeleteClient(${jsq(c.id)})">Delete</button>
+          ${canDeleteClients() ? `<button class="danger" onclick="admToggleRowMenu(event,'np-${c.id}');admDeleteClient(${jsq(c.id)})">Delete</button>` : ""}
         </div>
       </div>
     </td>
@@ -6732,6 +6738,83 @@ function mktTasksTableHtml(){
     <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
       <th>Client Name</th><th>Task</th><th>Members</th><th>Start Date</th><th>Finish By</th><th>Priority</th><th>Status</th><th>Action</th>
     </tr></thead><tbody>${body}</tbody></table>` : `<div class="adm-empty">No tasks yet. Use "+ Add Task" to create one.</div>`}</div>
+  </div>`;
+}
+// Whether a task counts as "Overdue" for the status filter/badge below: has a finish
+// date that's in the past, and isn't already marked Completed.
+function taskIsOverdue(t){
+  return !!(t.finish_date && t.status!=="COMPLETED" && new Date(t.finish_date) < new Date());
+}
+function taskMatchesStatusFilter(t, filterVal){
+  if(!filterVal) return true;
+  if(filterVal==="OVERDUE") return taskIsOverdue(t);
+  if(filterVal==="COMPLETED") return t.status==="COMPLETED";
+  if(filterVal==="PENDING") return t.status!=="COMPLETED" && !taskIsOverdue(t);
+  return true;
+}
+// Universal Search for the Task tab: one field, matches client, task title/type,
+// assigned members, priority, and status — filtered live via oninput (no click needed).
+function matchesTaskSearch(t){
+  const q = (searchQuery||"").trim().toLowerCase();
+  if(!q) return true;
+  const c = admTaskClient(t);
+  const hay = [
+    t.title||"", TASK_TYPE_LABEL[t.task_type]||"", t.assigned_to||"", t.priority||"",
+    TASK_STATUS_LABEL[t.status]||t.status||"", taskIsOverdue(t) ? "overdue" : "",
+    c ? (c.name||"") : "", c ? (c.displayId||c.id||"") : "", c ? (c.projectId||"") : ""
+  ].join(" ").toLowerCase();
+  return hay.includes(q);
+}
+let tmTaskStatusFilter = "";
+// Dedicated Task-tab table for the Technical Manager/TL dashboard. Unlike
+// mktTasksTableHtml (Marketing's own task list, which deliberately excludes Proposal /
+// Code Implementation / Paper Writing since Marketing never assigns technical work),
+// this one includes every task type — those ARE the Technical team's own work. It also
+// has one working Universal Search box (the shared one had a search field that never
+// actually filtered anything) and a Status filter (Overdue / Pending / Completed).
+function tmTasksTableHtml(){
+  const rows = tasks.slice()
+    .filter(matchesTaskSearch)
+    .filter(t=>taskMatchesStatusFilter(t, tmTaskStatusFilter))
+    .sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+  const body = rows.map(t=>{
+    const c = admTaskClient(t);
+    const overdue = taskIsOverdue(t);
+    const cls = t.status==="COMPLETED" ? "good" : (overdue ? "bad" : taskStatusCls(t.status));
+    const statusLabel = (overdue && t.status!=="COMPLETED") ? "Overdue" : (TASK_STATUS_LABEL[t.status]||t.status);
+    return `<tr onclick="admOpenTaskDetail(${t.id})">
+      <td><b>${c?esc(c.name):"—"}</b>${c?`<br><small style="color:#8DA39A">${esc(c.projectId||c.displayId||c.id)}</small>`:""}</td>
+      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}</td>
+      <td>${admMembersFromNames(t.assigned_to)}</td>
+      <td>${t.start_date?fmtDate(t.start_date):"—"}</td>
+      <td>${t.finish_date?fmtDate(t.finish_date):"—"}</td>
+      <td>${esc(t.priority)}</td>
+      <td><span class="adm-status ${cls}">${esc(statusLabel)}</span></td>
+      <td onclick="event.stopPropagation()">
+        <div class="adm-row-menu">
+          <button class="adm-dots" onclick="admToggleRowMenu(event,'task-${t.id}')">&#8942;</button>
+          <div class="adm-row-menu-pop" id="qmenu-task-${t.id}">
+            <button onclick="admToggleRowMenu(event,'task-${t.id}');admOpenTaskDetail(${t.id})">Open</button>
+            ${t.status!=="COMPLETED"?`<button onclick="admToggleRowMenu(event,'task-${t.id}');admQuickCompleteTask(${t.id})">Mark completed</button>`:""}
+            <button class="danger" onclick="admToggleRowMenu(event,'task-${t.id}');admDeleteTask(${t.id})">Delete</button>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+  const filterOpts = [["","All statuses"],["OVERDUE","Overdue"],["PENDING","Pending"],["COMPLETED","Completed"]];
+  return `<div class="adm-panel">
+    <div class="adm-panel-head">
+      <h3>Tasks</h3>
+      <div class="adm-search"><span>&#128269;</span><input placeholder="Search by client, task, member, priority, status..." value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <select onchange="tmTaskStatusFilter=this.value;rerenderCurrent()" style="max-width:170px">
+        ${filterOpts.map(([v,l])=>`<option value="${v}" ${tmTaskStatusFilter===v?"selected":""}>${l}</option>`).join("")}
+      </select>
+      <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('tasks')">Import</button><button class="btn ghost small" onclick="admExportTasksCsv()">Export</button></div>
+    </div>
+    <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
+      <th>Client Name</th><th>Task</th><th>Members</th><th>Start Date</th><th>Finish By</th><th>Priority</th><th>Status</th><th>Action</th>
+    </tr></thead><tbody>${body}</tbody></table>` : `<div class="adm-empty">No tasks match your search/filter.</div>`}</div>
   </div>`;
 }
 function admExportTasksCsv(){
