@@ -693,7 +693,7 @@ JOURNAL_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "REVISION_REQUESTED", "ACCEPTED
 
 SERVICES = {
     "SCI": {
-        "label": "SCI (Scopus paid, with implementation)",
+        "label": "SCI (with implementation)",
         "hasImplementation": True,
         "requiresWritingFee": True,
         "amounts": {"reg": 25000, "start": 25000, "code": 40000, "writing": 20000, "paper": 10000},
