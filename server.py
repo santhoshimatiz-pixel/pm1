@@ -356,10 +356,14 @@ ACTION_ROLES = {
     "mark_demo_given": _R_MARKETING + ("technical_manager", "technical_tl"),
     "reject_client": _R_MKT_MGMT,
     "unreject_client": _R_MKT_MGMT,
-    "import_clients": _R_MKT_MGMT,
-    "import_clients_from_url": _R_MKT_MGMT,
-    "bulk_import": _R_MKT_MGMT,
-    "bulk_import_from_url": _R_MKT_MGMT,
+    # BUGFIX: widened from _R_MKT_MGMT. Telecallers can already add a client one at a
+    # time (add_client uses _R_MARKETING), but the bulk-import panel shown on their own
+    # dashboard was still gated to Marketing TL/Manager only, so a Telecaller clicking
+    # "Import file" there got a silent 403. Matches add_client's roles.
+    "import_clients": _R_MARKETING,
+    "import_clients_from_url": _R_MARKETING,
+    "bulk_import": _R_MARKETING,
+    "bulk_import_from_url": _R_MARKETING,
     "assign_proposal_writer": _R_MARKETING + ("technical_manager", "technical_tl"),
     "send_to_client": _R_MARKETING,
     "send_to_tl": _R_MARKETING + ("technical_manager", "technical_tl"),
