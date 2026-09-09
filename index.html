@@ -494,7 +494,8 @@ tbody tr:last-child td{border-bottom:none}
 
   .adm-profile-row{flex-direction:column;align-items:flex-start;gap:3px}
   .adm-profile-row label{flex:0 0 auto}
-  .adm-bar-row .lbl{flex:0 0 96px;font-size:11px}
+  .adm-bar-row .lbl{font-size:11px}
+  .adm-bar-row:has(.track) .lbl{flex:0 0 96px}
   th,td{padding:10px 12px;font-size:13px}
   .panel-head,.adm-panel-head{padding:14px 15px}
 }
@@ -738,7 +739,14 @@ input.adm-th-search:not(:placeholder-shown){color:#16241D;text-transform:none;le
 .adm-tb-item.current .adm-tb-dot{background:#fff;border-color:#0E9A6C;box-shadow:0 0 0 3px rgba(14,154,108,.2)}
 .adm-bar-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(15,40,30,.06)}
 .adm-bar-row:last-child{border-bottom:none}
-.adm-bar-row .lbl{flex:0 0 150px;font-size:12.5px;color:#16241D;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Default: labels show the FULL name (wrap onto a second line if needed) — the old
+   fixed 150px + ellipsis truncated real names in queues like "New Work To Assign",
+   Delivery, Work Updates, etc. that don't have a progress track next to the label.
+   Rows that DO pair the label with a .track/.days progress bar still need a fixed
+   width so the bar lines up, so that layout is restored specifically for those via
+   :has() below instead of applying to every .adm-bar-row .lbl unconditionally. */
+.adm-bar-row .lbl{flex:1 1 auto;min-width:0;font-size:12.5px;color:#16241D;font-weight:700;overflow-wrap:break-word;word-break:break-word}
+.adm-bar-row:has(.track) .lbl{flex:0 0 150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .adm-bar-row .track{flex:1;height:9px;background:#EEF3F0;border-radius:99px;overflow:hidden}
 .adm-bar-row .track i{display:block;height:100%;background:linear-gradient(90deg,#0E9A6C,#34D8C4)}
 .adm-bar-row .days{flex:0 0 auto;font-size:11px;color:#B42318;font-weight:800}
@@ -863,7 +871,8 @@ html:not([data-theme="light"]) .adm-tb-item.done .adm-tb-dot{background:var(--pu
 html:not([data-theme="light"]) .adm-tb-item.current{color:var(--purple);font-weight:800;border-left-color:var(--purple)}
 html:not([data-theme="light"]) .adm-tb-item.current .adm-tb-dot{background:var(--card);border-color:var(--purple);box-shadow:0 0 0 3px rgba(14,154,108,.2)}
 html:not([data-theme="light"]) .adm-bar-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(159,232,203,.06)}
-html:not([data-theme="light"]) .adm-bar-row .lbl{flex:0 0 150px;font-size:12.5px;color:var(--text);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html:not([data-theme="light"]) .adm-bar-row .lbl{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--text);font-weight:700;overflow-wrap:break-word;word-break:break-word}
+html:not([data-theme="light"]) .adm-bar-row:has(.track) .lbl{flex:0 0 150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 html:not([data-theme="light"]) .adm-bar-row .track{flex:1;height:9px;background:var(--card2);border-radius:99px;overflow:hidden}
 html:not([data-theme="light"]) .adm-bar-row .track i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--ok))}
 html:not([data-theme="light"]) .adm-bar-row .days{flex:0 0 auto;font-size:11px;color:var(--bad);font-weight:800}
@@ -5969,9 +5978,22 @@ function admProjTasksTab(c){
       : `<div class="adm-empty">No tasks logged yet.</div>`}</div>
   </div>`;
 }
+// Clients whose service scope skips Code Implementation (serviceConf(c).hasImplementation
+// is false — same flag tmNewWorkQueue() already uses to route straight to Paper Writing)
+// never pass through these stages: Technical goes straight from "Sent to Technical Team"
+// to Paper Writing. The task board must reflect that real path instead of always showing
+// every stage of the universal pipeline, which used to leave "Proposal writing assigned" /
+// "Proposal submitted" sitting there as if still pending on a client that will never need them.
+const PROPOSAL_IMPL_STAGES = ['PROPOSAL_ASSIGNED','PROPOSAL_SUBMITTED','PROPOSAL_VERIFIED',
+  'PROPOSAL_CLIENT_REVIEW','PROPOSAL_APPROVED','IMPLEMENTATION_ASSIGNED','IMPLEMENTATION_COMPLETE',
+  'IMPLEMENTATION_CLIENT_REVIEW','IMPLEMENTATION_APPROVED'];
 function admProjTaskBoardTab(c){
   const curIdx = stageIdx(c.stage);
-  const items = STAGES.map((s,i)=>`<div class="adm-tb-item ${i<curIdx?'done':i===curIdx?'current':''}"><div class="adm-tb-dot"></div><div class="adm-tb-label">${esc(STAGE_LABEL[s]||s)}</div></div>`).join("");
+  const displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
+  const items = displayStages.map(s=>{
+    const i = stageIdx(s);
+    return `<div class="adm-tb-item ${i<curIdx?'done':i===curIdx?'current':''}"><div class="adm-tb-dot"></div><div class="adm-tb-label">${esc(STAGE_LABEL[s]||s)}</div></div>`;
+  }).join("");
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3></div>
     <div class="adm-panel-body"><div class="adm-tb-rail">${items}</div></div>
   </div>`;
