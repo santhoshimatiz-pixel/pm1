@@ -3336,12 +3336,27 @@ def handle_action(action, d, ip=""):
             return {"ok": True}
 
         if action == "add_task":
+            # A task must never be created/assigned unless ALL required fields are
+            # present: title, client, at least one employee, a start date, and a
+            # deadline. The frontend already checks this for instant feedback, but
+            # that can never be trusted alone — this is the authoritative check that
+            # actually keeps incomplete task records out of the database.
             title = (d.get("title") or "").strip()
             if not title:
                 raise ApiError("Give the task a title.")
-            client_id = (d.get("clientId") or "").strip() or None
-            if client_id:
-                get_client(con, client_id)  # raises if not found
+            client_id = (d.get("clientId") or "").strip()
+            if not client_id:
+                raise ApiError("Select a client before assigning this task.")
+            get_client(con, client_id)  # raises if not found
+            assigned_to = (d.get("assignedTo") or "").strip()
+            if not assigned_to:
+                raise ApiError("Select at least one employee to assign this task to.")
+            start_date = (d.get("startDate") or "").strip()
+            if not start_date:
+                raise ApiError("Select a start date for this task.")
+            finish_date = (d.get("finishDate") or "").strip()
+            if not finish_date:
+                raise ApiError("Select a deadline / due date for this task.")
             priority = (d.get("priority") or "MEDIUM").strip().upper()
             if priority not in ("LOW", "MEDIUM", "HIGH"):
                 priority = "MEDIUM"
@@ -3353,8 +3368,7 @@ def handle_action(action, d, ip=""):
                 (title, description, client_id, priority, start_date, finish_date, assigned_to, created_by, task_type)
                 VALUES (?,?,?,?,?,?,?,?,?)""",
                 (title, (d.get("description") or "").strip(), client_id, priority,
-                 (d.get("startDate") or "").strip() or None, (d.get("finishDate") or "").strip() or None,
-                 (d.get("assignedTo") or "").strip(), actor, task_type))
+                 start_date, finish_date, assigned_to, actor, task_type))
             con.commit()
             return {"ok": True, "id": cur.lastrowid}
 

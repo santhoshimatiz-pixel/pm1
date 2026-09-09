@@ -643,6 +643,34 @@ input.adm-th-search::placeholder{color:#66827A;text-transform:uppercase;letter-s
 input.adm-th-search:focus{border-bottom-color:#0E9A6C;color:#16241D;text-transform:none;letter-spacing:0}
 input.adm-th-search:not(:placeholder-shown){color:#16241D;text-transform:none;letter-spacing:0;border-bottom-color:#0E9A6C}
 
+/* column filter popover (BDC / Status multi-select) */
+.adm-filter-badge{display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:15px;padding:0 4px;background:#0E9A6C;color:#fff;font-size:9.5px;font-weight:800;border-radius:999px;line-height:15px}
+.adm-filter-pop{position:absolute;left:0;top:30px;background:#fff;border:1px solid rgba(15,40,30,.12);border-radius:10px;box-shadow:0 10px 26px -10px rgba(15,40,30,.35);min-width:190px;max-height:260px;display:flex;flex-direction:column;z-index:30;white-space:normal}
+.adm-filter-pop-list{overflow-y:auto;max-height:200px;padding:6px}
+.adm-filter-opt{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:12.5px;font-weight:600;color:#16241D;text-transform:none;letter-spacing:normal;cursor:pointer;border-radius:7px}
+.adm-filter-opt:hover{background:#F0F7F3}
+.adm-filter-opt input{width:auto;accent-color:#0E9A6C}
+.adm-filter-empty{padding:10px 9px;font-size:12px;color:#66827A}
+.adm-filter-pop-actions{display:flex;justify-content:space-between;gap:8px;padding:7px 9px;border-top:1px solid rgba(15,40,30,.08)}
+.adm-filter-clear{background:none;border:none;color:#B42318;font-size:11.5px;font-weight:700;cursor:pointer;padding:4px 6px}
+.adm-filter-clear:hover{text-decoration:underline}
+.adm-filter-done{background:#0E9A6C;border:none;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;padding:5px 11px;border-radius:7px}
+
+/* clickable multi-select dropdown (task employee assignment) */
+.ms-select{position:relative}
+.ms-select-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line);background:var(--card2);border-radius:10px;padding:10px 12px;cursor:pointer;font-size:13.5px;color:var(--text);transition:border-color .15s var(--ease)}
+.ms-select-trigger:hover{border-color:var(--line-strong)}
+.ms-select-display{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.ms-select-display.has-value{color:var(--text)}
+.ms-select-caret{width:14px;height:14px;color:var(--muted);flex-shrink:0;transition:transform .15s var(--ease)}
+.ms-select-pop{display:none;position:absolute;left:0;right:0;top:calc(100% + 6px);background:#fff;border:1px solid rgba(15,40,30,.12);border-radius:10px;box-shadow:0 10px 26px -10px rgba(15,40,30,.35);max-height:220px;overflow-y:auto;z-index:40;padding:6px}
+.ms-select-pop.open{display:block}
+.ms-select-opt{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:13px;font-weight:600;color:#16241D;cursor:pointer;border-radius:8px}
+.ms-select-opt:hover{background:#F0F7F3}
+.ms-select-opt input{width:auto;accent-color:#0E9A6C}
+.field-invalid{border-color:#DC2626 !important;box-shadow:0 0 0 2px rgba(220,38,38,.14) !important}
+.field-err-msg{color:#DC2626;font-size:12px;margin-top:5px;font-weight:600}
+
 .adm-status{font-size:11px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:.02em}
 .adm-status.good{background:#DEF7E9;color:#0E7A4F}
 .adm-status.warn{background:#FDECC8;color:#966017}
@@ -780,6 +808,14 @@ html:not([data-theme="light"]) input.adm-th-search{width:100%;min-width:70px;bac
 html:not([data-theme="light"]) input.adm-th-search::placeholder{color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:800;opacity:1}
 html:not([data-theme="light"]) input.adm-th-search:focus{border-bottom-color:var(--purple);color:var(--text);text-transform:none;letter-spacing:0}
 html:not([data-theme="light"]) input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:none;letter-spacing:0;border-bottom-color:var(--purple)}
+html:not([data-theme="light"]) .adm-filter-pop{background:var(--card);border:1px solid rgba(159,232,203,.14);box-shadow:0 10px 26px -10px rgba(159,232,203,.30)}
+html:not([data-theme="light"]) .adm-filter-opt{color:var(--text)}
+html:not([data-theme="light"]) .adm-filter-opt:hover{background:rgba(43,190,142,.10)}
+html:not([data-theme="light"]) .adm-filter-empty{color:var(--muted)}
+html:not([data-theme="light"]) .adm-filter-pop-actions{border-top:1px solid rgba(159,232,203,.10)}
+html:not([data-theme="light"]) .ms-select-pop{background:var(--card);border:1px solid rgba(159,232,203,.14);box-shadow:0 10px 26px -10px rgba(159,232,203,.30)}
+html:not([data-theme="light"]) .ms-select-opt{color:var(--text)}
+html:not([data-theme="light"]) .ms-select-opt:hover{background:rgba(43,190,142,.10)}
 html:not([data-theme="light"]) .adm-status.good{background:rgba(52,216,196,.16);color:var(--ok)}
 html:not([data-theme="light"]) .adm-status.warn{background:rgba(231,198,115,.20);color:var(--gold)}
 html:not([data-theme="light"]) .adm-status.bad{background:rgba(248,113,113,.16);color:var(--bad)}
@@ -5137,9 +5173,9 @@ function matchesAdminColSearch(c){
   if(s.project && !((c.domain||c.topic||"")).toLowerCase().includes(s.project.toLowerCase())) return false;
   if(s.email && !(c.email||"").toLowerCase().includes(s.email.toLowerCase())) return false;
   if(s.regdate && !fmtDate(admClientRegDate(c)).toLowerCase().includes(s.regdate.toLowerCase())) return false;
-  if(s.bdc && !(c.bdc||"").toLowerCase().includes(s.bdc.toLowerCase())) return false;
   if(s.works && !String(admWorksCount(c)).includes(s.works.trim())) return false;
-  if(s.status && !st.label.toLowerCase().includes(s.status.toLowerCase())) return false;
+  if(admBdcFilterSel.length && !admBdcFilterSel.includes((c.bdc||"").trim())) return false;
+  if(admStatusFilterSel.length && !admStatusFilterSel.includes(st.label)) return false;
   if(searchQuery){
     const q = searchQuery.trim().toLowerCase();
     const hay = ((c.name||"")+" "+(c.phone||"")+" "+(c.id||"")+" "+(c.displayId||"")+" "+(c.email||"")+" "
@@ -5193,6 +5229,69 @@ function admThCol(label, key, targetVar){
   </span></th>`;
 }
 function admThPlain(label){ return `<th><span class="adm-th-row adm-th-row-plain">${esc(label)}</span></th>`; }
+
+/* ---------- multi-select column filters (BDC / Status) ----------
+   A separate mechanism from admThCol's free-text search: these show a small
+   filter icon that opens a checkbox popover of the values actually present
+   in the current data (never hardcoded), and support selecting several
+   values at once plus a Clear option. They compose with admThCol's text
+   search and the universal search box via matchesAdminColSearch(). */
+let admMultiFilterOpen = {};   // key -> bool, which popover (if any) is open
+let admBdcFilterSel = [];      // selected BDC member names
+let admStatusFilterSel = [];   // selected status labels
+function admBdcFilterOptions(){
+  const set = new Set();
+  scopedClientsForCurrentView().forEach(c=>{ if(c.bdc && c.bdc.trim()) set.add(c.bdc.trim()); });
+  return Array.from(set).sort((a,b)=>a.localeCompare(b));
+}
+function admStatusFilterOptions(){
+  const set = new Set();
+  scopedClientsForCurrentView().forEach(c=>set.add(admClientStatus(c).label));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b));
+}
+function admToggleMultiFilter(key){
+  const wasOpen = !!admMultiFilterOpen[key];
+  admMultiFilterOpen = {};
+  admMultiFilterOpen[key] = !wasOpen;
+  rerenderCurrent();
+}
+function admCloseMultiFilters(){
+  if(Object.keys(admMultiFilterOpen).some(k=>admMultiFilterOpen[k])){
+    admMultiFilterOpen = {};
+    rerenderCurrent();
+  }
+}
+document.addEventListener("click", admCloseMultiFilters);
+function admToggleBdcFilterVal(val){
+  const i = admBdcFilterSel.indexOf(val);
+  if(i>=0) admBdcFilterSel.splice(i,1); else admBdcFilterSel.push(val);
+  rerenderCurrent();
+}
+function admToggleStatusFilterVal(val){
+  const i = admStatusFilterSel.indexOf(val);
+  if(i>=0) admStatusFilterSel.splice(i,1); else admStatusFilterSel.push(val);
+  rerenderCurrent();
+}
+function admClearBdcFilter(){ admBdcFilterSel = []; rerenderCurrent(); }
+function admClearStatusFilter(){ admStatusFilterSel = []; rerenderCurrent(); }
+function admThMultiFilter(label, key, options, sel, toggleFnName, clearFnName){
+  const icon = `<svg class="adm-th-icon" viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14l-5.3 6.2V16l-3.4-1.8v-3.5L3 4.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  const open = !!admMultiFilterOpen[key];
+  const count = sel.length;
+  const pop = open ? `<div class="adm-filter-pop" onclick="event.stopPropagation()">
+      <div class="adm-filter-pop-list">
+        ${options.length ? options.map(o=>`<label class="adm-filter-opt"><input type="checkbox" ${sel.includes(o)?'checked':''} onchange="${toggleFnName}(${jsq(o)})"> ${esc(o)}</label>`).join("")
+          : `<div class="adm-filter-empty">No ${esc(label.toLowerCase())} values yet</div>`}
+      </div>
+      <div class="adm-filter-pop-actions">
+        <button type="button" class="adm-filter-clear" onclick="${clearFnName}()">Clear</button>
+        <button type="button" class="adm-filter-done" onclick="admToggleMultiFilter(${jsq(key)})">Done</button>
+      </div>
+    </div>` : "";
+  return `<th style="position:relative"><span class="adm-th-row adm-th-trigger" onclick="event.stopPropagation();admToggleMultiFilter(${jsq(key)})" title="Filter ${esc(label)}">
+    ${icon}<span class="adm-th-row-plain" style="cursor:pointer">${esc(label)}</span>${count?`<span class="adm-filter-badge">${count}</span>`:""}
+  </span>${pop}</th>`;
+}
 function adminClientsTableHtml(){
   const list = scopedClientsForCurrentView().filter(matchesAdminColSearch);
   const rows = list.map(c=>{
@@ -5234,9 +5333,9 @@ function adminClientsTableHtml(){
         ${admThCol('Project Name','project')}
         ${admThCol('Email','email')}
         ${admThCol('Registered Date','regdate')}
-        ${admThCol('BDC','bdc')}
+        ${admThMultiFilter('BDC','bdc', admBdcFilterOptions(), admBdcFilterSel, 'admToggleBdcFilterVal', 'admClearBdcFilter')}
         ${admThCol('Works','works')}
-        ${admThCol('Status','status')}
+        ${admThMultiFilter('Status','status', admStatusFilterOptions(), admStatusFilterSel, 'admToggleStatusFilterVal', 'admClearStatusFilter')}
         ${admThPlain('Action')}
       </tr></thead><tbody>${list.length ? rows : `<tr><td colspan="9"><div class="adm-empty">No clients match your search.</div></td></tr>`}</tbody></table>
     </div>
@@ -6901,18 +7000,18 @@ function admOpenAddTask(prefillClientId){
         </select>
       </div>
     </div>
-    <div class="field"><label>Client / Project</label>
-      <select id="tk_client"><option value="">Not linked to a client</option>${options}</select>
+    <div class="field"><label>Client / Project *</label>
+      <select id="tk_client"><option value="">Select a client…</option>${options}</select>
     </div>
     <div class="grid2">
       <div class="field"><label>Priority</label>
         <select id="tk_priority"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option></select>
       </div>
-      <div class="field"><label>Finish By</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
+      <div class="field"><label>Finish By / Deadline *</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
     </div>
-    <div class="field"><label>Start Date</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox();
 }
@@ -6935,18 +7034,18 @@ function jmOpenAddTask(prefillClientId){
         </select>
       </div>
     </div>
-    <div class="field"><label>Client / Project</label>
-      <select id="tk_client"><option value="">Not linked to a client</option>${options}</select>
+    <div class="field"><label>Client / Project *</label>
+      <select id="tk_client"><option value="">Select a client…</option>${options}</select>
     </div>
     <div class="grid2">
       <div class="field"><label>Priority</label>
         <select id="tk_priority"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option></select>
       </div>
-      <div class="field"><label>Finish By</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
+      <div class="field"><label>Finish By / Deadline *</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
     </div>
-    <div class="field"><label>Start Date</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox();
 }
@@ -6960,21 +7059,25 @@ function mktOpenAddTask(prefillClientId){
   openModal(`<h3>Add task</h3><p class="msub">Create a task and assign it to one or more telecallers, or to the Marketing TL.</p>
     <div class="field"><label>Task Name *</label><input id="tk_title" placeholder="e.g. Follow up with client"></div>
     <input type="hidden" id="tk_type" value="">
-    <div class="field"><label>Client / Project</label>
-      <select id="tk_client"><option value="">Not linked to a client</option>${options}</select>
+    <div class="field"><label>Client / Project *</label>
+      <select id="tk_client"><option value="">Select a client…</option>${options}</select>
     </div>
     <div class="grid2">
       <div class="field"><label>Priority</label>
         <select id="tk_priority"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option></select>
       </div>
-      <div class="field"><label>Finish By</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
+      <div class="field"><label>Finish By / Deadline *</label><input id="tk_finish" type="date" min="${todayISO()}"></div>
     </div>
-    <div class="field"><label>Start Date</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox();
 }
+// Employees are shown as a clickable dropdown (closed by default) rather than a
+// permanently-open list of checkboxes: click the field to open the popover, tick
+// one or more names, and the field displays the selection. Names are always loaded
+// live from the existing employees[] data source (never hardcoded).
 function admRefreshTaskAssignBox(){
   const wrap = $("tk_assign_wrap");
   if(!wrap) return;
@@ -6989,19 +7092,76 @@ function admRefreshTaskAssignBox(){
     : isMktModern() ? [...telecallerNames(), "Marketing TL"]
     : [...writerNames(), ...programmerNames()];
   wrap.innerHTML = names.length
-    ? `<div class="check-row">${names.map(n=>`<label class="check"><input type="checkbox" class="tk-emp" value="${esc(n)}"> ${esc(n)}</label>`).join("")}</div>`
+    ? `<div class="ms-select" id="tk_assign_ms">
+        <div class="ms-select-trigger" id="tk_assign_trigger" onclick="tkToggleEmpDropdown(event)">
+          <span class="ms-select-display" id="tk_assign_display">Select employee(s)…</span>
+          <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="ms-select-pop" id="tk_assign_pop" onclick="event.stopPropagation()">
+          ${names.map(n=>`<label class="ms-select-opt"><input type="checkbox" class="tk-emp" value="${esc(n)}" onchange="tkUpdateEmpDisplay()"> ${esc(n)}</label>`).join("")}
+        </div>
+      </div>
+      <div class="field-err-msg" id="tk_assign_err" style="display:none">Select at least one employee.</div>`
     : `<span style="color:var(--muted);font-size:13px">${isJournalModern() ? "No journal team members yet — add Proofreaders/Formatters/Submission staff from the Team page."
         : isMktModern() ? "No telecallers yet — add them from the Team page."
         : "No technical team members yet — add Programmers/Paper Writers from the Team page."}</span>`;
 }
+function tkToggleEmpDropdown(ev){
+  if(ev) ev.stopPropagation();
+  const pop = $("tk_assign_pop");
+  if(!pop) return;
+  const isOpen = pop.classList.contains("open");
+  document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open"));
+  if(!isOpen) pop.classList.add("open");
+}
+document.addEventListener("click", ()=>document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open")));
+function tkUpdateEmpDisplay(){
+  const checked = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value);
+  const disp = $("tk_assign_display");
+  if(disp){
+    disp.textContent = checked.length ? checked.join(", ") : "Select employee(s)…";
+    disp.classList.toggle("has-value", checked.length>0);
+  }
+  const trig = $("tk_assign_trigger");
+  if(trig && checked.length) trig.classList.remove("field-invalid");
+  const err = $("tk_assign_err");
+  if(err && checked.length) err.style.display = "none";
+}
+function tkClearFieldErrors(){
+  ["tk_title","tk_client","tk_start","tk_finish"].forEach(id=>{ const el=$(id); if(el) el.classList.remove("field-invalid"); });
+  const trig = $("tk_assign_trigger"); if(trig) trig.classList.remove("field-invalid");
+  const err = $("tk_assign_err"); if(err) err.style.display = "none";
+}
 async function admSaveTask(){
+  tkClearFieldErrors();
   const title = $("tk_title").value.trim();
-  if(!title){ toast("Give the task a title"); return; }
-  const assignedTo = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value).join(", ");
   const clientId = $("tk_client").value;
+  const startDate = $("tk_start").value;
+  const finishDate = $("tk_finish").value;
+  const assignedNames = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value);
+  const assignedTo = assignedNames.join(", ");
+
+  // A task must never be created/assigned unless Client, Employee, Start Date and
+  // Deadline are ALL present — checked here on the frontend for instant feedback,
+  // and enforced again server-side in add_task so nothing incomplete can be saved.
+  const missing = [];
+  if(!title){ missing.push("Task Name"); $("tk_title").classList.add("field-invalid"); }
+  if(!clientId){ missing.push("Client"); $("tk_client").classList.add("field-invalid"); }
+  if(!assignedNames.length){
+    missing.push("Employee");
+    const trig = $("tk_assign_trigger"); if(trig) trig.classList.add("field-invalid");
+    const err = $("tk_assign_err"); if(err) err.style.display = "block";
+  }
+  if(!startDate){ missing.push("Start Date"); $("tk_start").classList.add("field-invalid"); }
+  if(!finishDate){ missing.push("Deadline"); $("tk_finish").classList.add("field-invalid"); }
+  if(missing.length){
+    toast("Please complete required field" + (missing.length>1?"s":"") + ": " + missing.join(", "));
+    return;
+  }
+
   try{
     await api("add_task", {title, clientId, priority: $("tk_priority").value, taskType: $("tk_type").value,
-      startDate: $("tk_start").value, finishDate: $("tk_finish").value, description: $("tk_desc").value.trim(),
+      startDate, finishDate, description: $("tk_desc").value.trim(),
       assignedTo, actorName: roleTitle()});
     await loadData();
     if(tmQuickAssignMode){
