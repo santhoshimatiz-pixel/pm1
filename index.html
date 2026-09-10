@@ -12,9 +12,9 @@
 
 :root{
   /* ---- neutrals ---- */
-  --bg:#F7F8FA; --bg2:#F0F2F5; --card:#FFFFFF; --card2:#F7F8FA;
-  --line:rgba(16,24,40,.08); --line-strong:rgba(16,24,40,.13);
-  --text:#101828; --muted:#5C6773; --faint:#8A94A0;
+  --bg:#F4F7F8; --bg2:#EDF3F3; --card:#FFFFFF; --card2:#F6FAFA;
+  --line:rgba(16,24,40,.08); --line-strong:rgba(16,24,40,.14);
+  --text:#101828; --muted:#5C7377; --faint:#8FA3A6;
 
   /* ---- brand ---- */
   --purple:#0E7490; --purple-deep:#155E75; --lav:#0E7490;
@@ -53,7 +53,8 @@ body{
 body::before{
   content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
   background-image:
-    radial-gradient(900px 500px at 100% -10%, rgba(14,116,144,.035), transparent 60%);
+    radial-gradient(1100px 620px at 92% -14%, rgba(14,116,144,.07), transparent 60%),
+    radial-gradient(760px 460px at -10% 18%, rgba(184,134,11,.045), transparent 60%);
   background-color:var(--bg);
 }
 ::-webkit-scrollbar{width:10px;height:10px}
@@ -140,87 +141,6 @@ a{color:var(--purple)}
 .field{margin-bottom:14px}
 .login-err{color:#F87171;font-size:13px;text-align:center;margin-top:10px;min-height:18px}
 .login-note{text-align:center;color:var(--ink-muted);font-size:12px;margin-top:18px}
-
-/* ---------- login success micro-interaction (verifying -> checkmark burst) ---------- */
-.login-success-overlay{
-  position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;
-  background:rgba(8,23,27,.72);backdrop-filter:blur(6px);
-  animation:lsaOverlayIn .22s ease both;
-}
-@keyframes lsaOverlayIn{from{opacity:0}to{opacity:1}}
-.login-success-anim{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  background:var(--ink2);border:1px solid var(--ink-line);border-radius:var(--radius-lg);
-  padding:44px 54px;box-shadow:var(--shadow-lg);min-width:240px;
-  animation:lsaCardIn .35s cubic-bezier(.2,.85,.3,1.2) both;
-}
-@keyframes lsaCardIn{from{opacity:0;transform:scale(.92) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
-.lsa-stage{position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.lsa-sparkles{position:absolute;inset:0}
-.lsa-sparkles span{
-  position:absolute;top:50%;left:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:#34D8C4;opacity:0;
-  transform:translate(-50%,-50%) rotate(var(--a)) translateY(-14px) scale(.4);
-  animation:lsaSpark .8s ease-out forwards;animation-delay:var(--d);
-}
-@keyframes lsaSpark{
-  0%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateY(-14px) scale(.3)}
-  30%{opacity:1}
-  100%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateY(-50px) scale(1)}
-}
-.lsa-ring{
-  position:relative;width:66px;height:66px;border-radius:20px;
-  background:radial-gradient(circle at 50% 38%,rgba(52,216,196,.30),rgba(52,216,196,.04) 72%);
-  border:2px solid #34D8C4;display:flex;align-items:center;justify-content:center;
-  animation:lsaPop .5s cubic-bezier(.2,.9,.3,1.3) both, lsaGlow 1.6s ease-out .5s infinite;
-}
-@keyframes lsaPop{0%{transform:scale(.5);opacity:0}100%{transform:scale(1);opacity:1}}
-@keyframes lsaGlow{0%{box-shadow:0 0 0 0 rgba(52,216,196,.4)}70%{box-shadow:0 0 0 16px rgba(52,216,196,0)}100%{box-shadow:0 0 0 0 rgba(52,216,196,0)}}
-.lsa-check{width:30px;height:30px}
-.lsa-check path{
-  fill:none;stroke:#34D8C4;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
-  stroke-dasharray:24;stroke-dashoffset:24;animation:lsaDraw .4s .3s ease forwards;
-}
-@keyframes lsaDraw{to{stroke-dashoffset:0}}
-.lsa-text{margin-top:20px;color:#34D8C4;font-weight:700;font-size:15px;letter-spacing:.01em;text-align:center;opacity:0;animation:lsaTextIn .45s .5s ease forwards}
-@keyframes lsaTextIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-
-/* ---------- password boxes: real segmented inputs you type directly into (like the
-   OTP reference) — 8 by default to match the app's minimum password length, growing
-   automatically if someone's actual password is longer so nobody gets locked out. ---------- */
-.pwd-boxes{display:flex;flex-wrap:wrap;gap:7px}
-.pwd-box{
-  width:32px!important;height:40px;padding:0!important;text-align:center;font-size:17px;
-  border-radius:9px!important;border:1.5px solid var(--ink-line-strong)!important;
-  background:rgba(255,255,255,.04)!important;transition:border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease), transform .15s var(--ease)!important;
-}
-.pwd-box:focus{border-color:#E4B85C!important;box-shadow:0 0 0 3px rgba(228,184,92,.18)!important}
-.pwd-box.filled{border-color:#34D8C4!important;background:rgba(52,216,196,.10)!important}
-.pwd-box.pop{animation:pwdPop .16s cubic-bezier(.2,.9,.3,1.3) both}
-.pwd-box.shake{animation:pwdShake .4s ease}
-@keyframes pwdPop{0%{transform:scale(.7)}70%{transform:scale(1.12)}100%{transform:scale(1)}}
-@keyframes pwdShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
-
-/* verifying ring: the filled boxes hand off to a small set of satellites that revolve
-   around a shared center while the password is checked, then resolve to green (correct,
-   continues into the checkmark overlay) or red+shake (wrong, boxes come back for a retry). */
-.orbit-stage{display:flex;align-items:center;justify-content:center;min-height:96px;margin:4px 0}
-.orbit-ring{position:relative;width:84px;height:84px;animation:orbitSpin 1.3s linear infinite}
-.orbit-ring.settled{animation:none}
-.orbit-box{
-  position:absolute;top:50%;left:50%;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:7px;
-  border:1.5px solid #34D8C4;background:rgba(52,216,196,.16);
-  transform:rotate(var(--ang)) translate(32px) rotate(calc(var(--ang) * -1));
-  transition:border-color .2s var(--ease), background .2s var(--ease);
-}
-@keyframes orbitSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-.orbit-ring.success .orbit-box{border-color:#34D8C4;background:#34D8C4;box-shadow:0 0 10px rgba(52,216,196,.6)}
-.orbit-ring.wrong .orbit-box{border-color:#F87171;background:rgba(248,113,113,.22)}
-.orbit-ring.wrong{animation:orbitShake .4s ease}
-@keyframes orbitShake{0%,100%{transform:rotate(0deg) translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(5px)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
-@media (prefers-reduced-motion:reduce){.pwd-box.pop,.pwd-box.shake,.orbit-ring,.orbit-ring.wrong{animation-duration:.01ms!important}}
-@media (prefers-reduced-motion:reduce){
-  .lsa-ring,.lsa-check path,.lsa-text,.lsa-sparkles span,.login-success-anim,.login-success-overlay{animation-duration:.01ms!important;animation-iteration-count:1!important}
-}
 
 /* ---------- login split (password left, roles right) ---------- */
 .login-split{display:flex;gap:26px;align-items:flex-start;max-width:920px;margin:0 auto}
@@ -591,7 +511,7 @@ tbody tr:last-child td{border-bottom:none}
 .adm-kpi .frac{font-family:var(--disp);font-size:25px;font-weight:700;color:var(--text);display:flex;align-items:baseline;gap:4px;letter-spacing:-.02em}
 .adm-kpi .frac span{font-size:14px;color:var(--faint);font-weight:600}
 .adm-kpi .sublabels{display:flex;justify-content:space-between;font-size:10px;color:var(--faint);font-weight:700;letter-spacing:.03em;text-transform:uppercase;margin:8px 0 5px}
-.adm-kpi .bar{height:6px;border-radius:99px;background:var(--bg2);overflow:hidden;display:flex}
+.adm-kpi .bar{height:6px;border-radius:99px;background:#EDF3F3;overflow:hidden;display:flex}
 .adm-kpi .bar i{display:block;height:100%}
 .adm-kpi .bar i.ok{background:linear-gradient(90deg,var(--purple),#5FC2CE)}
 .adm-kpi .bar i.rest{background:#F0DCB0}
@@ -682,7 +602,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-status.warn{background:#FEF3E2;color:var(--warn)}
 .adm-status.bad{background:#FDECEC;color:#B42318}
 
-.adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:420px}
+.adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
 .adm-cal .dow{font-size:10px;color:var(--faint);font-weight:700;text-align:center;padding-bottom:4px;text-transform:uppercase}
 .adm-cal .cell{aspect-ratio:1;border-radius:8px;background:var(--card2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--faint);position:relative;transition:background .12s}
 .adm-cal .cell:hover{background:#E6F5F7;color:var(--text)}
@@ -830,18 +750,8 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
             <input id="empUid" placeholder="e.g. EMP-1006" autocomplete="off">
           </div>
           <div class="field">
-            <label for="pwdBox0">Password</label>
-            <div class="pwd-boxes" id="pwdBoxes">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox0">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox1">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox2">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox3">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox4">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox5">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox6">
-              <input type="password" class="pwd-box" maxlength="1" autocomplete="off" id="pwdBox7">
-            </div>
-            <div class="orbit-stage" id="pwdOrbitStage" style="display:none"></div>
+            <label for="pwd">Password</label>
+            <input id="pwd" type="password" placeholder="Enter password" autocomplete="off">
           </div>
           <button class="btn" id="loginBtn">Sign in</button>
           <div class="login-err" id="loginErr"></div>
@@ -1519,7 +1429,7 @@ function bindRoleCards(){
       const label = b.dataset.emp ? b.querySelector("b").textContent : (ROLE_DISPLAY[selectedRole] || selectedRole);
       note.textContent = "Selected: " + label;
       note.classList.remove("empty");
-      if(selectedRole==="employee") $("empUid").focus(); else focusPwdBoxes();
+      if(selectedRole==="employee") $("empUid").focus(); else $("pwd").focus();
     };
   });
 }
@@ -1574,7 +1484,7 @@ async function submitClientSetup(){
   if(clientCard) clientCard.click();
   $("clientKey").value = clientKey;
   toast("Password created — you're all set. Please sign in.");
-  focusPwdBoxes();
+  $("pwd").focus();
 }
 function openClientForgot(){
   $("loginView").style.display = "none";
@@ -1612,143 +1522,23 @@ function checkInviteLinkOnLoad(){
   }
 }
 $("loginBtn").addEventListener("click", doLogin);
-
-// ================= PASSWORD BOXES =================
-// Real segmented inputs (like the OTP reference) instead of one plain password field.
-// Starts at 8 boxes (the app's own "8+ characters" minimum), auto-advances focus as you
-// type, supports backspace-to-previous and pasting a whole password at once, and grows
-// extra boxes on the fly if someone's actual password is longer than 8 — so nobody with a
-// longer real password gets locked out just because the row started at 8.
-function pwdBoxEls(){ return Array.from($("pwdBoxes").querySelectorAll(".pwd-box")); }
-function getPwdValue(){ return pwdBoxEls().map(b=>b.value).join(""); }
-function addPwdBox(){
-  const box = document.createElement("input");
-  box.type = "password"; box.className = "pwd-box"; box.maxLength = 1; box.autocomplete = "off";
-  wirePwdBox(box);
-  $("pwdBoxes").appendChild(box);
-  return box;
-}
-function focusPwdBoxes(){
-  const boxes = pwdBoxEls();
-  const firstEmpty = boxes.find(b=>!b.value) || boxes[0];
-  if(firstEmpty) firstEmpty.focus();
-}
-function clearPwdBoxes(){
-  const boxes = pwdBoxEls();
-  boxes.slice(8).forEach(b=>b.remove()); // drop any boxes grown past the base 8
-  boxes.slice(0,8).forEach(b=>{ b.value = ""; b.classList.remove("filled","pop","shake"); });
-}
-function wirePwdBox(box){
-  box.addEventListener("input", ()=>{
-    box.value = box.value.slice(-1); // one character per box, even if IME/typing sends more
-    const boxes = pwdBoxEls();
-    const i = boxes.indexOf(box);
-    box.classList.toggle("filled", !!box.value);
-    if(box.value){
-      box.classList.remove("pop"); void box.offsetWidth; box.classList.add("pop");
-      let next = boxes[i+1];
-      if(!next && i === boxes.length-1) next = addPwdBox(); // grow past 8 for a longer password
-      if(next) next.focus();
-    }
-  });
-  box.addEventListener("keydown", e=>{
-    const boxes = pwdBoxEls();
-    const i = boxes.indexOf(box);
-    if(e.key==="Enter"){ doLogin(); return; }
-    if(e.key==="Backspace" && !box.value && i>0){ boxes[i-1].focus(); boxes[i-1].value=""; boxes[i-1].classList.remove("filled"); }
-  });
-  box.addEventListener("paste", e=>{
-    const text = (e.clipboardData || window.clipboardData).getData("text").trim();
-    if(!text) return;
-    e.preventDefault();
-    const boxes = pwdBoxEls();
-    const start = boxes.indexOf(box);
-    for(let k=0;k<text.length;k++){
-      let target = boxes[start+k];
-      if(!target) target = addPwdBox();
-      target.value = text[k];
-      target.classList.add("filled");
-    }
-    focusPwdBoxes();
-  });
-}
-pwdBoxEls().forEach(wirePwdBox);
-
-// Plays the "verifying -> result" ring: boxes hand off to satellites that revolve around a
-// shared center while the password is checked (a genuine loading indicator, not just
-// decoration), then resolves green+checkmark (right) or red+shake (wrong).
-function playPwdVerifyRing(count){
-  const stage = $("pwdOrbitStage");
-  const n = Math.max(4, Math.min(10, count||4));
-  const dots = Array.from({length:n}, (_,i)=>`<div class="orbit-box" style="--ang:${Math.round(i*360/n)}deg"></div>`).join("");
-  stage.innerHTML = `<div class="orbit-ring" id="pwdOrbitRing">${dots}</div>`;
-  $("pwdBoxes").style.display = "none";
-  stage.style.display = "flex";
-  return {
-    async resolveSuccess(){
-      const ring = $("pwdOrbitRing");
-      ring.classList.add("settled","success");
-      await new Promise(r=>setTimeout(r,260));
-      stage.style.display = "none"; stage.innerHTML = "";
-    },
-    async resolveWrong(){
-      const ring = $("pwdOrbitRing");
-      ring.classList.add("settled","wrong");
-      await new Promise(r=>setTimeout(r,420));
-      stage.style.display = "none"; stage.innerHTML = "";
-      $("pwdBoxes").style.display = "flex";
-      clearPwdBoxes();
-      focusPwdBoxes();
-    }
-  };
-}
-
-// Plays a brief "verifying -> checkmark" success burst (inspired by the OTP-verification
-// reference) right after the password is accepted, before the dashboard appears. It's a
-// self-contained overlay appended to <body> and removed when done, so it never touches or
-// replaces the actual login form markup — safe to call from every login path (role/employee/
-// client) and won't leave anything stale behind if the person logs out and signs in again.
-function playLoginSuccessAnim(){
-  return new Promise(resolve=>{
-    const overlay = document.createElement("div");
-    overlay.className = "login-success-overlay";
-    const sparkles = Array.from({length:12}, (_,i)=>`<span style="--a:${i*30}deg;--d:${(i%6)*0.04}s"></span>`).join("");
-    overlay.innerHTML = `<div class="login-success-anim">
-        <div class="lsa-stage">
-          <div class="lsa-sparkles">${sparkles}</div>
-          <div class="lsa-ring"><svg viewBox="0 0 24 24" class="lsa-check"><path d="M5 13l4 4 10-10"/></svg></div>
-        </div>
-        <p class="lsa-text">Verified successfully</p>
-      </div>`;
-    document.body.appendChild(overlay);
-    setTimeout(()=>{ overlay.remove(); resolve(); }, 950);
-  });
-}
+$("pwd").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
 
 async function doLogin(){
   const err = $("loginErr");
   if(!selectedRole){ err.textContent = "Please select a role above."; return; }
   if(selectedRole==="employee" && !$("empUid").value.trim()){ err.textContent = "Enter your employee ID."; return; }
-  const pwdVal = getPwdValue();
-  if(!pwdVal){ err.textContent = "Enter your password."; focusPwdBoxes(); return; }
-  err.textContent = "";
-  const ring = playPwdVerifyRing(pwdVal.length);
-  let out;
+  err.textContent = "Signing in...";
   try{
-    out = await api("login", {role:selectedRole, password:pwdVal,
+    const out = await api("login", {role:selectedRole, password:$("pwd").value,
       clientKey:$("clientKey").value.trim(), empUid:$("empUid").value.trim()});
-  }catch(e){
-    await ring.resolveWrong();
-    err.textContent = e.message;
-    return;
-  }
-  await ring.resolveSuccess();
-  csrfToken = out.csrfToken || "";
-  if(selectedRole === "client") clientSelf = out.clientId;
-  if(selectedRole === "employee"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
+    csrfToken = out.csrfToken || "";
+    if(selectedRole === "client") clientSelf = out.clientId;
+    if(selectedRole === "employee"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
+  }catch(e){ err.textContent = e.message; return; }
+  err.textContent = "";
   role = selectedRole;
-  clearPwdBoxes(); $("empUid").value = "";
-  await playLoginSuccessAnim();
+  $("pwd").value = ""; $("empUid").value = "";
   $("loginView").style.display = "none";
   $("appView").style.display = "block";
   saveSession();
@@ -1766,35 +1556,33 @@ function clearSession(){
   try{ sessionStorage.removeItem("matiz_session_v1"); }catch(e){}
 }
 // Returns true if a valid server-side session was restored.
-// Retries a network-level failure before giving up (mirrors loadData()'s own
-// retry, above) — a page refresh fires this immediately, and one transient
-// failure (a slow connection, a cold-starting host) used to look identical to
-// "you're not logged in" and bounce a genuinely still-valid session back to
-// the login screen. Only an explicit, successful "authenticated: false"
-// answer from the server counts as actually being logged out.
 async function restoreSession(){
   clearSession();
+  // A page refresh fires this the instant the page loads — sometimes before the
+  // connection is fully warmed up, or over a slightly slower network than usual.
+  // A single failed/timed-out attempt here used to look identical to "you're not
+  // logged in", even though the HttpOnly session cookie was still perfectly
+  // valid. loadData() already retries for exactly this reason; do the same here
+  // so a normal refresh reliably keeps you signed in instead of bouncing you
+  // back to the login screen.
   const attempts = 3;
+  let out = null;
   for(let i=0; i<attempts; i++){
-    let out;
-    try{
-      out = await api("session", {});
-    }catch(e){
+    try{ out = await api("session", {}); break; }
+    catch(e){
       if(i === attempts-1) return false;
       await new Promise(r=>setTimeout(r, 500));
-      continue;
     }
-    if(!out || !out.authenticated) return false;
-    csrfToken = out.csrfToken || "";
-    role = (out.kind === "employee") ? "employee" : out.role;
-    clientSelf = out.clientId || null;
-    empId = out.empId || null; empName = out.empName || null;
-    empRole = out.empRole || null; empTeamType = out.empTeamType || "";
-    $("loginView").style.display = "none";
-    $("appView").style.display = "block";
-    return true;
   }
-  return false;
+  if(!out || !out.authenticated) return false;
+  csrfToken = out.csrfToken || "";
+  role = (out.kind === "employee") ? "employee" : out.role;
+  clientSelf = out.clientId || null;
+  empId = out.empId || null; empName = out.empName || null;
+  empRole = out.empRole || null; empTeamType = out.empTeamType || "";
+  $("loginView").style.display = "none";
+  $("appView").style.display = "block";
+  return true;
 }
 function logout(){
   // SECURITY: tell the server to destroy the session row and clear the cookie.
@@ -1814,7 +1602,6 @@ function logout(){
   $("empUidField").style.display = "none";
   $("appView").style.display = "none";
   $("loginView").style.display = "flex";
-  clearPwdBoxes();
   closeDrawer(); closeModal();
 }
 function confirmLogoutFromBrand(){
@@ -3184,7 +2971,7 @@ function renderTMDashboard(){
       ${admKpi("Total Paper Writing", tcounts.writing.pending.length, Math.max(tcounts.writing.pending.length+tcounts.writing.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.writing.completed.length], "tmOpenTaskTypeModal('writing')")}
       ${admKpi("Total Demo", tcounts.demo.pending.length, Math.max(tcounts.demo.pending.length+tcounts.demo.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.demo.completed.length], "tmOpenTaskTypeModal('demo')")}
     </div>
-    <div class="adm-kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start">
+    <div class="adm-kpi-grid" style="grid-template-columns:1fr 1.4fr;align-items:start">
       <div class="adm-panel" style="margin:0">
         <div class="adm-panel-head"><h3>Total Case Status</h3></div>
         <div class="adm-panel-body">${segments.length ? admDonutHtml(segments) : `<div class="adm-empty">No technical cases yet.</div>`}</div>
