@@ -184,6 +184,22 @@ a{color:var(--purple)}
 @keyframes lsaDraw{to{stroke-dashoffset:0}}
 .lsa-text{margin-top:20px;color:#34D8C4;font-weight:700;font-size:15px;letter-spacing:.01em;text-align:center;opacity:0;animation:lsaTextIn .45s .5s ease forwards}
 @keyframes lsaTextIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ---------- password cells: live per-character boxes under the password field,
+   echoing the OTP-style boxes from the reference — react the instant you type,
+   independent of the server round-trip (that's what the success overlay above is for). ---------- */
+.pwd-cells{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.pwd-cells .cell{
+  width:26px;height:32px;border-radius:8px;border:1.5px solid var(--ink-line-strong);
+  background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
+}
+.pwd-cells .cell.filled{border-color:#34D8C4;background:rgba(52,216,196,.10)}
+.pwd-cells .cell.filled span{width:6px;height:6px;border-radius:50%;background:#34D8C4}
+.pwd-cells .cell.filled span.pop{animation:pwdPop .18s cubic-bezier(.2,.9,.3,1.3) both}
+.pwd-cells .cell.active{border-color:#E4B85C;box-shadow:0 0 0 3px rgba(228,184,92,.18)}
+@keyframes pwdPop{0%{transform:scale(0)}70%{transform:scale(1.35)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.pwd-cells .cell.filled span.pop{animation-duration:.01ms!important}}
 @media (prefers-reduced-motion:reduce){
   .lsa-ring,.lsa-check path,.lsa-text,.lsa-sparkles span,.login-success-anim,.login-success-overlay{animation-duration:.01ms!important;animation-iteration-count:1!important}
 }
@@ -798,6 +814,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
           <div class="field">
             <label for="pwd">Password</label>
             <input id="pwd" type="password" placeholder="Enter password" autocomplete="off">
+            <div class="pwd-cells" id="pwdCells" aria-hidden="true"></div>
           </div>
           <button class="btn" id="loginBtn">Sign in</button>
           <div class="login-err" id="loginErr"></div>
@@ -1570,6 +1587,30 @@ function checkInviteLinkOnLoad(){
 $("loginBtn").addEventListener("click", doLogin);
 $("pwd").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
 
+// Live password cells — reacts the instant you type, independent of the server round-trip
+// (paste and autofill fire "input" too, so those are covered for free). Always shows at
+// least 6 empty cells so the box row is visible before you start typing, and grows past 6
+// for longer passwords instead of capping input length.
+function pwdCellsUpdate(){
+  const el = $("pwd"), cellsEl = $("pwdCells");
+  if(!el || !cellsEl) return;
+  const val = el.value;
+  const shown = Math.max(6, val.length + 1);
+  let html = "";
+  for(let i=0;i<shown;i++){
+    if(i < val.length){
+      html += `<div class="cell filled"><span${i===val.length-1?' class="pop"':''}></span></div>`;
+    } else if(i === val.length){
+      html += `<div class="cell active"></div>`;
+    } else {
+      html += `<div class="cell"></div>`;
+    }
+  }
+  cellsEl.innerHTML = html;
+}
+$("pwd").addEventListener("input", pwdCellsUpdate);
+pwdCellsUpdate();
+
 // Plays a brief "verifying -> checkmark" success burst (inspired by the OTP-verification
 // reference) right after the password is accepted, before the dashboard appears. It's a
 // self-contained overlay appended to <body> and removed when done, so it never touches or
@@ -1607,6 +1648,7 @@ async function doLogin(){
   err.textContent = "";
   role = selectedRole;
   $("pwd").value = ""; $("empUid").value = "";
+  pwdCellsUpdate();
   await playLoginSuccessAnim();
   $("loginView").style.display = "none";
   $("appView").style.display = "block";
@@ -1657,6 +1699,8 @@ function logout(){
   $("empUidField").style.display = "none";
   $("appView").style.display = "none";
   $("loginView").style.display = "flex";
+  if($("pwd")) $("pwd").value = "";
+  pwdCellsUpdate();
   closeDrawer(); closeModal();
 }
 function confirmLogoutFromBrand(){
