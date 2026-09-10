@@ -142,6 +142,52 @@ a{color:var(--purple)}
 .login-err{color:#F87171;font-size:13px;text-align:center;margin-top:10px;min-height:18px}
 .login-note{text-align:center;color:var(--ink-muted);font-size:12px;margin-top:18px}
 
+/* ---------- login success micro-interaction (verifying -> checkmark burst) ---------- */
+.login-success-overlay{
+  position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:rgba(8,23,27,.72);backdrop-filter:blur(6px);
+  animation:lsaOverlayIn .22s ease both;
+}
+@keyframes lsaOverlayIn{from{opacity:0}to{opacity:1}}
+.login-success-anim{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--ink2);border:1px solid var(--ink-line);border-radius:var(--radius-lg);
+  padding:44px 54px;box-shadow:var(--shadow-lg);min-width:240px;
+  animation:lsaCardIn .35s cubic-bezier(.2,.85,.3,1.2) both;
+}
+@keyframes lsaCardIn{from{opacity:0;transform:scale(.92) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.lsa-stage{position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.lsa-sparkles{position:absolute;inset:0}
+.lsa-sparkles span{
+  position:absolute;top:50%;left:50%;width:5px;height:5px;margin:-2.5px;border-radius:50%;background:#34D8C4;opacity:0;
+  transform:translate(-50%,-50%) rotate(var(--a)) translateY(-14px) scale(.4);
+  animation:lsaSpark .8s ease-out forwards;animation-delay:var(--d);
+}
+@keyframes lsaSpark{
+  0%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateY(-14px) scale(.3)}
+  30%{opacity:1}
+  100%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateY(-50px) scale(1)}
+}
+.lsa-ring{
+  position:relative;width:66px;height:66px;border-radius:20px;
+  background:radial-gradient(circle at 50% 38%,rgba(52,216,196,.30),rgba(52,216,196,.04) 72%);
+  border:2px solid #34D8C4;display:flex;align-items:center;justify-content:center;
+  animation:lsaPop .5s cubic-bezier(.2,.9,.3,1.3) both, lsaGlow 1.6s ease-out .5s infinite;
+}
+@keyframes lsaPop{0%{transform:scale(.5);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes lsaGlow{0%{box-shadow:0 0 0 0 rgba(52,216,196,.4)}70%{box-shadow:0 0 0 16px rgba(52,216,196,0)}100%{box-shadow:0 0 0 0 rgba(52,216,196,0)}}
+.lsa-check{width:30px;height:30px}
+.lsa-check path{
+  fill:none;stroke:#34D8C4;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:24;stroke-dashoffset:24;animation:lsaDraw .4s .3s ease forwards;
+}
+@keyframes lsaDraw{to{stroke-dashoffset:0}}
+.lsa-text{margin-top:20px;color:#34D8C4;font-weight:700;font-size:15px;letter-spacing:.01em;text-align:center;opacity:0;animation:lsaTextIn .45s .5s ease forwards}
+@keyframes lsaTextIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){
+  .lsa-ring,.lsa-check path,.lsa-text,.lsa-sparkles span,.login-success-anim,.login-success-overlay{animation-duration:.01ms!important;animation-iteration-count:1!important}
+}
+
 /* ---------- login split (password left, roles right) ---------- */
 .login-split{display:flex;gap:26px;align-items:flex-start;max-width:920px;margin:0 auto}
 .login-left{flex:0 0 300px;position:sticky;top:34px}
@@ -1524,6 +1570,28 @@ function checkInviteLinkOnLoad(){
 $("loginBtn").addEventListener("click", doLogin);
 $("pwd").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
 
+// Plays a brief "verifying -> checkmark" success burst (inspired by the OTP-verification
+// reference) right after the password is accepted, before the dashboard appears. It's a
+// self-contained overlay appended to <body> and removed when done, so it never touches or
+// replaces the actual login form markup — safe to call from every login path (role/employee/
+// client) and won't leave anything stale behind if the person logs out and signs in again.
+function playLoginSuccessAnim(){
+  return new Promise(resolve=>{
+    const overlay = document.createElement("div");
+    overlay.className = "login-success-overlay";
+    const sparkles = Array.from({length:12}, (_,i)=>`<span style="--a:${i*30}deg;--d:${(i%6)*0.04}s"></span>`).join("");
+    overlay.innerHTML = `<div class="login-success-anim">
+        <div class="lsa-stage">
+          <div class="lsa-sparkles">${sparkles}</div>
+          <div class="lsa-ring"><svg viewBox="0 0 24 24" class="lsa-check"><path d="M5 13l4 4 10-10"/></svg></div>
+        </div>
+        <p class="lsa-text">Verified successfully</p>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(()=>{ overlay.remove(); resolve(); }, 950);
+  });
+}
+
 async function doLogin(){
   const err = $("loginErr");
   if(!selectedRole){ err.textContent = "Please select a role above."; return; }
@@ -1539,6 +1607,7 @@ async function doLogin(){
   err.textContent = "";
   role = selectedRole;
   $("pwd").value = ""; $("empUid").value = "";
+  await playLoginSuccessAnim();
   $("loginView").style.display = "none";
   $("appView").style.display = "block";
   saveSession();
