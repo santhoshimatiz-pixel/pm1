@@ -788,11 +788,11 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
           </div>
           <div class="field" id="empUidField" style="display:none">
             <label for="empUid">Your employee ID</label>
-            <input id="empUid" placeholder="e.g. EMP-1006" autocomplete="off">
+            <input id="empUid" placeholder="e.g. EMP-1006" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">
           </div>
           <div class="field">
             <label for="pwd">Password</label>
-            <input id="pwd" type="password" placeholder="Enter password" autocomplete="off">
+            <input id="pwd" type="password" placeholder="Enter password" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
           </div>
           <div class="field" id="captchaField">
             <label for="captchaAnswer">Captcha</label>
@@ -1114,6 +1114,7 @@ function handleSessionExpired(){
   if(lv) lv.style.display = "flex";
   if(av) av.style.display = "none";
   loadCaptcha();
+  clearLoginFields();
 }
 // Tracks whether the most recent loadData() actually got fresh data from the server.
 // Used by renderClient() (and could be used elsewhere) to tell a genuine "this client
@@ -1727,6 +1728,15 @@ function logout(){
   closeDrawer(); closeModal();
   $("loginErr").textContent = "";
   loadCaptcha();
+  clearLoginFields();
+}
+// Chrome and password managers ignore autocomplete="off" and re-fill a saved password into
+// the login box after a refresh or a logout. Wipe the login fields on load, after logout
+// and after a session expiry - a few times, because the browser's autofill can land a
+// moment after the page is ready.
+function clearLoginFields(){
+  const wipe = ()=>{ ["pwd","empUid","clientKey","captchaAnswer"].forEach(id=>{ const el=$(id); if(el && !el.matches(":focus")) el.value=""; }); };
+  wipe(); [150, 500, 1200].forEach(ms=>setTimeout(wipe, ms));
 }
 function confirmLogoutFromBrand(){
   if(confirm("Log out of iMatiz?")) logout();
@@ -10218,7 +10228,7 @@ document.addEventListener("visibilitychange", function(){ if(document.visibility
 window.addEventListener("focus", pollPings);
 
 /* ================= BOOT + LIVE SYNC ================= */
-(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); startPingListener(); } else { loadCaptcha(); checkInviteLinkOnLoad(); } })();
+(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); startPingListener(); } else { loadCaptcha(); checkInviteLinkOnLoad(); clearLoginFields(); } })();
 
 /* Auto-refresh every 12s so all dashboards stay in sync across the pipeline
    (paused while a form/panel is open, or while the user is typing anywhere). */

@@ -47,3 +47,10 @@ New table emp_calls, created automatically on start-up. No manual migration.
 FILES CHANGED
 -------------
 server.py, index.html (and this note). No new packages.
+
+SMALL EXTRA FIX (index.html)
+----------------------------
+After logging out or refreshing, Chrome sometimes re-filled a saved password
+into the login box. The password / employee-ID / client-ID / captcha boxes are
+now cleared automatically on page load, after logout and after a session
+expiry, and the password box tells the browser not to autofill it.
