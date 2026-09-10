@@ -2957,7 +2957,7 @@ function renderTMDashboard(){
       ${admKpi("Total Paper Writing", tcounts.writing.pending.length, Math.max(tcounts.writing.pending.length+tcounts.writing.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.writing.completed.length], "tmOpenTaskTypeModal('writing')")}
       ${admKpi("Total Demo", tcounts.demo.pending.length, Math.max(tcounts.demo.pending.length+tcounts.demo.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.demo.completed.length], "tmOpenTaskTypeModal('demo')")}
     </div>
-    <div class="adm-kpi-grid" style="grid-template-columns:1fr 1.4fr">
+    <div class="adm-kpi-grid" style="grid-template-columns:1fr 1.4fr;align-items:start">
       <div class="adm-panel" style="margin:0">
         <div class="adm-panel-head"><h3>Total Case Status</h3></div>
         <div class="adm-panel-body">${segments.length ? admDonutHtml(segments) : `<div class="adm-empty">No technical cases yet.</div>`}</div>
@@ -7477,6 +7477,7 @@ function renderTeamMemberProfile(){
         </div>
       </div>
     </div>
+    ${coordinatorTeamPanelHtml(dirEmp)}
     <div class="adm-kpi-grid" style="grid-template-columns:1.4fr 1fr 1fr;align-items:stretch;margin-top:14px">
       <div class="adm-panel" style="margin:0"><div class="adm-panel-head"><h3>Case status</h3></div>
         <div class="adm-panel-body">${donutSegs.length ? admDonutHtml(donutSegs,150) : `<div class="adm-empty">Not involved in any projects yet.</div>`}</div>
@@ -7491,6 +7492,44 @@ function renderTeamMemberProfile(){
      <button class="btn ghost small" style="margin-top:10px" onclick="admBackFromTeamProfile()">&larr; Back to Team</button>
    </div></div>`;
  }
+}
+// Technical/Marketing/Journal Manager's Team Member profile — lets them mark a Programmer
+// or Paper Writer as a coordinator (leads their own small team) or assign them to report to
+// an existing coordinator of the same role. Uses the same employee_update_team action the
+// coordinator-assignment pickers elsewhere in the app already rely on. Only PROGRAMMER and
+// PAPER_WRITER have a coordinator team, matching the backend's own restriction.
+function coordinatorTeamPanelHtml(e){
+  if(e.role!=='PROGRAMMER' && e.role!=='PAPER_WRITER') return "";
+  const peers = (adminDirectory && adminDirectory.employees || []).filter(x=>x.role===e.role);
+  const coordOpts = peers.filter(x=>x.isCoordinator && x.id!==e.id)
+    .map(m=>`<option value="${m.id}" ${e.coordinatorId===m.id?"selected":""}>${esc(m.name)}</option>`).join("");
+  const teamMembers = peers.filter(x=>x.coordinatorId===e.id).map(x=>x.name).join(", ");
+  return `<div class="adm-panel" style="margin-top:14px">
+    <div class="adm-panel-head"><h3>Coordinator team</h3>
+      ${e.isCoordinator?'<span class="badge b-gold">&#9733; Coordinator</span>':(e.coordinatorName?`<span class="badge b-dim">Reports to ${esc(e.coordinatorName)}</span>`:"")}
+    </div>
+    <div class="adm-panel-body">
+      <p style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Mark ${esc(e.name)} as a coordinator to let them lead a small team, or have them report to an existing coordinator.</p>
+      <label class="check" style="margin-bottom:10px">
+        <input type="checkbox" id="tmCoordIsCoord-${e.id}" ${e.isCoordinator?"checked":""} onchange="$('tmCoordReportsWrap-${e.id}').style.display=this.checked?'none':'block'">
+        This person is a coordinator (leads a team)
+      </label>
+      <div id="tmCoordReportsWrap-${e.id}" class="field" style="display:${e.isCoordinator?"none":"block"};max-width:340px">
+        <label>Reports to (optional)</label>
+        <select id="tmCoordReports-${e.id}"><option value="">&mdash; none (independent) &mdash;</option>${coordOpts}</select>
+      </div>
+      <button class="btn small" style="margin-top:4px" onclick="admSaveCoordinatorEdit(${e.id})">Save</button>
+      ${e.isCoordinator ? `<p style="color:var(--muted);font-size:12.5px;margin-top:12px">Team members reporting to ${esc(e.name)}: ${esc(teamMembers||"none yet")}</p>` : ""}
+    </div>
+  </div>`;
+}
+async function admSaveCoordinatorEdit(id){
+  const isCoordinator = $("tmCoordIsCoord-"+id).checked;
+  const reportsSel = $("tmCoordReports-"+id);
+  const coordinatorId = (!isCoordinator && reportsSel && reportsSel.value) ? reportsSel.value : null;
+  try{ await api("employee_update_team",{empId:id, isCoordinator, coordinatorId}); }catch(e){ toast(e.message); return; }
+  await loadAdminDirectory(); await refresh();
+  toast("Team assignment updated");
 }
 function admOpenUpdateMember(empId){
   const e = adminDirectory.employees.find(x=>x.id===empId); if(!e) return;

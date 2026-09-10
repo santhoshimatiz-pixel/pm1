@@ -452,7 +452,7 @@ ACTION_ROLES = {
     "list_deleted_employees": _R_STAFF_MGMT,
 
     # ---- admin only ----
-    "admin_directory": _R_ADMIN,
+    "admin_directory": _R_STAFF_MGMT,
     "admin_change_password": _R_ADMIN,
     "set_role_access": _R_ADMIN,
     "delete_client": _R_ADMIN,
@@ -752,6 +752,17 @@ INVITE_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "md_admin", "
 # SECURITY: roles allowed to create/manage team members (Team tab on their dashboards).
 STAFF_MGMT_ROLES = ("technical_manager", "technical_tl", "marketing_tl", "marketing_manager",
                      "journal_manager", "journal_tl", "md_admin", "super_admin")
+# Which employee "role" values each department manager is allowed to see/manage when they
+# call admin_directory — keeps a Technical Manager from pulling telecaller/journal-team rows
+# and vice versa. md_admin/super_admin bypass this entirely and see every department.
+STAFF_MGMT_TEAM_ROLES = {
+    "technical_manager": ("PROGRAMMER", "PAPER_WRITER"),
+    "technical_tl": ("PROGRAMMER", "PAPER_WRITER"),
+    "marketing_tl": ("TELECALLER",),
+    "marketing_manager": ("TELECALLER",),
+    "journal_manager": ("JOURNAL_EMPLOYEE",),
+    "journal_tl": ("JOURNAL_EMPLOYEE",),
+}
 # SECURITY: roles allowed to administer logins/employees system-wide (Team & Access screen).
 ADMIN_ROLES = ("md_admin", "super_admin")
 # FEATURE: roles allowed to change a client's SERVICE and TOTAL AMOUNT after the client has
@@ -4844,22 +4855,37 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
-        # ----- Super Admin / MD Admin access-control directory: every role login + every
-        #       employee, including inactive ones. SECURITY: plaintext passwords are no
-        #       longer stored, so they can no longer be "revealed" here — only reset
+        # ----- Team directory: every role login + every employee (including inactive ones),
+        #       for the Super Admin / MD Admin's org-wide Access screen. Department managers
+        #       (Technical/Marketing/Journal Manager & TL — STAFF_MGMT_ROLES) also call this
+        #       to open a Team Member's profile from their own "Team" tab, so they get the
+        #       same shape back but scoped to only their own department's employees, with no
+        #       department-login list (that stays admin-only). SECURITY: plaintext passwords
+        #       are no longer stored, so they can no longer be "revealed" here — only reset
         #       (see openChangePasswordAdmin on the front end).
         if action == "admin_directory":
-            if (d.get("role") or "").strip() not in ADMIN_ROLES:
-                raise ApiError("Only the Super Admin / MD Admin can view the access-control directory.")
-            users_list = [{"role": r["role"], "label": r["display_name"],
-                           "enabled": bool(r["enabled"])}
-                          for r in con.execute("SELECT * FROM users WHERE role<>'employee' ORDER BY role")]
+            caller_role = (d.get("role") or "").strip()
+            if caller_role not in STAFF_MGMT_ROLES:
+                raise ApiError("You don't have permission to view the team directory.")
+            is_full_admin = caller_role in ADMIN_ROLES
+            emp_rows = con.execute("SELECT * FROM employees ORDER BY role, team_type, name").fetchall()
+            names_by_id = {r["id"]: r["name"] for r in emp_rows}
             emps_list = [{"id": r["id"], "name": r["name"], "role": r["role"], "teamType": r["team_type"] or "",
                          "empUid": r["emp_uid"] or "", "email": r["email"] or "",
+                         "isCoordinator": bool(r["is_coordinator"]), "coordinatorId": r["coordinator_id"],
+                         "coordinatorName": names_by_id.get(r["coordinator_id"], "") if r["coordinator_id"] else "",
                          "active": bool(r["active"]), "branch": r["branch"] or "", "department": r["department"] or "",
                          "phone": r["phone"] or "", "designation": r["designation"] or "",
                          "joiningDate": r["joining_date"] or ""}
-                        for r in con.execute("SELECT * FROM employees ORDER BY role, team_type, name")]
+                        for r in emp_rows]
+            if is_full_admin:
+                users_list = [{"role": r["role"], "label": r["display_name"],
+                               "enabled": bool(r["enabled"])}
+                              for r in con.execute("SELECT * FROM users WHERE role<>'employee' ORDER BY role")]
+            else:
+                own_roles = STAFF_MGMT_TEAM_ROLES.get(caller_role, ())
+                emps_list = [e for e in emps_list if e["role"] in own_roles]
+                users_list = []
             return {"users": users_list, "employees": emps_list}
 
         if action == "list_deleted_employees":
