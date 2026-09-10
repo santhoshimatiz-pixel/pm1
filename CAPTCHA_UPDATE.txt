@@ -1,0 +1,50 @@
+LOGIN CAPTCHA UPDATE
+====================
+
+WHAT CHANGED
+------------
+Every sign-in now needs a captcha code, on every dashboard:
+Super Admin, MD / Admin, Telecaller, Marketing TL, Marketing Manager,
+Accounts Team, Technical Manager, Technical TL, Journal Manager,
+Employee Login and the Client Status Portal.
+
+The captcha box sits between "Password" and "Sign in". The ↻ button next to
+the picture shows a different code.
+
+A NEW CODE EVERY TIME
+---------------------
+- Each code works for ONE login attempt only. Right or wrong, a brand-new
+  picture appears after every attempt.
+- A new code is also shown after logout, after a session expires, when coming
+  back from the client "Set password" / "Forgot password" screens, and
+  automatically just before a code expires (5 minutes).
+- Codes are 5 characters, not case-sensitive. Look-alike characters
+  (0/O, 1/I/L) are never used.
+
+HOW IT WORKS (server.py)
+------------------------
+- New public action "login_captcha" returns a picture drawn by the server
+  (plain Python, no extra packages). The answer is never sent to the browser.
+- Only an HMAC of the answer is stored, in a new table "login_captchas"
+  (created automatically on start-up; no manual migration needed).
+- The "login" action checks the captcha BEFORE looking at the account or
+  password, and deletes it at once, so a code can never be reused.
+- New captchas are limited to 60 per 5 minutes per IP address.
+- Works with several gunicorn workers (stored in PostgreSQL, not in memory).
+
+OPTIONAL SETTINGS (.env / Render Environment)
+---------------------------------------------
+CAPTCHA_LENGTH=5            number of characters, 4 to 8
+CAPTCHA_TTL_SECONDS=300     how long one code stays valid (minimum 60)
+
+Nothing needs to be set — the defaults above are used if these are missing.
+
+SMALL EXTRA FIX (index.html)
+----------------------------
+When a session expired, the login screen appeared off-centre. It now shows
+the same way as after a normal logout.
+
+FILES CHANGED
+-------------
+server.py, index.html (and this note). No new packages, no changes to
+requirements.txt, render.yaml or Procfile.

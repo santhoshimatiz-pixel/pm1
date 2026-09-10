@@ -4,16 +4,20 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
+import random
 import re
 import secrets
 import smtplib
 import socket
+import struct
 import sys
 import threading
 import traceback
 import time
 import zipfile
+import zlib
 import xml.etree.ElementTree as ET
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -85,6 +89,11 @@ MAX_PASSWORD_LENGTH = 200
 APP_BASE_URL = _env("APP_BASE_URL", "").strip().rstrip("/")
 INITIAL_ADMIN_PASSWORD = _env("INITIAL_ADMIN_PASSWORD", "").strip()
 ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in _env("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
+# ----- login CAPTCHA (required on every sign-in, for every dashboard) -----
+# Number of characters in each captcha (4-8) and how long one stays valid.
+CAPTCHA_LENGTH = min(8, max(4, int(_env("CAPTCHA_LENGTH", "5"))))
+CAPTCHA_TTL_SECONDS = max(60, int(_env("CAPTCHA_TTL_SECONDS", "300")))
 
 # ----- Gmail credentials (used only for the optional "send email now" handoff
 #       feature). Leave blank to disable that feature; never hard-code these. -----
@@ -261,6 +270,292 @@ def _rate_limited(ip, bucket, limit, window_seconds):
 
 
 # =====================================================================
+# LOGIN CAPTCHA — every sign-in (all dashboards: admin, department roles,
+# employees and the client portal) must first type a freshly generated code.
+# ---------------------------------------------------------------------
+# * The code is drawn server-side into a PNG (pure standard library — no
+#   Pillow needed), so the answer never appears as text anywhere the browser
+#   or a script could read it.
+# * Only an HMAC of the answer is stored (table login_captchas), keyed with
+#   SECRET_KEY, alongside a random 192-bit id. Stored in PostgreSQL rather
+#   than in memory so it keeps working with several gunicorn workers.
+# * Single use: a captcha is deleted the moment a login attempt presents it —
+#   right or wrong — so every attempt needs a brand-new code and a wrong guess
+#   can never be retried against the same image.
+# * Expires after CAPTCHA_TTL_SECONDS (default 5 minutes).
+# * Alphabet leaves out look-alikes (0/O, 1/I/L); answers are case-insensitive.
+# =====================================================================
+def _cap_arc(cx, cy, rx, ry, a0, a1):
+    return ("arc", cx, cy, rx, ry, a0, a1)
+
+
+# Stroke font. Each glyph is a list of strokes; a stroke is a list of points
+# and/or arcs in a 0..1 box (y grows downwards, angles in degrees).
+_CAPTCHA_GLYPHS = {
+    "A": [[(0, 1), (0.5, 0), (1, 1)], [(0.22, 0.62), (0.78, 0.62)]],
+    "B": [[(0, 1), (0, 0), (0.55, 0), _cap_arc(0.55, 0.24, 0.35, 0.24, -90, 90), (0, 0.48)],
+          [(0, 0.48), (0.6, 0.48), _cap_arc(0.6, 0.74, 0.4, 0.26, -90, 90), (0, 1)]],
+    "C": [[_cap_arc(0.52, 0.5, 0.5, 0.5, -45, -315)]],
+    "D": [[(0, 0), (0, 1), (0.4, 1), _cap_arc(0.4, 0.5, 0.6, 0.5, 90, -90), (0, 0)]],
+    "E": [[(1, 0), (0, 0), (0, 1), (1, 1)], [(0, 0.5), (0.75, 0.5)]],
+    "F": [[(1, 0), (0, 0), (0, 1)], [(0, 0.5), (0.75, 0.5)]],
+    "G": [[_cap_arc(0.52, 0.5, 0.5, 0.5, -45, -360), (1, 0.5), (0.55, 0.5)]],
+    "H": [[(0, 0), (0, 1)], [(1, 0), (1, 1)], [(0, 0.5), (1, 0.5)]],
+    "J": [[(0.3, 0), (1, 0)], [(0.75, 0), (0.75, 0.68), _cap_arc(0.4, 0.68, 0.35, 0.32, 0, 180)]],
+    "K": [[(0, 0), (0, 1)], [(1, 0), (0, 0.6)], [(0.32, 0.4), (1, 1)]],
+    "M": [[(0, 1), (0, 0), (0.5, 0.62), (1, 0), (1, 1)]],
+    "N": [[(0, 1), (0, 0), (1, 1), (1, 0)]],
+    "P": [[(0, 1), (0, 0), (0.6, 0), _cap_arc(0.6, 0.27, 0.4, 0.27, -90, 90), (0, 0.54)]],
+    "Q": [[_cap_arc(0.5, 0.5, 0.5, 0.5, 0, 360)], [(0.58, 0.68), (1.02, 1.05)]],
+    "R": [[(0, 1), (0, 0), (0.6, 0), _cap_arc(0.6, 0.27, 0.4, 0.27, -90, 90), (0, 0.54)],
+          [(0.42, 0.54), (1, 1)]],
+    "S": [[_cap_arc(0.5, 0.25, 0.45, 0.25, -25, -270), _cap_arc(0.5, 0.75, 0.47, 0.25, -90, 155)]],
+    "T": [[(0, 0), (1, 0)], [(0.5, 0), (0.5, 1)]],
+    "U": [[(0, 0), (0, 0.62), _cap_arc(0.5, 0.62, 0.5, 0.38, 180, 0), (1, 0)]],
+    "V": [[(0, 0), (0.5, 1), (1, 0)]],
+    "W": [[(0, 0), (0.24, 1), (0.5, 0.38), (0.76, 1), (1, 0)]],
+    "X": [[(0, 0), (1, 1)], [(1, 0), (0, 1)]],
+    "Y": [[(0, 0), (0.5, 0.5), (1, 0)], [(0.5, 0.5), (0.5, 1)]],
+    "Z": [[(0, 0), (1, 0), (0, 1), (1, 1)]],
+    "2": [[_cap_arc(0.5, 0.3, 0.45, 0.3, -165, 25), (0, 1), (1, 1)]],
+    "3": [[_cap_arc(0.5, 0.25, 0.43, 0.25, -155, 90), _cap_arc(0.5, 0.74, 0.48, 0.26, -90, 155)]],
+    "4": [[(0.72, 1), (0.72, 0), (0, 0.7), (1, 0.7)]],
+    "5": [[(0.92, 0), (0.14, 0), (0.08, 0.46), _cap_arc(0.5, 0.68, 0.46, 0.32, -145, 150)]],
+    "6": [[_cap_arc(0.55, 0.6, 0.48, 0.6, -60, -190)], [_cap_arc(0.5, 0.69, 0.46, 0.31, 0, 360)]],
+    "7": [[(0, 0), (1, 0), (0.35, 1)]],
+    "8": [[_cap_arc(0.5, 0.25, 0.38, 0.25, 0, 360)], [_cap_arc(0.5, 0.73, 0.46, 0.27, 0, 360)]],
+    "9": [[_cap_arc(0.5, 0.31, 0.46, 0.31, 0, 360)], [_cap_arc(0.45, 0.4, 0.51, 0.6, -10, 120)]],
+}
+CAPTCHA_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _cap_flatten(stroke):
+    pts = []
+    for item in stroke:
+        if isinstance(item, tuple) and item and item[0] == "arc":
+            _, cx, cy, rx, ry, a0, a1 = item
+            steps = max(6, int(abs(a1 - a0) / 8))
+            for i in range(steps + 1):
+                a = math.radians(a0 + (a1 - a0) * i / steps)
+                pts.append((cx + rx * math.cos(a), cy + ry * math.sin(a)))
+        else:
+            pts.append(item)
+    return pts
+
+
+_CAPTCHA_STROKES = {ch: [_cap_flatten(st) for st in strokes] for ch, strokes in _CAPTCHA_GLYPHS.items()}
+
+
+def _cap_hsv(h, s, v):
+    i = int(h * 6) % 6
+    f = h * 6 - int(h * 6)
+    p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+    r, g, b = [(v, t, p), (q, v, p), (p, v, t), (p, q, v), (t, p, v), (v, p, q)][i]
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def _cap_png(width, height, rgb):
+    stride = width * 3
+    raw = b"".join(b"\x00" + bytes(rgb[y * stride:(y + 1) * stride]) for y in range(height))
+
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 6))
+            + chunk(b"IEND", b""))
+
+
+def render_captcha_png(text, width=220, height=70):
+    """Draw `text` as a distorted, noisy PNG and return the PNG bytes.
+
+    Each character gets its own rotation, shear, size, colour and offset; the
+    whole string is bent by a sine wave; crossing lines, rings and speckle are
+    layered on top. Drawn at 2x and averaged down for smooth edges (~50 ms)."""
+    rnd = random.Random(secrets.randbits(64))
+    S = 2
+    W, H = width * S, height * S
+    buf = bytearray(W * H * 3)
+
+    # background: soft two-colour gradient
+    c1 = _cap_hsv(rnd.random(), 0.10 + rnd.random() * 0.12, 0.93 + rnd.random() * 0.06)
+    c2 = _cap_hsv(rnd.random(), 0.10 + rnd.random() * 0.12, 0.93 + rnd.random() * 0.06)
+    for y in range(H):
+        row = y * W * 3
+        for x in range(W):
+            t = (x / W) * 0.7 + (y / H) * 0.3
+            i = row + x * 3
+            buf[i] = int(c1[0] + (c2[0] - c1[0]) * t)
+            buf[i + 1] = int(c1[1] + (c2[1] - c1[1]) * t)
+            buf[i + 2] = int(c1[2] + (c2[2] - c1[2]) * t)
+
+    brushes = {}
+
+    def brush(r):
+        key = round(r * 4)
+        if key not in brushes:
+            rr = key / 4.0
+            ir = int(math.ceil(rr))
+            brushes[key] = [(dx, dy) for dy in range(-ir, ir + 1) for dx in range(-ir, ir + 1)
+                            if dx * dx + dy * dy <= rr * rr]
+        return brushes[key]
+
+    def polyline(pts, radius, col):
+        offs = brush(radius)
+        cr, cg, cb = col
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            n = max(1, int(math.hypot(x1 - x0, y1 - y0) / 0.8))
+            for k in range(n + 1):
+                px = int(x0 + (x1 - x0) * k / n)
+                py = int(y0 + (y1 - y0) * k / n)
+                for dx, dy in offs:
+                    x, y = px + dx, py + dy
+                    if 0 <= x < W and 0 <= y < H:
+                        i = (y * W + x) * 3
+                        buf[i] = cr
+                        buf[i + 1] = cg
+                        buf[i + 2] = cb
+
+    def densify(pts, step=3.0):
+        out = []
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            n = max(1, int(math.hypot(x1 - x0, y1 - y0) / step))
+            for k in range(n):
+                out.append((x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n))
+        out.append(pts[-1])
+        return out
+
+    # a global wave that bends the whole string
+    wa, wp, wph = rnd.uniform(3, 6) * S, rnd.uniform(70, 120) * S, rnd.uniform(0, 6.28)
+    xa, xp, xph = rnd.uniform(1, 3) * S, rnd.uniform(25, 45) * S, rnd.uniform(0, 6.28)
+
+    def warp(x, y):
+        return (x + xa * math.sin(2 * math.pi * y / xp + xph),
+                y + wa * math.sin(2 * math.pi * x / wp + wph))
+
+    # background clutter: faint rings
+    for _ in range(rnd.randint(4, 7)):
+        cx, cy = rnd.uniform(0, W), rnd.uniform(0, H)
+        rad = rnd.uniform(8, 26) * S
+        ring = [(cx + rad * math.cos(a * math.pi / 10), cy + rad * math.sin(a * math.pi / 10))
+                for a in range(21)]
+        polyline(densify(ring), 0.9 * S, _cap_hsv(rnd.random(), 0.22, 0.84))
+
+    # the characters
+    n = len(text)
+    margin = 14 * S
+    cell = (W - 2 * margin) / n
+    char_cols = []
+    for idx, ch in enumerate(text):
+        gh = rnd.uniform(34, 42) * S
+        gw = gh * rnd.uniform(0.55, 0.68)
+        ang = rnd.uniform(-0.3, 0.3)
+        shear = rnd.uniform(-0.18, 0.18)
+        cx = margin + cell * (idx + 0.5) + rnd.uniform(-3, 3) * S
+        cy = H / 2 + rnd.uniform(-5, 5) * S
+        ca, sa = math.cos(ang), math.sin(ang)
+        col = _cap_hsv(rnd.random(), rnd.uniform(0.55, 0.9), rnd.uniform(0.28, 0.5))
+        char_cols.append(col)
+        radius = rnd.uniform(1.45, 1.85) * S
+        for stroke in _CAPTCHA_STROKES[ch]:
+            pts = []
+            for gx, gy in stroke:
+                lx, ly = (gx - 0.5) * gw, (gy - 0.5) * gh
+                lx += shear * ly
+                pts.append((cx + lx * ca - ly * sa, cy + lx * sa + ly * ca))
+            polyline([warp(x, y) for x, y in densify(pts)], radius, col)
+
+    # interference curves crossing the text (one shares a character's colour)
+    for k in range(2):
+        amp = rnd.uniform(6, 14) * S
+        per = rnd.uniform(80, 200) * S
+        ph = rnd.uniform(0, 6.28)
+        base = rnd.uniform(0.3, 0.7) * H
+        slope = rnd.uniform(-0.12, 0.12)
+        col = char_cols[rnd.randrange(n)] if k == 0 else _cap_hsv(rnd.random(), 0.45, 0.6)
+        pts = [(x, base + slope * (x - W / 2) + amp * math.sin(2 * math.pi * x / per + ph))
+               for x in range(0, W + 8, 8)]
+        polyline(pts, rnd.uniform(0.5, 0.75) * S, col)
+
+    # downsample 2x -> anti-aliased edges
+    out = bytearray(width * height * 3)
+    row3 = W * 3
+    for y in range(height):
+        for x in range(width):
+            i = (y * S * W + x * S) * 3
+            j = (y * width + x) * 3
+            for c in range(3):
+                out[j + c] = (buf[i + c] + buf[i + 3 + c] + buf[i + row3 + c] + buf[i + row3 + 3 + c]) >> 2
+
+    # speckle noise
+    for _ in range(int(width * height * 0.04)):
+        j = (rnd.randrange(height) * width + rnd.randrange(width)) * 3
+        if rnd.random() < 0.5:
+            out[j], out[j + 1], out[j + 2] = _cap_hsv(rnd.random(), 0.5, rnd.uniform(0.2, 0.6))
+        else:
+            out[j], out[j + 1], out[j + 2] = 255, 255, 255
+
+    return _cap_png(width, height, out)
+
+
+def _captcha_answer_hash(captcha_id, answer):
+    msg = ("login-captcha:%s:%s" % (captcha_id, answer)).encode("utf-8")
+    return hmac.new(SECRET_KEY.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+
+def _normalize_captcha_answer(value):
+    # Case-insensitive; spaces people type between characters are ignored.
+    return re.sub(r"\s+", "", str(value or "")).upper()[:32]
+
+
+def new_login_captcha():
+    """Create a fresh captcha and return what the login screen needs to show it."""
+    code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
+    captcha_id = secrets.token_urlsafe(24)
+    now = time.time()
+    con = db()
+    try:
+        # Housekeeping: drop captchas nobody used before they expired.
+        con.execute("DELETE FROM login_captchas WHERE created_at < ?", (now - CAPTCHA_TTL_SECONDS,))
+        con.execute("INSERT INTO login_captchas (id, answer_hash, created_at) VALUES (?,?,?)",
+                    (captcha_id, _captcha_answer_hash(captcha_id, code), now))
+        con.commit()
+    finally:
+        con.close()
+    png = render_captcha_png(code)
+    return {"captchaId": captcha_id,
+            "image": "data:image/png;base64," + base64.b64encode(png).decode("ascii"),
+            "length": CAPTCHA_LENGTH,
+            "expiresIn": CAPTCHA_TTL_SECONDS}
+
+
+def verify_login_captcha(captcha_id, answer):
+    """Check (and always burn) the captcha presented with a login attempt.
+
+    Runs before any password is looked at. Raises ApiError when the captcha is
+    missing, unknown, expired or wrong. Its deletion is committed on its own
+    connection, so a failed attempt can never be replayed with the same code."""
+    captcha_id = str(captcha_id or "").strip()[:64]
+    answer = _normalize_captcha_answer(answer)
+    if not captcha_id:
+        raise ApiError("Please enter the captcha code shown above the Sign in button.")
+    con = db()
+    try:
+        row = con.execute("DELETE FROM login_captchas WHERE id=? RETURNING answer_hash, created_at",
+                          (captcha_id,)).fetchone()
+        con.commit()
+    finally:
+        con.close()
+    if not row or float(row["created_at"]) < time.time() - CAPTCHA_TTL_SECONDS:
+        raise ApiError("That captcha has expired. A new code is shown — please type it and sign in again.")
+    if not answer:
+        raise ApiError("Please enter the captcha code shown above the Sign in button.")
+    if not hmac.compare_digest(row["answer_hash"], _captcha_answer_hash(captcha_id, answer)):
+        raise ApiError("The captcha code didn't match. A new code is shown — please try again.")
+
+
+# =====================================================================
 # SERVER-SIDE SESSIONS. Replaces the old design where every request simply
 # trusted a "role" / "empId" / "clientId" field sent by the browser. A
 # session is created only after a password has been verified in
@@ -280,7 +575,7 @@ def _rate_limited(ip, bucket, limit, window_seconds):
 # =====================================================================
 
 # Reachable with no session at all.
-PUBLIC_ACTIONS = {"login", "logout", "session",
+PUBLIC_ACTIONS = {"login", "login_captcha", "logout", "session",
                   "set_client_password", "request_client_password_reset"}
 
 # The only actions a client-portal session may reach. Everything else is
@@ -1244,6 +1539,14 @@ def init_db():
         created_at TEXT DEFAULT ({_NOW_SQL}),
         last_seen TEXT DEFAULT ({_NOW_SQL})
     );
+    -- One row per login captcha on screen. Only an HMAC of the answer is kept;
+    -- rows are deleted when used (right or wrong) or once they expire.
+    CREATE TABLE IF NOT EXISTS login_captchas (
+        id TEXT PRIMARY KEY,
+        answer_hash TEXT NOT NULL,
+        created_at DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_login_captchas_created ON login_captchas (created_at);
     """)
     con.commit()
 
@@ -2635,10 +2938,20 @@ def handle_action(action, d, ip=""):
             delete_session(con, d.get("_session_token"))
             return {"ok": True, "_clear_cookie": True}
 
+        if action == "login_captcha":
+            # A fresh, single-use captcha for the login screen (all dashboards).
+            if _rate_limited(ip, "login_captcha", limit=60, window_seconds=300):
+                raise ApiError("Too many captcha requests. Please wait a few minutes and try again.", 429)
+            return new_login_captcha()
+
         if action == "login":
             # SECURITY: brute-force throttling on login attempts, per source IP.
             if _rate_limited(ip, "login", limit=10, window_seconds=300):
                 raise ApiError("Too many login attempts. Please wait a few minutes and try again.")
+            # SECURITY: every sign-in — Super Admin, MD Admin, every department role,
+            # individual employees and clients — must pass the captcha first. It is
+            # checked (and burned) before any account lookup or password check.
+            verify_login_captcha(d.get("captchaId"), d.get("captchaAnswer"))
             role = d.get("role") or ""
             if role == "employee":
                 uid = (d.get("empUid") or "").strip()
@@ -5483,10 +5796,10 @@ class Handler(BaseHTTPRequestHandler):
         except ApiError as e:
             return self._json({"error": e.msg}, e.code)
 
-        # ----- per-session CSRF token. login/logout/session are exempt (there is no
-        #       session yet, or it is being torn down); the custom header above still
-        #       covers those. -----
-        if session and action not in ("login", "logout", "session"):
+        # ----- per-session CSRF token. login/login_captcha/logout/session are exempt
+        #       (there is no session yet, or it is being torn down); the custom header
+        #       above still covers those. -----
+        if session and action not in ("login", "login_captcha", "logout", "session"):
             supplied = self.headers.get("X-CSRF-Token") or ""
             expected = session["csrf"] or ""
             if not expected or not hmac.compare_digest(supplied, expected):

@@ -140,6 +140,19 @@ a{color:var(--purple)}
 .login-form .btn{width:100%;margin-top:6px}
 .field{margin-bottom:14px}
 .login-err{color:#F87171;font-size:13px;text-align:center;margin-top:10px;min-height:18px}
+/* login captcha (required on every sign-in) */
+.captcha-row{display:flex;align-items:stretch;gap:8px;margin-bottom:8px}
+.captcha-img-wrap{flex:1;min-width:0;border-radius:10px;overflow:hidden;border:1px solid var(--ink-line-strong);
+  background:rgba(255,255,255,.06);aspect-ratio:22/7;display:flex;align-items:center;justify-content:center}
+.captcha-img-wrap img{display:block;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;transition:opacity .15s}
+.captcha-img-wrap img.loading{opacity:.35}
+.captcha-img-wrap img:not([src]){visibility:hidden}
+.captcha-refresh{flex:0 0 38px;border-radius:10px;border:1px solid var(--ink-line-strong);background:rgba(255,255,255,.04);
+  color:#E0B25A;font-size:19px;font-weight:700;line-height:1;cursor:pointer;transition:background .12s,border-color .12s}
+.captcha-refresh:hover{background:rgba(255,255,255,.09);border-color:#22A6B3}
+.captcha-refresh:disabled{opacity:.5;cursor:wait}
+.login-form input.captcha-input{text-transform:uppercase;letter-spacing:4px;font-weight:600}
+.login-form input.captcha-input::placeholder{text-transform:none;letter-spacing:normal;font-weight:400}
 .login-note{text-align:center;color:var(--ink-muted);font-size:12px;margin-top:18px}
 
 /* ---------- login split (password left, roles right) ---------- */
@@ -753,6 +766,14 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
             <label for="pwd">Password</label>
             <input id="pwd" type="password" placeholder="Enter password" autocomplete="off">
           </div>
+          <div class="field" id="captchaField">
+            <label for="captchaAnswer">Captcha</label>
+            <div class="captcha-row">
+              <div class="captcha-img-wrap"><img id="captchaImg" alt="Captcha code picture" width="220" height="70" draggable="false"></div>
+              <button type="button" class="captcha-refresh" id="captchaRefresh" title="Show a different code" aria-label="Show a different captcha code">&#8635;</button>
+            </div>
+            <input id="captchaAnswer" class="captcha-input" placeholder="Type the code shown above" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="8">
+          </div>
           <button class="btn" id="loginBtn">Sign in</button>
           <div class="login-err" id="loginErr"></div>
         </div>
@@ -1055,8 +1076,9 @@ function handleSessionExpired(){
   role = null; clientSelf = null; empId = empName = empRole = empTeamType = null;
   clearSession();
   const lv = $("loginView"), av = $("appView");
-  if(lv) lv.style.display = "block";
+  if(lv) lv.style.display = "flex";
   if(av) av.style.display = "none";
+  loadCaptcha();
 }
 // Tracks whether the most recent loadData() actually got fresh data from the server.
 // Used by renderClient() (and could be used elsewhere) to tell a genuine "this client
@@ -1463,6 +1485,7 @@ function openClientSetup(prefillId, prefillToken){
 function closeClientSetup(){
   $("clientSetupView").style.display = "none";
   $("loginView").style.display = "flex";
+  loadCaptcha();
 }
 async function submitClientSetup(){
   const err = $("csErr");
@@ -1497,6 +1520,7 @@ function openClientForgot(){
 function closeClientForgot(){
   $("clientForgotView").style.display = "none";
   $("loginView").style.display = "flex";
+  loadCaptcha();
 }
 async function submitClientForgot(){
   const err = $("cfErr");
@@ -1521,24 +1545,85 @@ function checkInviteLinkOnLoad(){
     openClientSetup(cid, tok);
   }
 }
+/* ----- LOGIN CAPTCHA -----
+   Every sign-in, for every dashboard, needs the code from a fresh captcha picture.
+   The server draws the picture and keeps only a hash of the answer; each code is
+   single-use (burned by the first login attempt, right or wrong) and expires after
+   a few minutes, so a new one is fetched after every attempt and when it runs out. */
+let captchaId = "", captchaTimer = null, captchaSeq = 0, loginBusy = false;
+function loginScreenVisible(){
+  const lv = $("loginView");
+  return !!lv && getComputedStyle(lv).display !== "none";
+}
+async function loadCaptcha(){
+  const img = $("captchaImg"), inp = $("captchaAnswer"), btn = $("captchaRefresh");
+  if(!img || !inp) return;
+  const seq = ++captchaSeq;
+  clearTimeout(captchaTimer);
+  captchaId = "";
+  inp.value = "";
+  img.classList.add("loading");
+  if(btn) btn.disabled = true;
+  try{
+    const out = await api("login_captcha", {});
+    if(seq !== captchaSeq) return;              // a newer request already replaced this one
+    captchaId = out.captchaId || "";
+    img.src = out.image || "";
+    if(out.length) inp.maxLength = out.length;
+    // Swap in a new code a little before this one expires on the server.
+    const ms = Math.max(30, (out.expiresIn || 300) - 15) * 1000;
+    captchaTimer = setTimeout(()=>{
+      if(!loginScreenVisible()){ captchaId = ""; return; }   // reloaded when the login screen is shown again
+      const hadTyped = $("captchaAnswer").value.trim() !== "";
+      loadCaptcha();
+      if(hadTyped) $("loginErr").textContent = "The captcha expired, so a new code is shown. Please type it again.";
+    }, ms);
+  }catch(e){
+    if(seq !== captchaSeq) return;
+    img.removeAttribute("src");
+    $("loginErr").textContent = "Couldn't load the captcha (" + e.message + "). Click \u21bb to try again.";
+  }finally{
+    if(seq === captchaSeq){ img.classList.remove("loading"); if(btn) btn.disabled = false; }
+  }
+}
+$("captchaRefresh").addEventListener("click", ()=>{ $("loginErr").textContent = ""; loadCaptcha().then(()=>$("captchaAnswer").focus()); });
+$("captchaAnswer").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
+
 $("loginBtn").addEventListener("click", doLogin);
 $("pwd").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
 
 async function doLogin(){
+  if(loginBusy) return;
   const err = $("loginErr");
   if(!selectedRole){ err.textContent = "Please select a role above."; return; }
   if(selectedRole==="employee" && !$("empUid").value.trim()){ err.textContent = "Enter your employee ID."; return; }
+  const captchaAnswer = $("captchaAnswer").value.trim();
+  if(!captchaId){ err.textContent = "The captcha is still loading \u2014 please wait a moment."; if(!$("captchaImg").getAttribute("src")) loadCaptcha(); return; }
+  if(!captchaAnswer){ err.textContent = "Please type the captcha code shown in the picture."; $("captchaAnswer").focus(); return; }
+  // The code is single-use: whatever happens next, this captcha is spent.
+  const usedCaptchaId = captchaId;
+  captchaId = "";
+  clearTimeout(captchaTimer);
+  loginBusy = true;
   err.textContent = "Signing in...";
   try{
     const out = await api("login", {role:selectedRole, password:$("pwd").value,
-      clientKey:$("clientKey").value.trim(), empUid:$("empUid").value.trim()});
+      clientKey:$("clientKey").value.trim(), empUid:$("empUid").value.trim(),
+      captchaId:usedCaptchaId, captchaAnswer});
     csrfToken = out.csrfToken || "";
     if(selectedRole === "client") clientSelf = out.clientId;
     if(selectedRole === "employee"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
-  }catch(e){ err.textContent = e.message; return; }
+  }catch(e){
+    loginBusy = false;
+    err.textContent = e.message;
+    loadCaptcha();                               // every new attempt gets a brand-new code
+    $("captchaAnswer").focus();
+    return;
+  }
+  loginBusy = false;
   err.textContent = "";
   role = selectedRole;
-  $("pwd").value = ""; $("empUid").value = "";
+  $("pwd").value = ""; $("empUid").value = ""; $("captchaAnswer").value = "";
   $("loginView").style.display = "none";
   $("appView").style.display = "block";
   saveSession();
@@ -1603,6 +1688,8 @@ function logout(){
   $("appView").style.display = "none";
   $("loginView").style.display = "flex";
   closeDrawer(); closeModal();
+  $("loginErr").textContent = "";
+  loadCaptcha();
 }
 function confirmLogoutFromBrand(){
   if(confirm("Log out of iMatiz?")) logout();
@@ -9937,7 +10024,7 @@ async function saveSettingsForm(){
 }
 
 /* ================= BOOT + LIVE SYNC ================= */
-(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); } else { checkInviteLinkOnLoad(); } })();
+(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); } else { loadCaptcha(); checkInviteLinkOnLoad(); } })();
 
 /* Auto-refresh every 12s so all dashboards stay in sync across the pipeline
    (paused while a form/panel is open, or while the user is typing anywhere). */
