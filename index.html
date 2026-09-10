@@ -521,6 +521,16 @@ tbody tr:last-child td{border-bottom:none}
 .adm-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .adm-panel-head h3{font-size:15px;font-weight:600;color:var(--text);font-family:var(--disp)}
 .adm-panel-body{padding:16px 18px}
+/* queue-card: used when several .adm-panel cards sit side by side in a grid row
+   (e.g. "New Work To Assign / Delivery / Work Updates"). Grid stretch already
+   equalizes the outer card heights, but without this the footer button just
+   trails whatever content happens to be above it, so it lands at a different
+   height in every card. Making the card a flex column and pinning the button
+   to the bottom keeps every card's button on one shared baseline. */
+.queue-card{display:flex;flex-direction:column}
+.queue-card .adm-panel-body{display:flex;flex-direction:column;flex:1;min-height:0}
+.queue-card .adm-scroll-list{min-height:0}
+.queue-card .adm-panel-body>.btn{margin-top:auto!important}
 .adm-scroll-list{max-height:260px;overflow-y:auto;padding-right:4px}
 .adm-scroll-list::-webkit-scrollbar{width:6px}
 .adm-scroll-list::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:6px}
@@ -2903,7 +2913,7 @@ function renderTMDashboard(){
       ${admKpi("Journal Revisions", journalPending.length, Math.max(withJournal.length,1), "Pending vs completed journal work", ["Pending","Completed"], "tmPage='journals';refresh()")}
     </div>
     <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1fr">
-      <div class="adm-panel" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='assign';refresh()">
+      <div class="adm-panel queue-card" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='assign';refresh()">
         <div class="adm-panel-head"><h3>New Work To Assign</h3><span class="badge ${newWork.length?'b-bad':'b-purp'}">${newWork.length}</span></div>
         <div class="adm-panel-body">
           <div class="adm-scroll-list">
@@ -2915,7 +2925,7 @@ function renderTMDashboard(){
           <button class="btn small" style="margin-top:10px" onclick="event.stopPropagation();tmPage='tasks';tmTasksTab='assign';refresh()">Open Assign Work &#8594;</button>
         </div>
       </div>
-      <div class="adm-panel" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='assign';refresh()">
+      <div class="adm-panel queue-card" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='assign';refresh()">
         <div class="adm-panel-head"><h3>Delivery</h3><span class="badge ${deliveryQueue.length?'b-bad':'b-purp'}">${deliveryQueue.length}</span></div>
         <div class="adm-panel-body">
           <div class="adm-scroll-list">
@@ -2927,7 +2937,7 @@ function renderTMDashboard(){
           <button class="btn small" style="margin-top:10px" onclick="event.stopPropagation();tmPage='tasks';tmTasksTab='assign';refresh()">Open Delivery &#8594;</button>
         </div>
       </div>
-      <div class="adm-panel" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='updates';refresh()">
+      <div class="adm-panel queue-card" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='updates';refresh()">
         <div class="adm-panel-head"><h3>Work Updates</h3><span class="badge ${workUpdates.length?'b-bad':'b-purp'}">${workUpdates.length}</span></div>
         <div class="adm-panel-body">
           <div class="adm-scroll-list">
