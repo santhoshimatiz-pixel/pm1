@@ -18,15 +18,8 @@ A NEW CODE EVERY TIME
 - A new code is also shown after logout, after a session expires, when coming
   back from the client "Set password" / "Forgot password" screens, and
   automatically just before a code expires (5 minutes).
-- Codes are 5 characters and always MIX capital and small letters
-  (plus digits), e.g. "Hb3Wm".
-- Capital and small letters MUST MATCH: "A" and "a" are different.
-  The login box now shows exactly what is typed (it no longer turns
-  everything into capitals, and phone keyboards won't auto-capitalise).
-- Letters that look the same in both cases - C K P S U V W X Y Z - are
-  always drawn as capitals and accepted in either case, so nobody is
-  failed for something they can't see.
-- Look-alike characters (0/O/o, 1/I/l/i, 9/g/q, j) are never used.
+- Codes are 5 characters, not case-sensitive. Look-alike characters
+  (0/O, 1/I/L) are never used.
 
 HOW IT WORKS (server.py)
 ------------------------

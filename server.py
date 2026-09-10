@@ -283,9 +283,7 @@ def _rate_limited(ip, bucket, limit, window_seconds):
 #   right or wrong — so every attempt needs a brand-new code and a wrong guess
 #   can never be retried against the same image.
 # * Expires after CAPTCHA_TTL_SECONDS (default 5 minutes).
-# * Mixes capital letters, small letters and digits. Capital vs small must
-#   match (A is not a), except C K P S U V W X Y Z whose small form looks the
-#   same. Look-alikes such as 0/O and 1/I/l are never used.
+# * Alphabet leaves out look-alikes (0/O, 1/I/L); answers are case-insensitive.
 # =====================================================================
 def _cap_arc(cx, cy, rx, ry, a0, a1):
     return ("arc", cx, cy, rx, ry, a0, a1)
@@ -327,32 +325,8 @@ _CAPTCHA_GLYPHS = {
     "7": [[(0, 0), (1, 0), (0.35, 1)]],
     "8": [[_cap_arc(0.5, 0.25, 0.38, 0.25, 0, 360)], [_cap_arc(0.5, 0.73, 0.46, 0.27, 0, 360)]],
     "9": [[_cap_arc(0.5, 0.31, 0.46, 0.31, 0, 360)], [_cap_arc(0.45, 0.4, 0.51, 0.6, -10, 120)]],
-    # small letters: x-height from y=0.38 to the baseline at y=1; b/d/f/h/t reach
-    # the top. Only letters whose small shape is clearly different from the
-    # capital are used, so capital vs small is always visible.
-    "a": [[_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)], [(0.85, 0.38), (0.85, 1)]],
-    "b": [[(0.15, 0), (0.15, 1)], [_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)]],
-    "d": [[(0.85, 0), (0.85, 1)], [_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)]],
-    "e": [[(0.15, 0.69), (0.85, 0.69), _cap_arc(0.5, 0.69, 0.35, 0.31, 0, -315)]],
-    "f": [[(0.45, 1), (0.45, 0.2), _cap_arc(0.7, 0.2, 0.25, 0.2, 180, 320)], [(0.15, 0.42), (0.78, 0.42)]],
-    "h": [[(0.15, 0), (0.15, 1)], [_cap_arc(0.5, 0.66, 0.35, 0.28, 180, 360), (0.85, 1)]],
-    "m": [[(0.08, 0.38), (0.08, 1)], [_cap_arc(0.29, 0.62, 0.21, 0.24, 180, 360), (0.5, 1)],
-          [_cap_arc(0.71, 0.62, 0.21, 0.24, 180, 360), (0.92, 1)]],
-    "n": [[(0.15, 0.38), (0.15, 1)], [_cap_arc(0.5, 0.66, 0.35, 0.28, 180, 360), (0.85, 1)]],
-    "r": [[(0.2, 0.38), (0.2, 1)], [_cap_arc(0.58, 0.68, 0.38, 0.3, 180, 300)]],
-    "t": [[(0.42, 0.06), (0.42, 0.85), _cap_arc(0.67, 0.85, 0.25, 0.15, 180, 30)], [(0.12, 0.4), (0.8, 0.4)]],
 }
-# Capital letters, small letters and digits. Left out on purpose: look-alikes
-# (0/O/o, 1/I/l/i, 9/g/q, j) and small letters that look like a smaller or
-# twisted copy of their capital (c k o p s u v w x y z) — once the picture is
-# distorted, size alone is too hard to judge.
-CAPTCHA_UPPER = "ABCDEFGHJKMNPQRSTUVWXYZ"
-CAPTCHA_LOWER = "abdefhmnrt"
-CAPTCHA_DIGITS = "23456789"
-CAPTCHA_ALPHABET = CAPTCHA_UPPER + CAPTCHA_LOWER + CAPTCHA_DIGITS
-# Capitals whose small form looks the same (only ever drawn as capitals). For
-# these, typing either case is accepted; every other letter must match exactly.
-CAPTCHA_CASE_FREE = frozenset("CKPSUVWXYZ")
+CAPTCHA_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
 def _cap_flatten(stroke):
@@ -531,25 +505,13 @@ def _captcha_answer_hash(captcha_id, answer):
 
 
 def _normalize_captcha_answer(value):
-    """Spaces are ignored. Capital/small letters are kept exactly as typed —
-    except the letters that look the same in both cases (CAPTCHA_CASE_FREE),
-    which only ever appear as capitals, so a small one typed there counts."""
-    text = re.sub(r"\s+", "", str(value or ""))[:32]
-    return "".join(ch.upper() if ch.upper() in CAPTCHA_CASE_FREE else ch for ch in text)
-
-
-def _new_captcha_code():
-    """Random code that always mixes at least one capital and one small letter.
-    Simply redrawn until it does (about 1.3 draws on average)."""
-    while True:
-        code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
-        if any(ch in CAPTCHA_LOWER for ch in code) and any(ch in CAPTCHA_UPPER for ch in code):
-            return code
+    # Case-insensitive; spaces people type between characters are ignored.
+    return re.sub(r"\s+", "", str(value or "")).upper()[:32]
 
 
 def new_login_captcha():
     """Create a fresh captcha and return what the login screen needs to show it."""
-    code = _new_captcha_code()
+    code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
     captcha_id = secrets.token_urlsafe(24)
     now = time.time()
     con = db()
@@ -783,6 +745,12 @@ ACTION_ROLES = {
     "employee_reset_password": _R_STAFF_MGMT,
     "set_employee_active": _R_STAFF_MGMT,
     "list_deleted_employees": _R_STAFF_MGMT,
+
+    # ---- "Ping team" nudges (Technical Manager / TL -> their programmers & paper writers) ----
+    "ping_team_directory": _R_TECH_MGMT,
+    "ping_employee": _R_TECH_MGMT,
+    "ping_poll": ("employee",),          # only individually-added employees receive pings
+    "ping_ack": ("employee",),
 
     # ---- admin only ----
     "admin_directory": _R_STAFF_MGMT,
@@ -1585,6 +1553,21 @@ def init_db():
         created_at DOUBLE PRECISION NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_login_captchas_created ON login_captchas (created_at);
+    -- FEATURE: "Ping team" — a Technical Manager/TL nudges an employee. The employee's
+    -- open PM-tool tab polls this table (even while it is in the background) and pops a
+    -- desktop notification. delivered_at = the tab picked it up; seen_at = the person
+    -- clicked/dismissed it.
+    CREATE TABLE IF NOT EXISTS emp_pings (
+        id SERIAL PRIMARY KEY,
+        emp_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        from_key TEXT NOT NULL DEFAULT '',
+        from_label TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT ({_NOW_SQL}),
+        delivered_at TEXT DEFAULT '',
+        seen_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_emp_pings_emp ON emp_pings (emp_id, delivered_at);
     """)
     con.commit()
 
@@ -5214,6 +5197,117 @@ def handle_action(action, d, ip=""):
         #       department-login list (that stays admin-only). SECURITY: plaintext passwords
         #       are no longer stored, so they can no longer be "revealed" here — only reset
         #       (see openChangePasswordAdmin on the front end).
+        # =============================================================
+        # "PING TEAM" — Technical Manager / TL dashboard
+        # ---------------------------------------------------------------
+        # The manager picks an employee (or everyone who is online) and sends a
+        # short nudge. Every logged-in employee tab polls "ping_poll" every few
+        # seconds in the background, so the nudge shows up as a desktop
+        # notification even while they are in Word, another tab or another app,
+        # as long as the PM tool is still open and signed in in their browser.
+        # =============================================================
+        if action in ("ping_team_directory", "ping_employee", "ping_poll", "ping_ack"):
+            PING_ONLINE_MINUTES = 3          # sessions' last_seen is written at most once a minute
+            PING_MAX_MESSAGE = 300
+
+            def _ping_team_rows():
+                caller_role = (d.get("role") or "").strip()
+                if caller_role in ADMIN_ROLES:
+                    rows = con.execute(
+                        "SELECT id, name, role, team_type, emp_uid FROM employees "
+                        "WHERE active=1 AND deleted_at IS NULL ORDER BY role, team_type, name").fetchall()
+                else:
+                    own_roles = STAFF_MGMT_TEAM_ROLES.get(caller_role, ())
+                    if not own_roles:
+                        raise ApiError("You don't have permission to ping employees.", 403)
+                    rows = con.execute(
+                        "SELECT id, name, role, team_type, emp_uid FROM employees "
+                        "WHERE active=1 AND deleted_at IS NULL AND role = ANY(?) "
+                        "ORDER BY role, team_type, name", (list(own_roles),)).fetchall()
+                return rows
+
+            def _online_emp_ids():
+                cutoff = (datetime.now() - timedelta(minutes=PING_ONLINE_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+                return {r["emp_id"] for r in con.execute(
+                    "SELECT DISTINCT emp_id FROM sessions WHERE kind='employee' AND last_seen >= ?", (cutoff,))}
+
+            if action == "ping_team_directory":
+                rows = _ping_team_rows()
+                online = _online_emp_ids()
+                ids = [r["id"] for r in rows]
+                recent = []
+                if ids:
+                    since = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+                    recent = [{
+                        "id": r["id"], "empId": r["emp_id"], "empName": r["emp_name"],
+                        "from": r["from_label"], "message": r["message"], "at": iso(r["created_at"]),
+                        "delivered": bool(r["delivered_at"]), "seen": bool(r["seen_at"]),
+                    } for r in con.execute(
+                        "SELECT p.*, e.name AS emp_name FROM emp_pings p JOIN employees e ON e.id=p.emp_id "
+                        "WHERE p.emp_id = ANY(?) AND p.created_at >= ? ORDER BY p.id DESC LIMIT 40",
+                        (ids, since))]
+                return {"employees": [{
+                    "id": r["id"], "name": r["name"], "role": r["role"], "teamType": r["team_type"] or "",
+                    "empUid": r["emp_uid"] or "", "online": r["id"] in online} for r in rows],
+                    "recent": recent}
+
+            if action == "ping_employee":
+                if _rate_limited(ip, "ping_employee", limit=60, window_seconds=300):
+                    raise ApiError("Too many pings in a short time. Please wait a few minutes.", 429)
+                message = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(d.get("message") or "")).strip()
+                if len(message) > PING_MAX_MESSAGE:
+                    raise ApiError("Keep the message under %d characters." % PING_MAX_MESSAGE)
+                if not message:
+                    message = "Please check the PM tool."
+                allowed = {r["id"] for r in _ping_team_rows()}
+                targets = []
+                if d.get("allOnline"):
+                    targets = sorted(allowed & _online_emp_ids())
+                    if not targets:
+                        raise ApiError("Nobody from your team is online right now.")
+                else:
+                    try:
+                        emp_id_target = int(d.get("targetEmpId"))
+                    except (TypeError, ValueError):
+                        raise ApiError("Pick an employee to ping.")
+                    if emp_id_target not in allowed:
+                        raise ApiError("That employee is not in your team.", 403)
+                    targets = [emp_id_target]
+                ident = session_identity(get_principal())
+                for t in targets:
+                    con.execute("INSERT INTO emp_pings (emp_id, from_key, from_label, message) VALUES (?,?,?,?)",
+                                (t, ident["key"], ident["label"], message))
+                con.commit()
+                return {"ok": True, "sent": len(targets)}
+
+            # ----- employee side -----
+            my_emp_id = d.get("empId")
+            if action == "ping_poll":
+                rows = con.execute(
+                    "UPDATE emp_pings SET delivered_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
+                    "WHERE emp_id=? AND delivered_at='' RETURNING id, from_label, message, created_at",
+                    (my_emp_id,)).fetchall()
+                con.commit()
+                return {"pings": [{"id": r["id"], "from": r["from_label"], "message": r["message"],
+                                   "at": iso(r["created_at"])} for r in rows]}
+
+            if action == "ping_ack":
+                ids = d.get("ids") or []
+                if not isinstance(ids, list):
+                    ids = []
+                clean_ids = []
+                for x in ids[:100]:
+                    try:
+                        clean_ids.append(int(x))
+                    except (TypeError, ValueError):
+                        pass
+                if clean_ids:
+                    con.execute(
+                        "UPDATE emp_pings SET seen_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
+                        "WHERE emp_id=? AND seen_at='' AND id = ANY(?)", (my_emp_id, clean_ids))
+                    con.commit()
+                return {"ok": True}
+
         if action == "admin_directory":
             caller_role = (d.get("role") or "").strip()
             if caller_role not in STAFF_MGMT_ROLES:

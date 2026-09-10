@@ -151,10 +151,8 @@ a{color:var(--purple)}
   color:#E0B25A;font-size:19px;font-weight:700;line-height:1;cursor:pointer;transition:background .12s,border-color .12s}
 .captcha-refresh:hover{background:rgba(255,255,255,.09);border-color:#22A6B3}
 .captcha-refresh:disabled{opacity:.5;cursor:wait}
-/* shows exactly what is typed - capital and small letters are different in the captcha */
-.login-form input.captcha-input{text-transform:none;letter-spacing:4px;font-weight:600}
-.login-form input.captcha-input::placeholder{letter-spacing:normal;font-weight:400}
-.captcha-hint{font-size:11.5px;color:var(--ink-muted);margin-top:6px;line-height:1.4}
+.login-form input.captcha-input{text-transform:uppercase;letter-spacing:4px;font-weight:600}
+.login-form input.captcha-input::placeholder{text-transform:none;letter-spacing:normal;font-weight:400}
 .login-note{text-align:center;color:var(--ink-muted);font-size:12px;margin-top:18px}
 
 /* ---------- login split (password left, roles right) ---------- */
@@ -378,6 +376,34 @@ tbody tr:last-child td{border-bottom:none}
   box-shadow:var(--shadow-lg);opacity:0;transition:all .3s var(--ease);pointer-events:none;max-width:90vw;text-align:center;
 }
 #toast.show{transform:translate(-50%,0);opacity:1}
+/* ---------- "Ping team" (Technical Manager -> employee nudges) ---------- */
+.ping-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#C9D3CE;margin-right:7px;vertical-align:middle;box-shadow:0 0 0 2px #fff}
+.ping-dot.on{background:#16A34A;box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(22,163,74,.18)}
+.ping-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.ping-row:last-child{border-bottom:0}
+.ping-row .nm{flex:1;min-width:0;font-size:13.5px}
+.ping-row .nm small{display:block;color:var(--muted);font-size:11.5px}
+.ping-hist{font-size:12.5px;color:var(--muted);padding:6px 4px;border-bottom:1px dashed var(--line);display:flex;gap:8px;align-items:center}
+.ping-hist b{color:var(--text)}
+.ping-status{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:#EEF2F0;color:#5B6B63;white-space:nowrap}
+.ping-status.d{background:#E0F2FE;color:#0369A1}.ping-status.s{background:#DCFCE7;color:#15803D}
+#pingAlert{
+  position:fixed;top:18px;left:50%;transform:translate(-50%,-140px);z-index:120;width:min(520px,92vw);
+  background:#16241D;color:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 22px 48px -14px rgba(0,0,0,.55);
+  border:1px solid rgba(255,255,255,.12);display:flex;gap:12px;align-items:flex-start;transition:transform .35s var(--ease);
+}
+#pingAlert.show{transform:translate(-50%,0)}
+#pingAlert .pa-ic{font-size:24px;line-height:1}
+#pingAlert .pa-body{flex:1;min-width:0}
+#pingAlert .pa-body b{display:block;font-size:14px;margin-bottom:3px}
+#pingAlert .pa-body span{font-size:13px;color:#D6E3DC;white-space:pre-wrap;word-break:break-word}
+#pingAlert .pa-body small{display:block;color:#8DA39A;font-size:11px;margin-top:5px}
+#pingAlert button{background:#fff;color:#16241D;border:0;border-radius:9px;padding:8px 13px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
+#pingPermBar{display:none;background:#EAF7F8;border:1px solid rgba(14,116,144,.25);color:#0E7490;font-size:13px;border-radius:12px;padding:10px 15px;margin-bottom:14px;align-items:center;gap:12px;flex-wrap:wrap}
+#pingPermBar.show{display:flex}
+#pingPermBar .btn{margin-left:auto}
+@keyframes pingPulse{0%,100%{opacity:1}50%{opacity:.35}}
+.ping-pulse{animation:pingPulse 1.1s infinite}
 #memWarn{display:none;background:#FEF3E2;border:1px solid rgba(180,83,9,.3);color:var(--warn);font-size:13px;border-radius:12px;padding:11px 15px;margin-bottom:18px}
 
 /* ---------- client portal ---------- */
@@ -774,8 +800,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
               <div class="captcha-img-wrap"><img id="captchaImg" alt="Captcha code picture" width="220" height="70" draggable="false"></div>
               <button type="button" class="captcha-refresh" id="captchaRefresh" title="Show a different code" aria-label="Show a different captcha code">&#8635;</button>
             </div>
-            <input id="captchaAnswer" class="captcha-input" placeholder="Type the code shown above" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="8">
-            <div class="captcha-hint">Capital and small letters must match (e.g. <b>A</b> and <b>a</b> are different).</div>
+            <input id="captchaAnswer" class="captcha-input" placeholder="Type the code shown above" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="8">
           </div>
           <button class="btn" id="loginBtn">Sign in</button>
           <div class="login-err" id="loginErr"></div>
@@ -939,7 +964,8 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
     </aside>
 
     <main class="main">
-      <div id="memWarn">Cannot reach the server. Open the terminal in VS Code and run:  python server.py  (see README.txt)</div>
+      <div id="pingPermBar"><span>&#128276; Turn on desktop notifications so your manager's pings reach you even while you're in Word, another tab or another app.</span><button class="btn small" type="button" onclick="requestPingPermission()">Turn on notifications</button></div>
+<div id="memWarn">Cannot reach the server. Open the terminal in VS Code and run:  python server.py  (see README.txt)</div>
       <div class="page-head">
         <div>
           <h2 id="pageTitle"></h2>
@@ -966,6 +992,11 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 </div>
 
 <div id="toast"></div>
+<div id="pingAlert" role="alert" aria-live="assertive">
+  <div class="pa-ic">&#128227;</div>
+  <div class="pa-body"><b id="pingAlertTitle"></b><span id="pingAlertMsg"></span><small id="pingAlertMeta"></small></div>
+  <button type="button" onclick="dismissPingAlert()">Got it</button>
+</div>
 <script>
 /* ================= STATE ================= */
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -1075,6 +1106,7 @@ async function api(action, data){
 function handleSessionExpired(){
   if(!role) return;
   try{ if(typeof stopRefreshLoop === "function") stopRefreshLoop(); }catch(e){}
+  try{ stopPingListener(); }catch(e){}
   csrfToken = "";
   role = null; clientSelf = null; empId = empName = empRole = empTeamType = null;
   clearSession();
@@ -1631,6 +1663,7 @@ async function doLogin(){
   $("appView").style.display = "block";
   saveSession();
   await refresh();
+  startPingListener();
 }
 // ----- keeping the person signed in across a page refresh.
 //       This used to mirror the logged-in identity into sessionStorage and trust
@@ -1678,6 +1711,7 @@ function logout(){
   // stayed valid until it timed out — anyone recovering the cookie could carry
   // on using it after the user believed they had signed out.
   try{ api("logout", {}); }catch(e){ /* best effort — still clear locally */ }
+  stopPingListener(); pingUnseen = []; $("pingAlert").classList.remove("show");
   csrfToken = "";
   role = null; clientSelf = null; selectedRole = null; selectedEmpId = null; empName = empRole = empId = empTeamType = null; tmTab='work'; clientView='overview';
   dashActiveSection = {};
@@ -2950,7 +2984,8 @@ function renderTechnicalManagerModern(){
     else{ setHead("Team","Programmers &amp; Paper Writers",""); renderTMTeam(); if(!adminDirectory){ loadAdminDirectory().then(rerenderCurrent); } return; }
   }
   setHead(isTL ? "Technical TL Dashboard" : "Technical Manager Dashboard",
-    "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team","");
+    "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team",
+    `<button class="btn gold" onclick="openPingTeam()" title="Send a notification to a team member's screen">&#128227; Ping team</button>`);
   renderTMDashboard();
 }
 function admOpenProjectTab(id, tab){
@@ -10026,8 +10061,157 @@ async function saveSettingsForm(){
   closeModal(); toast("Email settings saved for the whole team");
 }
 
+/* ================= PING TEAM (Technical Manager -> employee notifications) =================
+   Manager side: "Ping team" button on the Technical Manager / TL dashboard opens a modal listing
+   the programmers & paper writers, shows who is online (has a live login), and sends a short
+   nudge to one person or to everyone online.
+   Employee side: while an employee is signed in, this tab keeps polling the server for new
+   pings in the background. A new ping pops a DESKTOP notification (works while the person is in
+   Word, another tab or another app, as long as the PM tool is still open and signed in in their
+   browser), an in-page banner, a short beep, and a flashing tab title. */
+let pingModalTimer = null, pingListenTimer = null, pingTitleTimer = null, pingLastOnline = null;
+let pingUnseen = [];
+const PING_POLL_MS = 10000;
+const pingBaseTitle = document.title;
+
+function pingRoleLabel(e){ return (EMP_ROLE_LABEL[e.role] || e.role || "") + (e.teamType ? " · " + e.teamType.replace(/_/g," ") : ""); }
+
+async function openPingTeam(){
+  openModal(`<h2 style="margin-bottom:4px">&#128227; Ping team</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">A ping pops up on the person's screen as a desktop notification &mdash; even if they are in Word or another app &mdash; as long as they are still signed in to the PM tool in their browser.</p>
+    <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:6px">Message</label>
+    <input id="pingMsg" maxlength="300" placeholder="Please check the PM tool." style="width:100%;margin-bottom:12px" value="Please check the PM tool.">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b style="font-size:13px">Team</b>
+      <button class="btn small" onclick="sendPing(null,true)">Ping everyone online</button>
+    </div>
+    <div id="pingTeamList" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;margin-bottom:14px"><div style="padding:14px;color:var(--muted);font-size:13px">Loading team&hellip;</div></div>
+    <b style="font-size:13px">Recent pings (last 24 h)</b>
+    <div id="pingHist" style="max-height:170px;overflow:auto;margin-top:6px"></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closePingTeam()">Close</button></div>`);
+  await refreshPingTeam();
+  clearInterval(pingModalTimer);
+  pingModalTimer = setInterval(()=>{ if($("pingTeamList")) refreshPingTeam(); else clearInterval(pingModalTimer); }, 5000);
+}
+function closePingTeam(){ clearInterval(pingModalTimer); pingModalTimer = null; closeModal(); }
+async function refreshPingTeam(){
+  let out;
+  try{ out = await api("ping_team_directory", {}); }catch(e){ const l=$("pingTeamList"); if(l) l.innerHTML = `<div style="padding:14px;color:var(--bad);font-size:13px">${esc(e.message)}</div>`; return; }
+  const list = $("pingTeamList"), hist = $("pingHist");
+  if(!list) return;
+  const emps = out.employees || [];
+  list.innerHTML = emps.length ? emps.map(e=>`
+    <div class="ping-row">
+      <span class="ping-dot ${e.online?'on':''}" title="${e.online?'Online now':'Not signed in'}"></span>
+      <div class="nm"><b>${esc(e.name)}</b> <span style="color:var(--muted);font-size:12px">${esc(e.empUid)}</span><small>${esc(pingRoleLabel(e))} &middot; ${e.online ? '<span style="color:#15803D;font-weight:700">Online</span>' : 'Not signed in'}</small></div>
+      <button class="btn small ${e.online?'':'ghost'}" onclick="sendPing(${jsq(String(e.id))},false)" title="${e.online?'':'They are not signed in — the ping will show the moment they log in'}">Ping</button>
+    </div>`).join("") : `<div style="padding:14px;color:var(--muted);font-size:13px">No active programmers or paper writers yet.</div>`;
+  const recent = out.recent || [];
+  if(hist) hist.innerHTML = recent.length ? recent.map(r=>`
+    <div class="ping-hist"><span style="flex:1;min-width:0"><b>${esc(r.empName)}</b> &larr; ${esc(r.from)}: ${esc(r.message)}<br><small>${esc(fmtDateTime(r.at))}</small></span>
+      <span class="ping-status ${r.seen?'s':(r.delivered?'d':'')}">${r.seen?'Seen':(r.delivered?'Delivered':'Waiting for login')}</span></div>`).join("")
+    : `<div style="padding:10px 4px;color:var(--muted);font-size:12.5px">No pings sent yet.</div>`;
+}
+async function sendPing(empIdTarget, allOnline){
+  const message = ($("pingMsg") ? $("pingMsg").value : "").trim();
+  try{
+    const out = await api("ping_employee", allOnline ? {allOnline:true, message} : {targetEmpId: Number(empIdTarget), message});
+    toast(allOnline ? `Ping sent to ${out.sent} team member${out.sent===1?'':'s'}` : "Ping sent");
+    refreshPingTeam();
+  }catch(e){ toast(e.message); }
+}
+
+/* ----- employee side ----- */
+function pingCanListen(){ return role === "employee" && !!empId; }
+function startPingListener(){
+  stopPingListener();
+  if(!pingCanListen()) return;
+  updatePingPermBar();
+  pollPings();
+  pingListenTimer = setInterval(pollPings, PING_POLL_MS);
+}
+function stopPingListener(){
+  clearInterval(pingListenTimer); pingListenTimer = null;
+  stopPingTitleFlash();
+  const bar = $("pingPermBar"); if(bar) bar.classList.remove("show");
+}
+function updatePingPermBar(){
+  const bar = $("pingPermBar"); if(!bar) return;
+  const show = pingCanListen() && ("Notification" in window) && Notification.permission === "default";
+  bar.classList.toggle("show", show);
+}
+async function requestPingPermission(){
+  if(!("Notification" in window)){ toast("This browser does not support desktop notifications."); return; }
+  try{ await Notification.requestPermission(); }catch(e){}
+  updatePingPermBar();
+  if(Notification.permission === "granted") toast("Desktop notifications are on.");
+  else if(Notification.permission === "denied") toast("Notifications are blocked for this site. Allow them in the browser's site settings (lock icon in the address bar).");
+}
+let pingPollBusy = false;
+async function pollPings(){
+  if(!pingCanListen() || pingPollBusy) return;
+  pingPollBusy = true;
+  try{
+    const out = await api("ping_poll", {});
+    (out.pings || []).forEach(showPing);
+  }catch(e){ /* quiet — the session-expired path is handled inside api() */ }
+  finally{ pingPollBusy = false; }
+}
+function showPing(p){
+  pingUnseen.push(p);
+  const title = `${p.from || "Your manager"} pinged you`;
+  $("pingAlertTitle").textContent = title;
+  $("pingAlertMsg").textContent = p.message || "";
+  $("pingAlertMeta").textContent = (pingUnseen.length > 1 ? `${pingUnseen.length} pings · ` : "") + "iMatiz PM Tool";
+  $("pingAlert").classList.add("show");
+  pingBeep();
+  startPingTitleFlash();
+  // Desktop notification: this is what reaches the person while they are in another
+  // app/tab. requireInteraction keeps it on screen until they click it.
+  if(("Notification" in window) && Notification.permission === "granted"){
+    try{
+      const n = new Notification(title, {body: p.message || "", tag: "matiz-ping-" + p.id, requireInteraction: true, renotify: true});
+      n.onclick = function(){ try{ window.focus(); }catch(e){} dismissPingAlert(); n.close(); };
+    }catch(e){}
+  }
+}
+function dismissPingAlert(){
+  $("pingAlert").classList.remove("show");
+  stopPingTitleFlash();
+  const ids = pingUnseen.map(p=>p.id); pingUnseen = [];
+  if(ids.length){ api("ping_ack", {ids}).catch(()=>{}); }
+}
+function startPingTitleFlash(){
+  if(pingTitleTimer) return;
+  let on = false;
+  pingTitleTimer = setInterval(()=>{ on = !on; document.title = on ? "\u{1F4E3} New ping!" : pingBaseTitle; }, 900);
+}
+function stopPingTitleFlash(){ clearInterval(pingTitleTimer); pingTitleTimer = null; document.title = pingBaseTitle; }
+function pingBeep(){
+  // Two short tones. Browsers only allow sound after the person has interacted with the page
+  // once (which logging in already counts as), so this is best-effort.
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext; if(!AC) return;
+    const ctx = pingBeep._ctx || (pingBeep._ctx = new AC());
+    if(ctx.state === "suspended") ctx.resume().catch(()=>{});
+    [0, 0.22].forEach(t=>{
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.18);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.2);
+    });
+  }catch(e){}
+}
+// Background tabs get their timers slowed down by the browser; the moment the tab is looked at
+// again, check straight away so nothing that arrived meanwhile is missed.
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") pollPings(); });
+window.addEventListener("focus", pollPings);
+
 /* ================= BOOT + LIVE SYNC ================= */
-(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); } else { loadCaptcha(); checkInviteLinkOnLoad(); } })();
+(async function(){ await loadLoginOptions(); if(await restoreSession()){ await refresh(); startPingListener(); } else { loadCaptcha(); checkInviteLinkOnLoad(); } })();
 
 /* Auto-refresh every 12s so all dashboards stay in sync across the pipeline
    (paused while a form/panel is open, or while the user is typing anywhere). */
