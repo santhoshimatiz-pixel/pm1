@@ -283,7 +283,9 @@ def _rate_limited(ip, bucket, limit, window_seconds):
 #   right or wrong — so every attempt needs a brand-new code and a wrong guess
 #   can never be retried against the same image.
 # * Expires after CAPTCHA_TTL_SECONDS (default 5 minutes).
-# * Alphabet leaves out look-alikes (0/O, 1/I/L); answers are case-insensitive.
+# * Mixes capital letters, small letters and digits. Capital vs small must
+#   match (A is not a), except C K P S U V W X Y Z whose small form looks the
+#   same. Look-alikes such as 0/O and 1/I/l are never used.
 # =====================================================================
 def _cap_arc(cx, cy, rx, ry, a0, a1):
     return ("arc", cx, cy, rx, ry, a0, a1)
@@ -325,8 +327,32 @@ _CAPTCHA_GLYPHS = {
     "7": [[(0, 0), (1, 0), (0.35, 1)]],
     "8": [[_cap_arc(0.5, 0.25, 0.38, 0.25, 0, 360)], [_cap_arc(0.5, 0.73, 0.46, 0.27, 0, 360)]],
     "9": [[_cap_arc(0.5, 0.31, 0.46, 0.31, 0, 360)], [_cap_arc(0.45, 0.4, 0.51, 0.6, -10, 120)]],
+    # small letters: x-height from y=0.38 to the baseline at y=1; b/d/f/h/t reach
+    # the top. Only letters whose small shape is clearly different from the
+    # capital are used, so capital vs small is always visible.
+    "a": [[_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)], [(0.85, 0.38), (0.85, 1)]],
+    "b": [[(0.15, 0), (0.15, 1)], [_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)]],
+    "d": [[(0.85, 0), (0.85, 1)], [_cap_arc(0.5, 0.69, 0.35, 0.31, 0, 360)]],
+    "e": [[(0.15, 0.69), (0.85, 0.69), _cap_arc(0.5, 0.69, 0.35, 0.31, 0, -315)]],
+    "f": [[(0.45, 1), (0.45, 0.2), _cap_arc(0.7, 0.2, 0.25, 0.2, 180, 320)], [(0.15, 0.42), (0.78, 0.42)]],
+    "h": [[(0.15, 0), (0.15, 1)], [_cap_arc(0.5, 0.66, 0.35, 0.28, 180, 360), (0.85, 1)]],
+    "m": [[(0.08, 0.38), (0.08, 1)], [_cap_arc(0.29, 0.62, 0.21, 0.24, 180, 360), (0.5, 1)],
+          [_cap_arc(0.71, 0.62, 0.21, 0.24, 180, 360), (0.92, 1)]],
+    "n": [[(0.15, 0.38), (0.15, 1)], [_cap_arc(0.5, 0.66, 0.35, 0.28, 180, 360), (0.85, 1)]],
+    "r": [[(0.2, 0.38), (0.2, 1)], [_cap_arc(0.58, 0.68, 0.38, 0.3, 180, 300)]],
+    "t": [[(0.42, 0.06), (0.42, 0.85), _cap_arc(0.67, 0.85, 0.25, 0.15, 180, 30)], [(0.12, 0.4), (0.8, 0.4)]],
 }
-CAPTCHA_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+# Capital letters, small letters and digits. Left out on purpose: look-alikes
+# (0/O/o, 1/I/l/i, 9/g/q, j) and small letters that look like a smaller or
+# twisted copy of their capital (c k o p s u v w x y z) — once the picture is
+# distorted, size alone is too hard to judge.
+CAPTCHA_UPPER = "ABCDEFGHJKMNPQRSTUVWXYZ"
+CAPTCHA_LOWER = "abdefhmnrt"
+CAPTCHA_DIGITS = "23456789"
+CAPTCHA_ALPHABET = CAPTCHA_UPPER + CAPTCHA_LOWER + CAPTCHA_DIGITS
+# Capitals whose small form looks the same (only ever drawn as capitals). For
+# these, typing either case is accepted; every other letter must match exactly.
+CAPTCHA_CASE_FREE = frozenset("CKPSUVWXYZ")
 
 
 def _cap_flatten(stroke):
@@ -505,13 +531,25 @@ def _captcha_answer_hash(captcha_id, answer):
 
 
 def _normalize_captcha_answer(value):
-    # Case-insensitive; spaces people type between characters are ignored.
-    return re.sub(r"\s+", "", str(value or "")).upper()[:32]
+    """Spaces are ignored. Capital/small letters are kept exactly as typed —
+    except the letters that look the same in both cases (CAPTCHA_CASE_FREE),
+    which only ever appear as capitals, so a small one typed there counts."""
+    text = re.sub(r"\s+", "", str(value or ""))[:32]
+    return "".join(ch.upper() if ch.upper() in CAPTCHA_CASE_FREE else ch for ch in text)
+
+
+def _new_captcha_code():
+    """Random code that always mixes at least one capital and one small letter.
+    Simply redrawn until it does (about 1.3 draws on average)."""
+    while True:
+        code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
+        if any(ch in CAPTCHA_LOWER for ch in code) and any(ch in CAPTCHA_UPPER for ch in code):
+            return code
 
 
 def new_login_captcha():
     """Create a fresh captcha and return what the login screen needs to show it."""
-    code = "".join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
+    code = _new_captcha_code()
     captcha_id = secrets.token_urlsafe(24)
     now = time.time()
     con = db()

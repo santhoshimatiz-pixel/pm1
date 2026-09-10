@@ -151,8 +151,10 @@ a{color:var(--purple)}
   color:#E0B25A;font-size:19px;font-weight:700;line-height:1;cursor:pointer;transition:background .12s,border-color .12s}
 .captcha-refresh:hover{background:rgba(255,255,255,.09);border-color:#22A6B3}
 .captcha-refresh:disabled{opacity:.5;cursor:wait}
-.login-form input.captcha-input{text-transform:uppercase;letter-spacing:4px;font-weight:600}
-.login-form input.captcha-input::placeholder{text-transform:none;letter-spacing:normal;font-weight:400}
+/* shows exactly what is typed - capital and small letters are different in the captcha */
+.login-form input.captcha-input{text-transform:none;letter-spacing:4px;font-weight:600}
+.login-form input.captcha-input::placeholder{letter-spacing:normal;font-weight:400}
+.captcha-hint{font-size:11.5px;color:var(--ink-muted);margin-top:6px;line-height:1.4}
 .login-note{text-align:center;color:var(--ink-muted);font-size:12px;margin-top:18px}
 
 /* ---------- login split (password left, roles right) ---------- */
@@ -772,7 +774,8 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
               <div class="captcha-img-wrap"><img id="captchaImg" alt="Captcha code picture" width="220" height="70" draggable="false"></div>
               <button type="button" class="captcha-refresh" id="captchaRefresh" title="Show a different code" aria-label="Show a different captcha code">&#8635;</button>
             </div>
-            <input id="captchaAnswer" class="captcha-input" placeholder="Type the code shown above" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="8">
+            <input id="captchaAnswer" class="captcha-input" placeholder="Type the code shown above" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="8">
+            <div class="captcha-hint">Capital and small letters must match (e.g. <b>A</b> and <b>a</b> are different).</div>
           </div>
           <button class="btn" id="loginBtn">Sign in</button>
           <div class="login-err" id="loginErr"></div>
