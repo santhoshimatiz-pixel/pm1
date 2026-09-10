@@ -746,11 +746,11 @@ ACTION_ROLES = {
     "set_employee_active": _R_STAFF_MGMT,
     "list_deleted_employees": _R_STAFF_MGMT,
 
-    # ---- "Ping team" nudges (Technical Manager / TL -> their programmers & paper writers) ----
-    "ping_team_directory": _R_TECH_MGMT,
-    "ping_employee": _R_TECH_MGMT,
-    "ping_poll": ("employee",),          # only individually-added employees receive pings
-    "ping_ack": ("employee",),
+    # ---- "Call" (Technical Manager / TL -> their programmers & paper writers) ----
+    "call_team_directory": _R_TECH_MGMT,
+    "call_employee": _R_TECH_MGMT,
+    "call_poll": ("employee",),          # only individually-added employees receive pings
+    "call_ack": ("employee",),
 
     # ---- admin only ----
     "admin_directory": _R_STAFF_MGMT,
@@ -1553,11 +1553,11 @@ def init_db():
         created_at DOUBLE PRECISION NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_login_captchas_created ON login_captchas (created_at);
-    -- FEATURE: "Ping team" — a Technical Manager/TL nudges an employee. The employee's
-    -- open PM-tool tab polls this table (even while it is in the background) and pops a
-    -- desktop notification. delivered_at = the tab picked it up; seen_at = the person
-    -- clicked/dismissed it.
-    CREATE TABLE IF NOT EXISTS emp_pings (
+    -- FEATURE: "Call" — a Technical Manager/TL calls an employee to the cabin or the
+    -- conference room. The employee's open PM-tool tab polls this table (even while it
+    -- is in the background) and pops a desktop notification. delivered_at = the tab
+    -- picked it up; seen_at = the person clicked/dismissed it.
+    CREATE TABLE IF NOT EXISTS emp_calls (
         id SERIAL PRIMARY KEY,
         emp_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
         from_key TEXT NOT NULL DEFAULT '',
@@ -1567,7 +1567,7 @@ def init_db():
         delivered_at TEXT DEFAULT '',
         seen_at TEXT DEFAULT ''
     );
-    CREATE INDEX IF NOT EXISTS idx_emp_pings_emp ON emp_pings (emp_id, delivered_at);
+    CREATE INDEX IF NOT EXISTS idx_emp_calls_emp ON emp_calls (emp_id, delivered_at);
     """)
     con.commit()
 
@@ -5201,14 +5201,14 @@ def handle_action(action, d, ip=""):
         # "PING TEAM" — Technical Manager / TL dashboard
         # ---------------------------------------------------------------
         # The manager picks an employee (or everyone who is online) and sends a
-        # short nudge. Every logged-in employee tab polls "ping_poll" every few
+        # short nudge. Every logged-in employee tab polls "call_poll" every few
         # seconds in the background, so the nudge shows up as a desktop
         # notification even while they are in Word, another tab or another app,
         # as long as the PM tool is still open and signed in in their browser.
         # =============================================================
-        if action in ("ping_team_directory", "ping_employee", "ping_poll", "ping_ack"):
+        if action in ("call_team_directory", "call_employee", "call_poll", "call_ack"):
             PING_ONLINE_MINUTES = 3          # sessions' last_seen is written at most once a minute
-            PING_MAX_MESSAGE = 300
+            CALL_MESSAGES = ("Come to cabin", "Come to conference room")
 
             def _ping_team_rows():
                 caller_role = (d.get("role") or "").strip()
@@ -5219,7 +5219,7 @@ def handle_action(action, d, ip=""):
                 else:
                     own_roles = STAFF_MGMT_TEAM_ROLES.get(caller_role, ())
                     if not own_roles:
-                        raise ApiError("You don't have permission to ping employees.", 403)
+                        raise ApiError("You don't have permission to call employees.", 403)
                     rows = con.execute(
                         "SELECT id, name, role, team_type, emp_uid FROM employees "
                         "WHERE active=1 AND deleted_at IS NULL AND role = ANY(?) "
@@ -5231,7 +5231,7 @@ def handle_action(action, d, ip=""):
                 return {r["emp_id"] for r in con.execute(
                     "SELECT DISTINCT emp_id FROM sessions WHERE kind='employee' AND last_seen >= ?", (cutoff,))}
 
-            if action == "ping_team_directory":
+            if action == "call_team_directory":
                 rows = _ping_team_rows()
                 online = _online_emp_ids()
                 ids = [r["id"] for r in rows]
@@ -5243,7 +5243,7 @@ def handle_action(action, d, ip=""):
                         "from": r["from_label"], "message": r["message"], "at": iso(r["created_at"]),
                         "delivered": bool(r["delivered_at"]), "seen": bool(r["seen_at"]),
                     } for r in con.execute(
-                        "SELECT p.*, e.name AS emp_name FROM emp_pings p JOIN employees e ON e.id=p.emp_id "
+                        "SELECT p.*, e.name AS emp_name FROM emp_calls p JOIN employees e ON e.id=p.emp_id "
                         "WHERE p.emp_id = ANY(?) AND p.created_at >= ? ORDER BY p.id DESC LIMIT 40",
                         (ids, since))]
                 return {"employees": [{
@@ -5251,14 +5251,12 @@ def handle_action(action, d, ip=""):
                     "empUid": r["emp_uid"] or "", "online": r["id"] in online} for r in rows],
                     "recent": recent}
 
-            if action == "ping_employee":
-                if _rate_limited(ip, "ping_employee", limit=60, window_seconds=300):
-                    raise ApiError("Too many pings in a short time. Please wait a few minutes.", 429)
-                message = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", str(d.get("message") or "")).strip()
-                if len(message) > PING_MAX_MESSAGE:
-                    raise ApiError("Keep the message under %d characters." % PING_MAX_MESSAGE)
-                if not message:
-                    message = "Please check the PM tool."
+            if action == "call_employee":
+                if _rate_limited(ip, "call_employee", limit=60, window_seconds=300):
+                    raise ApiError("Too many calls in a short time. Please wait a few minutes.", 429)
+                message = str(d.get("message") or "").strip()
+                if message not in CALL_MESSAGES:
+                    raise ApiError("Pick one of the call messages.")
                 allowed = {r["id"] for r in _ping_team_rows()}
                 targets = []
                 if d.get("allOnline"):
@@ -5275,23 +5273,23 @@ def handle_action(action, d, ip=""):
                     targets = [emp_id_target]
                 ident = session_identity(get_principal())
                 for t in targets:
-                    con.execute("INSERT INTO emp_pings (emp_id, from_key, from_label, message) VALUES (?,?,?,?)",
+                    con.execute("INSERT INTO emp_calls (emp_id, from_key, from_label, message) VALUES (?,?,?,?)",
                                 (t, ident["key"], ident["label"], message))
                 con.commit()
                 return {"ok": True, "sent": len(targets)}
 
             # ----- employee side -----
             my_emp_id = d.get("empId")
-            if action == "ping_poll":
+            if action == "call_poll":
                 rows = con.execute(
-                    "UPDATE emp_pings SET delivered_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
+                    "UPDATE emp_calls SET delivered_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
                     "WHERE emp_id=? AND delivered_at='' RETURNING id, from_label, message, created_at",
                     (my_emp_id,)).fetchall()
                 con.commit()
                 return {"pings": [{"id": r["id"], "from": r["from_label"], "message": r["message"],
                                    "at": iso(r["created_at"])} for r in rows]}
 
-            if action == "ping_ack":
+            if action == "call_ack":
                 ids = d.get("ids") or []
                 if not isinstance(ids, list):
                     ids = []
@@ -5303,7 +5301,7 @@ def handle_action(action, d, ip=""):
                         pass
                 if clean_ids:
                     con.execute(
-                        "UPDATE emp_pings SET seen_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
+                        "UPDATE emp_calls SET seen_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
                         "WHERE emp_id=? AND seen_at='' AND id = ANY(?)", (my_emp_id, clean_ids))
                     con.commit()
                 return {"ok": True}

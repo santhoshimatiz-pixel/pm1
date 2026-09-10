@@ -376,7 +376,7 @@ tbody tr:last-child td{border-bottom:none}
   box-shadow:var(--shadow-lg);opacity:0;transition:all .3s var(--ease);pointer-events:none;max-width:90vw;text-align:center;
 }
 #toast.show{transform:translate(-50%,0);opacity:1}
-/* ---------- "Ping team" (Technical Manager -> employee nudges) ---------- */
+/* ---------- "Call" (Technical Manager -> employee notifications) ---------- */
 .ping-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#C9D3CE;margin-right:7px;vertical-align:middle;box-shadow:0 0 0 2px #fff}
 .ping-dot.on{background:#16A34A;box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(22,163,74,.18)}
 .ping-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line)}
@@ -964,7 +964,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
     </aside>
 
     <main class="main">
-      <div id="pingPermBar"><span>&#128276; Turn on desktop notifications so your manager's pings reach you even while you're in Word, another tab or another app.</span><button class="btn small" type="button" onclick="requestPingPermission()">Turn on notifications</button></div>
+      <div id="pingPermBar"><span>&#128276; Turn on desktop notifications so your manager's calls reach you even while you're in Word, another tab or another app.</span><button class="btn small" type="button" onclick="requestPingPermission()">Turn on notifications</button></div>
 <div id="memWarn">Cannot reach the server. Open the terminal in VS Code and run:  python server.py  (see README.txt)</div>
       <div class="page-head">
         <div>
@@ -993,7 +993,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 
 <div id="toast"></div>
 <div id="pingAlert" role="alert" aria-live="assertive">
-  <div class="pa-ic">&#128227;</div>
+  <div class="pa-ic">&#128222;</div>
   <div class="pa-body"><b id="pingAlertTitle"></b><span id="pingAlertMsg"></span><small id="pingAlertMeta"></small></div>
   <button type="button" onclick="dismissPingAlert()">Got it</button>
 </div>
@@ -2985,7 +2985,7 @@ function renderTechnicalManagerModern(){
   }
   setHead(isTL ? "Technical TL Dashboard" : "Technical Manager Dashboard",
     "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team",
-    `<button class="btn gold" onclick="openPingTeam()" title="Send a notification to a team member's screen">&#128227; Ping team</button>`);
+    `<button class="btn gold" onclick="openPingTeam()" title="Call a team member to your cabin or the conference room">&#128222; Call</button>`);
   renderTMDashboard();
 }
 function admOpenProjectTab(id, tab){
@@ -10061,12 +10061,12 @@ async function saveSettingsForm(){
   closeModal(); toast("Email settings saved for the whole team");
 }
 
-/* ================= PING TEAM (Technical Manager -> employee notifications) =================
-   Manager side: "Ping team" button on the Technical Manager / TL dashboard opens a modal listing
-   the programmers & paper writers, shows who is online (has a live login), and sends a short
-   nudge to one person or to everyone online.
+/* ================= CALL (Technical Manager -> employee notifications) =================
+   Manager side: "Call" button on the Technical Manager / TL dashboard opens a modal listing
+   the programmers & paper writers, shows who is online (has a live login), and sends one of two
+   fixed messages ("Come to cabin" / "Come to conference room") to one person or everyone online.
    Employee side: while an employee is signed in, this tab keeps polling the server for new
-   pings in the background. A new ping pops a DESKTOP notification (works while the person is in
+   calls in the background. A new call pops a DESKTOP notification (works while the person is in
    Word, another tab or another app, as long as the PM tool is still open and signed in in their
    browser), an in-page banner, a short beep, and a flashing tab title. */
 let pingModalTimer = null, pingListenTimer = null, pingTitleTimer = null, pingLastOnline = null;
@@ -10076,17 +10076,23 @@ const pingBaseTitle = document.title;
 
 function pingRoleLabel(e){ return (EMP_ROLE_LABEL[e.role] || e.role || "") + (e.teamType ? " · " + e.teamType.replace(/_/g," ") : ""); }
 
+const CALL_MESSAGES = ["Come to cabin", "Come to conference room"];
+let callMsgChoice = CALL_MESSAGES[0];
+function setCallMsg(m){ callMsgChoice = m; document.querySelectorAll("#callMsgPick button").forEach(b=>{ const on = b.dataset.m===m; b.classList.toggle("ghost", !on); }); }
 async function openPingTeam(){
-  openModal(`<h2 style="margin-bottom:4px">&#128227; Ping team</h2>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">A ping pops up on the person's screen as a desktop notification &mdash; even if they are in Word or another app &mdash; as long as they are still signed in to the PM tool in their browser.</p>
+  callMsgChoice = CALL_MESSAGES[0];
+  openModal(`<h2 style="margin-bottom:4px">&#128222; Call</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">The message pops up on the person's screen as a desktop notification &mdash; even if they are in Word or another app &mdash; as long as they are still signed in to the PM tool in their browser.</p>
     <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:6px">Message</label>
-    <input id="pingMsg" maxlength="300" placeholder="Please check the PM tool." style="width:100%;margin-bottom:12px" value="Please check the PM tool.">
+    <div id="callMsgPick" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${CALL_MESSAGES.map((m,i)=>`<button class="btn small ${i?'ghost':''}" data-m="${esc(m)}" onclick="setCallMsg(${jsq(m)})">${esc(m)}</button>`).join("")}
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <b style="font-size:13px">Team</b>
-      <button class="btn small" onclick="sendPing(null,true)">Ping everyone online</button>
+      <button class="btn small" onclick="sendPing(null,true)">Call everyone online</button>
     </div>
     <div id="pingTeamList" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;margin-bottom:14px"><div style="padding:14px;color:var(--muted);font-size:13px">Loading team&hellip;</div></div>
-    <b style="font-size:13px">Recent pings (last 24 h)</b>
+    <b style="font-size:13px">Recent calls (last 24 h)</b>
     <div id="pingHist" style="max-height:170px;overflow:auto;margin-top:6px"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closePingTeam()">Close</button></div>`);
   await refreshPingTeam();
@@ -10096,7 +10102,7 @@ async function openPingTeam(){
 function closePingTeam(){ clearInterval(pingModalTimer); pingModalTimer = null; closeModal(); }
 async function refreshPingTeam(){
   let out;
-  try{ out = await api("ping_team_directory", {}); }catch(e){ const l=$("pingTeamList"); if(l) l.innerHTML = `<div style="padding:14px;color:var(--bad);font-size:13px">${esc(e.message)}</div>`; return; }
+  try{ out = await api("call_team_directory", {}); }catch(e){ const l=$("pingTeamList"); if(l) l.innerHTML = `<div style="padding:14px;color:var(--bad);font-size:13px">${esc(e.message)}</div>`; return; }
   const list = $("pingTeamList"), hist = $("pingHist");
   if(!list) return;
   const emps = out.employees || [];
@@ -10104,19 +10110,19 @@ async function refreshPingTeam(){
     <div class="ping-row">
       <span class="ping-dot ${e.online?'on':''}" title="${e.online?'Online now':'Not signed in'}"></span>
       <div class="nm"><b>${esc(e.name)}</b> <span style="color:var(--muted);font-size:12px">${esc(e.empUid)}</span><small>${esc(pingRoleLabel(e))} &middot; ${e.online ? '<span style="color:#15803D;font-weight:700">Online</span>' : 'Not signed in'}</small></div>
-      <button class="btn small ${e.online?'':'ghost'}" onclick="sendPing(${jsq(String(e.id))},false)" title="${e.online?'':'They are not signed in — the ping will show the moment they log in'}">Ping</button>
+      <button class="btn small ${e.online?'':'ghost'}" onclick="sendPing(${jsq(String(e.id))},false)" title="${e.online?'':'They are not signed in — the call will show the moment they log in'}">Call</button>
     </div>`).join("") : `<div style="padding:14px;color:var(--muted);font-size:13px">No active programmers or paper writers yet.</div>`;
   const recent = out.recent || [];
   if(hist) hist.innerHTML = recent.length ? recent.map(r=>`
     <div class="ping-hist"><span style="flex:1;min-width:0"><b>${esc(r.empName)}</b> &larr; ${esc(r.from)}: ${esc(r.message)}<br><small>${esc(fmtDateTime(r.at))}</small></span>
       <span class="ping-status ${r.seen?'s':(r.delivered?'d':'')}">${r.seen?'Seen':(r.delivered?'Delivered':'Waiting for login')}</span></div>`).join("")
-    : `<div style="padding:10px 4px;color:var(--muted);font-size:12.5px">No pings sent yet.</div>`;
+    : `<div style="padding:10px 4px;color:var(--muted);font-size:12.5px">No calls yet.</div>`;
 }
 async function sendPing(empIdTarget, allOnline){
-  const message = ($("pingMsg") ? $("pingMsg").value : "").trim();
+  const message = callMsgChoice;
   try{
-    const out = await api("ping_employee", allOnline ? {allOnline:true, message} : {targetEmpId: Number(empIdTarget), message});
-    toast(allOnline ? `Ping sent to ${out.sent} team member${out.sent===1?'':'s'}` : "Ping sent");
+    const out = await api("call_employee", allOnline ? {allOnline:true, message} : {targetEmpId: Number(empIdTarget), message});
+    toast(allOnline ? `"${message}" sent to ${out.sent} team member${out.sent===1?'':'s'}` : `"${message}" sent`);
     refreshPingTeam();
   }catch(e){ toast(e.message); }
 }
@@ -10152,17 +10158,17 @@ async function pollPings(){
   if(!pingCanListen() || pingPollBusy) return;
   pingPollBusy = true;
   try{
-    const out = await api("ping_poll", {});
+    const out = await api("call_poll", {});
     (out.pings || []).forEach(showPing);
   }catch(e){ /* quiet — the session-expired path is handled inside api() */ }
   finally{ pingPollBusy = false; }
 }
 function showPing(p){
   pingUnseen.push(p);
-  const title = `${p.from || "Your manager"} pinged you`;
+  const title = p.from || "Your manager";
   $("pingAlertTitle").textContent = title;
   $("pingAlertMsg").textContent = p.message || "";
-  $("pingAlertMeta").textContent = (pingUnseen.length > 1 ? `${pingUnseen.length} pings · ` : "") + "iMatiz PM Tool";
+  $("pingAlertMeta").textContent = (pingUnseen.length > 1 ? `${pingUnseen.length} calls · ` : "") + "iMatiz PM Tool";
   $("pingAlert").classList.add("show");
   pingBeep();
   startPingTitleFlash();
@@ -10170,7 +10176,8 @@ function showPing(p){
   // app/tab. requireInteraction keeps it on screen until they click it.
   if(("Notification" in window) && Notification.permission === "granted"){
     try{
-      const n = new Notification(title, {body: p.message || "", tag: "matiz-ping-" + p.id, requireInteraction: true, renotify: true});
+      const icon = (document.querySelector('link[rel="icon"]') || {}).href || undefined;
+      const n = new Notification(title, {body: p.message || "", icon, tag: "matiz-call-" + p.id, requireInteraction: true, renotify: true});
       n.onclick = function(){ try{ window.focus(); }catch(e){} dismissPingAlert(); n.close(); };
     }catch(e){}
   }
@@ -10179,12 +10186,12 @@ function dismissPingAlert(){
   $("pingAlert").classList.remove("show");
   stopPingTitleFlash();
   const ids = pingUnseen.map(p=>p.id); pingUnseen = [];
-  if(ids.length){ api("ping_ack", {ids}).catch(()=>{}); }
+  if(ids.length){ api("call_ack", {ids}).catch(()=>{}); }
 }
 function startPingTitleFlash(){
   if(pingTitleTimer) return;
   let on = false;
-  pingTitleTimer = setInterval(()=>{ on = !on; document.title = on ? "\u{1F4E3} New ping!" : pingBaseTitle; }, 900);
+  pingTitleTimer = setInterval(()=>{ on = !on; document.title = on ? "\u{1F4DE} " + (pingUnseen[pingUnseen.length-1] ? pingUnseen[pingUnseen.length-1].message : "New call") : pingBaseTitle; }, 900);
 }
 function stopPingTitleFlash(){ clearInterval(pingTitleTimer); pingTitleTimer = null; document.title = pingBaseTitle; }
 function pingBeep(){

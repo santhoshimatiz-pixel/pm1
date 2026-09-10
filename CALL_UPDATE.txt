@@ -1,0 +1,49 @@
+CALL UPDATE
+===========
+
+WHAT CHANGED
+------------
+The Technical Manager / Technical TL dashboard has a "Call" button (top-right,
+next to the page title). It opens a panel that:
+- lets you pick ONE of two messages: "Come to cabin" or "Come to conference room"
+  (no free text)
+- lists the programmers and paper writers, with a green dot for anyone who is
+  signed in right now
+- has a "Call" button per person and a "Call everyone online" button
+- shows the last 24 hours of calls with a status:
+  Waiting for login -> Delivered -> Seen
+
+EMPLOYEE SIDE
+-------------
+While an employee is signed in, their PM-tool tab checks for calls every
+10 seconds in the background. A new call shows as:
+- a DESKTOP notification from the browser, like a Gmail notification:
+  title = who is calling (e.g. "Technical Manager"), text = the message,
+  with the iMatiz icon. Visible while they are in Word, another tab or another
+  app; stays on screen until clicked.
+- a banner at the top of the PM tool with a "Got it" button
+- a short beep and a flashing tab title
+If the person is not signed in, the call is queued and appears when they log in.
+
+Desktop notifications need the person's permission once: employees see a
+"Turn on notifications" bar on their dashboard. Without it they still get the
+in-page banner, beep and flashing title.
+The PM tool must stay open in a browser tab (minimised is fine). In a
+background tab the browser slows timers, so a call can take up to ~1 minute.
+
+SECURITY
+--------
+Only Technical Manager, Technical TL and admins can call, and only their own
+department's employees (server enforced). The server accepts only the two
+fixed messages. Employees can only receive/acknowledge their own calls.
+Sending is rate-limited to 60 per 5 minutes. New actions
+(call_team_directory, call_employee, call_poll, call_ack) are in the
+authorization matrix and use the normal session + CSRF checks.
+
+DATABASE
+--------
+New table emp_calls, created automatically on start-up. No manual migration.
+
+FILES CHANGED
+-------------
+server.py, index.html (and this note). No new packages.
