@@ -2894,7 +2894,7 @@ function renderTechnicalTL(){
   html += sectionHead("Proposal being written", proposalWaiting.length);
   if(!proposalWaiting.length) html += emptyBox("No proposal is currently being written.");
   proposalWaiting.forEach(c=> html += pipeCard(c, "",
-    `<div class="pc-meta">Writer: ${esc(c.proposalWriter)}</div>` + deadlineLineTL("Proposal deadline", c.proposalDeadline)));
+    `<div class="pc-meta">Writer: ${esc(c.proposalWriter)}</div>` + (c.proposalStartDate?`<div class="pc-meta">Started: ${fmtDate(c.proposalStartDate)}</div>`:"") + deadlineLineTL("Proposal deadline", c.proposalDeadline)));
 
   html += sectionHead("Proposal submitted — verify", toVerify.length);
   if(!toVerify.length) html += emptyBox("No proposal is waiting on verification right now.");
@@ -2929,7 +2929,7 @@ function renderTechnicalTL(){
   html += sectionHead("Implementation in progress", inImpl.length);
   inImpl.forEach(c=> html += pipeCard(c, "",
     `<div class="pc-meta">Programmer(s): ${esc((c.assignedProgrammers||[]).join(", "))}</div>` +
-    deadlineLineTL("Implementation deadline", c.implementationDeadline)));
+    (c.implementationStartDate?`<div class="pc-meta">Started: ${fmtDate(c.implementationStartDate)}</div>`:"") + deadlineLineTL("Implementation deadline", c.implementationDeadline)));
 
   const demoPendingTL = clients.filter(c=>c.stage==='IMPLEMENTATION_ASSIGNED' && c.demoGivenDate && !c.demoApprovedAt);
   html += sectionHead("Demo given — needs your approval", demoPendingTL.length);
@@ -3343,25 +3343,27 @@ function tmDeliveryHtml(){
     </div>
   </div>${awaitingHtml}`;
 }
-async function tmCreateCompanionTask(clientId, taskType, taskLabel, assignedTo, deadline){
+async function tmCreateCompanionTask(clientId, taskType, taskLabel, assignedTo, deadline, startDate){
   // Best-effort tracking record so the assignment shows up in "My assigned tasks",
   // the Work Approval flow, and the Total Proposal/Implementation/Paper Writing stat boxes.
   // The REAL pipeline stage change already happened via the assign_* API call before this runs.
   try{
     await api("add_task", {title: taskLabel, clientId, priority:"MEDIUM", taskType,
-      startDate: todayISO(), finishDate: deadline, assignedTo, actorName: taskActorName()});
+      startDate: startDate || todayISO(), finishDate: deadline, assignedTo, actorName: taskActorName()});
   }catch(e){ /* non-fatal */ }
 }
 async function tmAssignProposalNow(id){
-  const nameEl = $("aw-pw-"+id), dlEl = $("aw-pwdl-"+id);
+  const nameEl = $("aw-pw-"+id), dlEl = $("aw-pwdl-"+id), sdEl = $("aw-pwsd-"+id);
   const name = nameEl ? nameEl.value : "", deadline = dlEl ? dlEl.value : "";
+  const startDate = sdEl ? sdEl.value : "";
   if(!name || !deadline){ toast("Pick a writer and a proposal deadline"); return; }
+  if(startDate && deadline && startDate > deadline){ toast("Start date can't be after the deadline"); return; }
   const pre = gatherPreAssign(id, 'aw');
-  try{ await api("assign_proposal_writer",{clientId:id, name, deadline, actorLabel: taskActorName(),
+  try{ await api("assign_proposal_writer",{clientId:id, name, deadline, startDate, actorLabel: taskActorName(),
        preImplProgrammers: pre.preImplProgrammers, preImplDeadline: pre.preImplDeadline,
        preWriteWriters: pre.preWriteWriters, preWriteDeadline: pre.preWriteDeadline}); }
   catch(e){ toast(e.message); await refresh(); return; }
-  await tmCreateCompanionTask(id, "PROPOSAL", "Proposal writing", name, deadline);
+  await tmCreateCompanionTask(id, "PROPOSAL", "Proposal writing", name, deadline, startDate);
   await refresh(); rerenderCurrent();
   const extra = [];
   if(pre.preImplProgrammers.length) extra.push("implementation pre-assigned");
@@ -3370,23 +3372,27 @@ async function tmAssignProposalNow(id){
 }
 async function tmAssignImplementationNow(id){
   const picked = [...document.querySelectorAll(`input[data-aw-prog='${id}']:checked`)].map(x=>x.value);
-  const dlEl = $("aw-dl-"+id);
+  const dlEl = $("aw-dl-"+id), sdEl = $("aw-sd-"+id);
   const dl = dlEl ? dlEl.value : "";
+  const startDate = sdEl ? sdEl.value : "";
   if(!picked.length || !dl){ toast("Pick at least one programmer and a deadline"); return; }
-  try{ await api("assign_programmers",{clientId:id, programmers:picked, deadline:dl, actorLabel: taskActorName()}); }
+  if(startDate && dl && startDate > dl){ toast("Start date can't be after the deadline"); return; }
+  try{ await api("assign_programmers",{clientId:id, programmers:picked, deadline:dl, startDate, actorLabel: taskActorName()}); }
   catch(e){ toast(e.message); await refresh(); return; }
-  await tmCreateCompanionTask(id, "IMPLEMENTATION", "Code implementation", picked.join(", "), dl);
+  await tmCreateCompanionTask(id, "IMPLEMENTATION", "Code implementation", picked.join(", "), dl, startDate);
   await refresh(); rerenderCurrent();
   toast("Implementation assigned to " + picked.join(", "));
 }
 async function tmAssignWritersNow(id){
   const picked = [...document.querySelectorAll(`input[data-aw-writer='${id}']:checked`)].map(x=>x.value);
-  const dlEl = $("aw-wdl-"+id);
+  const dlEl = $("aw-wdl-"+id), sdEl = $("aw-wsd-"+id);
   const dl = dlEl ? dlEl.value : "";
+  const startDate = sdEl ? sdEl.value : "";
   if(!picked.length || !dl){ toast("Pick at least one paper writer and a writing deadline"); return; }
-  try{ await api("assign_writers",{clientId:id, writers:picked, deadline:dl, actorLabel: taskActorName()}); }
+  if(startDate && dl && startDate > dl){ toast("Start date can't be after the deadline"); return; }
+  try{ await api("assign_writers",{clientId:id, writers:picked, deadline:dl, startDate, actorLabel: taskActorName()}); }
   catch(e){ toast(e.message); await refresh(); return; }
-  await tmCreateCompanionTask(id, "PAPER_WRITING", "Paper writing", picked.join(", "), dl);
+  await tmCreateCompanionTask(id, "PAPER_WRITING", "Paper writing", picked.join(", "), dl, startDate);
   await refresh(); rerenderCurrent();
   toast("Paper writing assigned to " + picked.join(", "));
 }
@@ -3406,20 +3412,23 @@ function tmAssignWorkHtml(){
     if(type==="PROPOSAL"){
       const opts = writerNames().map(n=>`<option value="${esc(n)}">${esc(writerLabel(n))}</option>`).join("") || `<option value="">No writers yet</option>`;
       body = `<div onclick="event.stopPropagation()"><select id="aw-pw-${c.id}">${opts}</select>
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-pwdl-${c.id}" placeholder="Proposal deadline">
+        <input type="date" class="mini-date" id="aw-pwsd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
+        <input type="date" class="mini-date" min="${todayISO()}" id="aw-pwdl-${c.id}" placeholder="Proposal deadline" title="Proposal deadline">
         <button class="btn small" style="margin-top:8px" onclick="tmAssignProposalNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>
         ${preAssignExtraHtml(c.id,'aw')}</div>`;
     } else if(type==="IMPLEMENTATION"){
       const boxes = programmerNames().map(n=>`<label class="check"><input type="checkbox" data-aw-prog="${c.id}" value="${esc(n)}"> ${esc(programmerLabel(n))}</label>`).join("")
         || '<span style="color:var(--muted);font-size:13px">No programmers yet — add one in the Team tab.</span>';
       body = `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div>
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-dl-${c.id}" placeholder="Implementation deadline">
+        <input type="date" class="mini-date" id="aw-sd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
+        <input type="date" class="mini-date" min="${todayISO()}" id="aw-dl-${c.id}" placeholder="Implementation deadline" title="Implementation deadline">
         <button class="btn small" style="margin-top:8px" onclick="tmAssignImplementationNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button></div>`;
     } else {
       const boxes = writerNames().map(n=>`<label class="check"><input type="checkbox" data-aw-writer="${c.id}" value="${esc(n)}"> ${esc(writerLabel(n))}</label>`).join("")
         || '<span style="color:var(--muted);font-size:13px">No paper writers yet — add one in the Team tab.</span>';
       body = `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div>
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-wdl-${c.id}" placeholder="Writing deadline">
+        <input type="date" class="mini-date" id="aw-wsd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
+        <input type="date" class="mini-date" min="${todayISO()}" id="aw-wdl-${c.id}" placeholder="Writing deadline" title="Writing deadline">
         <button class="btn gold small" style="margin-top:8px" onclick="tmAssignWritersNow(${jsq(c.id)})">Assign to Paper Writing &#8594;</button></div>`;
     }
     return `<div class="adm-bar-row" style="display:block;cursor:default">
@@ -4309,6 +4318,7 @@ function renderProgrammer(){
     const myUpdates = (c.workUpdates||[]).filter(w=>w.empName===empName).map(w=>Object.assign({client:c}, w));
     const demoWaiting = c.demoGivenDate && !c.demoApprovedAt;
     const extra = `<div onclick="event.stopPropagation()">
+      ${c.implementationStartDate?`<div class="pc-meta">Implementation started: <b>${fmtDate(c.implementationStartDate)}</b></div>`:""}
       ${c.implementationDeadline?`<div class="pc-meta">Implementation deadline: <b style="color:var(--gold)">${fmtDate(c.implementationDeadline)}</b></div>`:""}
       ${c.onHold?`<div class="pc-meta" style="color:var(--bad)">On hold &mdash; waiting for a new deadline from Technical TL/Manager.</div>`:""}
       ${c.demoGivenDate?`<div class="pc-meta">Demo given: <b style="color:var(--gold)">${fmtDate(c.demoGivenDate)}</b> &bull; ${c.demoSatisfied==='satisfied'?'Client satisfied':'Client not satisfied'}
@@ -4481,6 +4491,7 @@ function renderWriter(){
   proposalMine.forEach(c=> html += pipeCard(c, c.onHold ? "" : `<button class="btn gold small" onclick="submitProposal(${jsq(c.id)})">Submit proposal &#8594;</button>
     <button class="btn ghost small" onclick="openHoldModal(${jsq(c.id)})">Hold this work</button>
     <button class="btn ghost small" onclick="openExtensionModal(${jsq(c.id)},'PROPOSAL_ASSIGNED')">Request deadline extension</button>`,
+    (c.proposalStartDate?`<div class="pc-meta">Proposal started: <b>${fmtDate(c.proposalStartDate)}</b></div>`:"") +
     (c.proposalDeadline?`<div class="pc-meta">Proposal deadline: <b style="color:var(--gold)">${fmtDate(c.proposalDeadline)}</b></div>`:"") +
     (c.onHold?`<div class="pc-meta" style="color:var(--bad)">On hold &mdash; waiting for a new deadline from Technical TL/Manager.</div>`:"") +
     (c.extRequested?`<div class="pc-meta" style="color:var(--gold)">Extension requested (${esc(c.extAmount)}) &mdash; waiting on your Manager/TL.</div>`:"")));
@@ -4507,6 +4518,7 @@ function renderWriter(){
   mine.forEach(c=>{
     const myUpdates = (c.workUpdates||[]).filter(w=>w.empName===empName).map(w=>Object.assign({client:c}, w));
     const extra = `<div onclick="event.stopPropagation()" style="margin-top:8px">
+      ${c.writingStartDate?`<div class="pc-meta">Writing started: <b>${fmtDate(c.writingStartDate)}</b></div>`:""}
       ${c.writingDeadline?`<div class="pc-meta">Writing deadline: <b style="color:var(--gold)">${fmtDate(c.writingDeadline)}</b></div>`:""}
       ${c.onHold?`<div class="pc-meta" style="color:var(--bad)">On hold &mdash; waiting for a new deadline from Technical TL/Manager.</div>`:""}
       ${c.demoScheduledType==="paper"?demoScheduleChipHtml(c):""}
@@ -6769,6 +6781,15 @@ function taskStatusCls(status){
   if(status==='SUBMITTED' || status==='IN_PROGRESS') return 'warn';
   return 'bad';
 }
+function taskStageSummaryBadge(t){
+  const stages = t.stages || [];
+  if(!stages.length) return "";
+  const done = stages.filter(s=>s.status==='COMPLETED').length;
+  const overdue = stages.filter(s=>stageStatusMeta(s).overdue).length;
+  const cls = overdue ? 'b-bad' : (done===stages.length ? 'b-paid' : 'b-dim');
+  const label = overdue ? `${overdue} stage${overdue===1?'':'s'} overdue` : `${done}/${stages.length} stages`;
+  return `<br><span class="badge ${cls}" style="margin-top:4px">${label}</span>`;
+}
 function renderMktTasks(){
   let html = `<div class="adm-tabbar">
     <button class="adm-tab ${mktTasksTab==='overview'?'active':''}" onclick="mktTasksTab='overview';refresh()">Overview</button>
@@ -6785,7 +6806,7 @@ function mktTasksTableHtml(){
     const cls = taskStatusCls(t.status);
     return `<tr onclick="admOpenTaskDetail(${t.id})">
       <td><b>${c?esc(c.name):"—"}</b>${c?`<br><small style="color:#8DA39A">${esc(c.projectId||c.displayId||c.id)}</small>`:""}</td>
-      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}</td>
+      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}${taskStageSummaryBadge(t)}</td>
       <td>${admMembersFromNames(t.assigned_to)}</td>
       <td>${t.start_date?fmtDate(t.start_date):"—"}</td>
       <td>${t.finish_date?fmtDate(t.finish_date):"—"}</td>
@@ -6858,7 +6879,7 @@ function tmTasksTableHtml(){
     const statusLabel = (overdue && t.status!=="COMPLETED") ? "Overdue" : (TASK_STATUS_LABEL[t.status]||t.status);
     return `<tr onclick="admOpenTaskDetail(${t.id})">
       <td><b>${c?esc(c.name):"—"}</b>${c?`<br><small style="color:#8DA39A">${esc(c.projectId||c.displayId||c.id)}</small>`:""}</td>
-      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}</td>
+      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}${taskStageSummaryBadge(t)}</td>
       <td>${admMembersFromNames(t.assigned_to)}</td>
       <td>${t.start_date?fmtDate(t.start_date):"—"}</td>
       <td>${t.finish_date?fmtDate(t.finish_date):"—"}</td>
@@ -6926,7 +6947,7 @@ function jmTasksTableHtml(){
     const cls = taskStatusCls(t.status);
     return `<tr onclick="admOpenTaskDetail(${t.id})">
       <td><b>${c?esc(c.name):"—"}</b>${c?`<br><small style="color:#8DA39A">${esc(c.projectId||c.displayId||c.id)}</small>`:""}</td>
-      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}</td>
+      <td>${esc(t.title)}${t.task_type?`<br><span class="badge b-purp" style="margin-top:4px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}${taskStageSummaryBadge(t)}</td>
       <td>${admMembersFromNames(t.assigned_to)}</td>
       <td>${t.start_date?fmtDate(t.start_date):"—"}</td>
       <td>${t.finish_date?fmtDate(t.finish_date):"—"}</td>
@@ -7169,10 +7190,20 @@ function renderMktTaskDetail(){
     return;
   }
   const c = admTaskClient(t);
-  const tabs = [["dashboard","Dashboard"],["files","Files"],["discussion","Discussion"],["notes","Notes"],["activity","Activity"]];
-  const tabsHtml = tabs.map(([k,l])=>`<button class="adm-tab ${admTaskTab===k?'active':''}" onclick="admSetTaskTab(${jsq(k)})">${l}</button>`).join("");
+  const tabs = [["dashboard","Dashboard"],["stages","Stages"],["files","Files"],["discussion","Discussion"],["notes","Notes"],["activity","Activity"]];
+  const tabsHtml = tabs.map(([k,l])=>{
+    let extra = "";
+    if(k==="stages"){
+      const stages = t.stages || [];
+      const overdueN = stages.filter(s=>stageStatusMeta(s).overdue).length;
+      if(overdueN) extra = ` <span class="badge b-bad" style="margin-left:4px;padding:0 6px">${overdueN}</span>`;
+      else if(stages.length) extra = ` <span class="badge b-dim" style="margin-left:4px;padding:0 6px">${stages.filter(s=>s.status==='COMPLETED').length}/${stages.length}</span>`;
+    }
+    return `<button class="adm-tab ${admTaskTab===k?'active':''}" onclick="admSetTaskTab(${jsq(k)})">${l}${extra}</button>`;
+  }).join("");
   let body = "";
   if(admTaskTab==="dashboard") body = admTaskDashboardTab(t);
+  else if(admTaskTab==="stages") body = admTaskStagesTab(t);
   else if(admTaskTab==="files") body = `<div class="adm-panel"><div class="adm-panel-body"><div class="adm-empty">There's no dedicated file storage in this build yet — share links or files as a comment note instead.</div></div></div>`;
   else if(admTaskTab==="discussion") body = admTaskCommentsHtml(t);
   else if(admTaskTab==="notes") body = admTaskNotesTab(t);
@@ -7208,6 +7239,109 @@ function admTaskDashboardTab(t){
       </div>
     </div></div>
     ${admTaskCommentsHtml(t)}`;
+}
+// ---------------------------------------------------------------------------
+// Multiple Workflow Stages — a task can be broken into an ordered list of
+// stages, each with its own status, an optional completion-criteria note, and
+// its own individual due date. Overdue stages (past due, not yet complete)
+// and upcoming stages (due within 3 days, not yet complete) are highlighted
+// so nothing slips through unnoticed.
+// ---------------------------------------------------------------------------
+function stageStatusMeta(s){
+  const today = todayISO();
+  const dueDate = (s.dueDate||"").slice(0,10);
+  const overdue = s.status!=='COMPLETED' && s.status!=='BLOCKED' && dueDate && dueDate < today;
+  const upcoming = !overdue && s.status!=='COMPLETED' && dueDate &&
+    (new Date(dueDate+"T00:00:00") - new Date(today+"T00:00:00")) <= 3*86400000 &&
+    (new Date(dueDate+"T00:00:00") - new Date(today+"T00:00:00")) >= 0;
+  return {overdue, upcoming};
+}
+function stageStatusBadge(s){
+  const {overdue, upcoming} = stageStatusMeta(s);
+  if(s.status==='COMPLETED') return `<span class="badge b-paid">Completed</span>`;
+  if(s.status==='BLOCKED') return `<span class="badge b-bad">Blocked</span>`;
+  if(overdue) return `<span class="badge b-bad">Overdue</span>`;
+  if(upcoming) return `<span class="badge b-wait">Due soon</span>`;
+  if(s.status==='IN_PROGRESS') return `<span class="badge b-purp">In progress</span>`;
+  return `<span class="badge b-dim">Pending</span>`;
+}
+function admTaskStagesTab(t){
+  const stages = (t.stages || []).slice().sort((a,b)=>a.sortOrder-b.sortOrder);
+  const doneCount = stages.filter(s=>s.status==='COMPLETED').length;
+  const overdueCount = stages.filter(s=>stageStatusMeta(s).overdue).length;
+  const upcomingCount = stages.filter(s=>stageStatusMeta(s).upcoming).length;
+  const summary = stages.length
+    ? `<p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">${doneCount} of ${stages.length} stage${stages.length===1?'':'s'} completed`
+      + (overdueCount ? ` &bull; <b style="color:var(--bad)">${overdueCount} overdue</b>` : "")
+      + (upcomingCount ? ` &bull; <b style="color:var(--warn)">${upcomingCount} due soon</b>` : "") + `.</p>`
+    : `<p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Break this task down into stages (e.g. Draft &rarr; Internal review &rarr; Delivery), each with its own due date and completion criteria.</p>`;
+  const rows = stages.map((s,idx)=>{
+    const {overdue} = stageStatusMeta(s);
+    return `<div class="adm-bar-row" style="display:block;${overdue?'border-left:3px solid var(--bad)':''}">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+        <div class="lbl"><b>${idx+1}. ${esc(s.name)}</b> ${stageStatusBadge(s)}</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn ghost small" title="Move up" ${idx===0?'disabled':''} onclick="admReorderStage(${s.id},'up')">&uarr;</button>
+          <button class="btn ghost small" title="Move down" ${idx===stages.length-1?'disabled':''} onclick="admReorderStage(${s.id},'down')">&darr;</button>
+          <button class="btn ghost small" onclick="admDeleteTaskStage(${s.id})">Remove</button>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <div class="field"><label>Due date</label><input type="date" value="${esc((s.dueDate||'').slice(0,10))}" onchange="admUpdateTaskStageField(${s.id},'dueDate',this.value)"></div>
+        <div class="field"><label>Status</label>
+          <select onchange="admUpdateTaskStageField(${s.id},'status',this.value)">
+            <option value="PENDING" ${s.status==='PENDING'?'selected':''}>Pending</option>
+            <option value="IN_PROGRESS" ${s.status==='IN_PROGRESS'?'selected':''}>In progress</option>
+            <option value="BLOCKED" ${s.status==='BLOCKED'?'selected':''}>Blocked</option>
+            <option value="COMPLETED" ${s.status==='COMPLETED'?'selected':''}>Completed</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" style="margin-top:6px"><label>Completion criteria</label>
+        <textarea rows="2" onchange="admUpdateTaskStageField(${s.id},'criteria',this.value)" placeholder="What has to be true for this stage to count as done?">${esc(s.criteria||"")}</textarea>
+      </div>
+      ${s.status==='COMPLETED' && s.completedBy ? `<div style="font-size:11px;color:#8DA39A;margin-top:4px">Completed by ${esc(s.completedBy)}${s.completedAt?(' &bull; '+fmtDateTime(s.completedAt)):''}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="adm-panel"><div class="adm-panel-head"><h3>Workflow Stages</h3></div>
+    <div class="adm-panel-body">
+      ${summary}
+      ${rows || `<div class="adm-empty">No stages yet.</div>`}
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+        <label class="adm-field-label">Add a stage</label>
+        <div class="grid2" style="margin-top:6px">
+          <div class="field"><input id="stg_name_${t.id}" placeholder="Stage name, e.g. Internal review"></div>
+          <div class="field"><input id="stg_due_${t.id}" type="date"></div>
+        </div>
+        <div class="field" style="margin-top:6px"><textarea id="stg_criteria_${t.id}" rows="2" placeholder="Completion criteria (optional)"></textarea></div>
+        <button class="btn small" style="margin-top:8px" onclick="admAddTaskStage(${t.id})">Add stage</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function admAddTaskStage(taskId){
+  const nameEl = $("stg_name_"+taskId), dueEl = $("stg_due_"+taskId), critEl = $("stg_criteria_"+taskId);
+  const name = nameEl.value.trim();
+  if(!name){ toast("Give the stage a name"); return; }
+  try{
+    await api("add_task_stage", {taskId, name, dueDate: dueEl.value, criteria: critEl.value.trim(), actorName: taskActorName()});
+    await loadData(); rerenderCurrent(); toast("Stage added");
+  }catch(e){ toast(e.message || "Could not add stage"); }
+}
+async function admUpdateTaskStageField(id, field, value){
+  const payload = {id, actorName: taskActorName()};
+  payload[field] = value;
+  try{ await api("update_task_stage", payload); await loadData(); rerenderCurrent(); }
+  catch(e){ toast(e.message || "Could not update stage"); }
+}
+async function admDeleteTaskStage(id){
+  if(!confirm("Remove this stage?")) return;
+  try{ await api("delete_task_stage", {id}); await loadData(); rerenderCurrent(); toast("Stage removed"); }
+  catch(e){ toast(e.message || "Could not remove stage"); }
+}
+async function admReorderStage(id, direction){
+  try{ await api("reorder_task_stage", {id, direction}); await loadData(); rerenderCurrent(); }
+  catch(e){ toast(e.message || "Could not reorder stage"); }
 }
 function admTaskCommentsHtml(t){
   const comments = t.comments || [];

@@ -687,6 +687,10 @@ ACTION_ROLES = {
     "add_task": _R_TECH + ("journal_manager", "journal_tl", "marketing_manager"),
     "update_task": _R_ALL_STAFF,
     "delete_task": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
+    "add_task_stage": _R_ALL_STAFF,
+    "update_task_stage": _R_ALL_STAFF,
+    "delete_task_stage": _R_TECH_MGMT + ("journal_manager", "journal_tl", "marketing_manager"),
+    "reorder_task_stage": _R_ALL_STAFF,
     "assign_programmers": _R_TECH,
     "assign_writers": _R_TECH,
     "assign_formatters": _R_TECH + ("journal_manager", "journal_tl"),
@@ -1243,6 +1247,7 @@ _SERIAL_ID_TABLES = {
     "client_installments", "journal_targets", "messages", "thread_reads",
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
+    "task_stages",
 }
 
 
@@ -1504,6 +1509,19 @@ def init_db():
         body TEXT NOT NULL,
         created_at TEXT DEFAULT ({_NOW_SQL})
     );
+    CREATE TABLE IF NOT EXISTS task_stages (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        criteria TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        due_date TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        completed_at TEXT,
+        completed_by TEXT DEFAULT '',
+        created_by TEXT DEFAULT '',
+        created_at TEXT DEFAULT ({_NOW_SQL})
+    );
     CREATE TABLE IF NOT EXISTS client_documents (
         id SERIAL PRIMARY KEY,
         client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1753,6 +1771,12 @@ def init_db():
         "demo_scheduled_by": "TEXT DEFAULT ''",       # Marketing TL/Manager who scheduled it
         "demo_schedule_status": "TEXT DEFAULT ''",    # 'SCHEDULED' / '' (cleared once done/cancelled)
         "writing_demo_given_date": "TEXT DEFAULT ''",
+        # ----- Start dates to go alongside the existing proposal/implementation/writing
+        #       deadlines, so the Assign Work tab can capture "work begins on" as well as
+        #       "work is due by" instead of only the latter. -----
+        "proposal_start_date": "TEXT DEFAULT ''",
+        "implementation_start_date": "TEXT DEFAULT ''",
+        "writing_start_date": "TEXT DEFAULT ''",
     }
     for col, decl in extra_cols.items():
         con.execute(f"ALTER TABLE clients ADD COLUMN IF NOT EXISTS {col} {decl}")
@@ -2380,8 +2404,10 @@ def all_clients(con):
             "proposalVerifiedBy": r["proposal_verified_by"] or None,
             "assignedProgrammers": names(r["assigned_programmers"]),
             "implementationDeadline": r["implementation_deadline"],
+            "implementationStartDate": r["implementation_start_date"] or "",
             "proposalWriter": r["proposal_writer"] or "",
             "proposalDeadline": r["proposal_deadline"],
+            "proposalStartDate": r["proposal_start_date"] or "",
             "onHold": bool(r["on_hold"]), "holdReason": r["hold_reason"] or "",
             "extRequested": bool(r["ext_requested"]), "extReason": r["ext_reason"] or "",
             "extRequestedBy": r["ext_requested_by"] or "", "extAmount": r["ext_amount"] or "",
@@ -2408,6 +2434,7 @@ def all_clients(con):
             "rejected": bool(r["rejected"]), "rejectReason": r["reject_reason"] or "",
             "rejectedAt": iso(r["rejected_at"]) if r["rejected_at"] else None,
             "writingDeadline": r["writing_deadline"],
+            "writingStartDate": r["writing_start_date"] or "",
             "demoCompletedDate": r["demo_completed_date"],
             "demoGivenDate": r["demo_given_date"],
             "demoSatisfied": r["demo_satisfied"] or "",
@@ -3176,6 +3203,18 @@ def handle_action(action, d, ip=""):
                     {"author": r["author"], "body": r["body"], "at": iso(r["created_at"])})
             for t in tasks:
                 t["comments"] = comments_by.get(t["id"], [])
+            stages_by = {}
+            for r in con.execute("SELECT * FROM task_stages ORDER BY task_id ASC, sort_order ASC, id ASC"):
+                stages_by.setdefault(r["task_id"], []).append({
+                    "id": r["id"], "taskId": r["task_id"], "name": r["name"],
+                    "criteria": r["criteria"] or "", "status": r["status"],
+                    "dueDate": r["due_date"], "sortOrder": r["sort_order"],
+                    "completedAt": iso(r["completed_at"]) if r["completed_at"] else None,
+                    "completedBy": r["completed_by"] or "", "createdBy": r["created_by"] or "",
+                    "createdAt": iso(r["created_at"]),
+                })
+            for t in tasks:
+                t["stages"] = stages_by.get(t["id"], [])
             # Document metadata only (never the file bytes) — keeps every page load light.
             client_docs = [dict(r) for r in con.execute(
                 """SELECT id, client_id, file_name, file_type, uploaded_by, created_at
@@ -3875,6 +3914,107 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
+        # ----- Multiple Workflow Stages: a task can be broken down into an ordered list of
+        #       sub-stages, each with its own status and due date, so progress on large pieces
+        #       of work (e.g. "Proposal writing" -> Draft / Internal review / Client delivery)
+        #       can be tracked stage-by-stage instead of as one all-or-nothing task status. -----
+        if action == "add_task_stage":
+            tid = d.get("taskId")
+            name = (d.get("name") or "").strip()
+            if not tid:
+                raise ApiError("Missing task id.")
+            if not name:
+                raise ApiError("Give the stage a name.")
+            if not con.execute("SELECT id FROM tasks WHERE id=?", (tid,)).fetchone():
+                raise ApiError("That task no longer exists.")
+            criteria = (d.get("criteria") or "").strip()
+            due_date = (d.get("dueDate") or "").strip() or None
+            actor = (d.get("actorName") or d.get("role") or "").strip()
+            next_order = con.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM task_stages WHERE task_id=?", (tid,)
+            ).fetchone()["n"]
+            cur = con.execute("""INSERT INTO task_stages
+                (task_id, name, criteria, due_date, sort_order, created_by)
+                VALUES (?,?,?,?,?,?)""",
+                (tid, name, criteria, due_date, next_order, actor))
+            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                        (tid, actor or "Someone", f"Added stage \u201c{name}\u201d." +
+                         (f" Due {due_date}." if due_date else "")))
+            con.commit()
+            return {"ok": True, "id": cur.lastrowid}
+
+        if action == "update_task_stage":
+            sid = d.get("id")
+            if not sid:
+                raise ApiError("Missing stage id.")
+            row = con.execute("SELECT * FROM task_stages WHERE id=?", (sid,)).fetchone()
+            if not row:
+                raise ApiError("That stage no longer exists.")
+            actor = (d.get("actorName") or d.get("role") or "Someone").strip()
+            fields, vals = [], []
+            if "name" in d:
+                new_name = (d.get("name") or "").strip()
+                if not new_name:
+                    raise ApiError("Give the stage a name.")
+                fields.append("name=?"); vals.append(new_name)
+            if "criteria" in d:
+                fields.append("criteria=?"); vals.append((d.get("criteria") or "").strip())
+            if "dueDate" in d:
+                fields.append("due_date=?"); vals.append((d.get("dueDate") or "").strip() or None)
+            note = None
+            if "status" in d:
+                status = (d.get("status") or "PENDING").strip().upper()
+                if status not in ("PENDING", "IN_PROGRESS", "COMPLETED", "BLOCKED"):
+                    raise ApiError("Unknown stage status.")
+                fields.append("status=?"); vals.append(status)
+                if status == "COMPLETED":
+                    fields.append(f"completed_at={_NOW_SQL}")
+                    fields.append("completed_by=?"); vals.append(actor)
+                else:
+                    fields.append("completed_at=NULL")
+                    fields.append("completed_by=''")
+                status_label = {"PENDING": "reset to pending", "IN_PROGRESS": "marked in progress",
+                                 "COMPLETED": "marked complete", "BLOCKED": "marked blocked"}[status]
+                note = f"{actor} {status_label} the stage \u201c{row['name']}\u201d."
+            if not fields:
+                raise ApiError("Nothing to update.")
+            vals.append(sid)
+            con.execute(f"UPDATE task_stages SET {', '.join(fields)} WHERE id=?", vals)
+            if note:
+                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                            (row["task_id"], actor, note))
+            con.commit()
+            return {"ok": True}
+
+        if action == "delete_task_stage":
+            sid = d.get("id")
+            if not sid:
+                raise ApiError("Missing stage id.")
+            row = con.execute("SELECT * FROM task_stages WHERE id=?", (sid,)).fetchone()
+            if not row:
+                raise ApiError("That stage no longer exists.")
+            con.execute("DELETE FROM task_stages WHERE id=?", (sid,))
+            con.commit()
+            return {"ok": True}
+
+        if action == "reorder_task_stage":
+            sid = d.get("id")
+            direction = (d.get("direction") or "").strip().lower()
+            if not sid or direction not in ("up", "down"):
+                raise ApiError("Missing stage id or direction.")
+            row = con.execute("SELECT * FROM task_stages WHERE id=?", (sid,)).fetchone()
+            if not row:
+                raise ApiError("That stage no longer exists.")
+            neighbor = con.execute(
+                f"""SELECT * FROM task_stages WHERE task_id=? AND sort_order {'<' if direction=='up' else '>'} ?
+                    ORDER BY sort_order {'DESC' if direction=='up' else 'ASC'} LIMIT 1""",
+                (row["task_id"], row["sort_order"])).fetchone()
+            if neighbor:
+                con.execute("UPDATE task_stages SET sort_order=? WHERE id=?", (neighbor["sort_order"], row["id"]))
+                con.execute("UPDATE task_stages SET sort_order=? WHERE id=?", (row["sort_order"], neighbor["id"]))
+                con.commit()
+            return {"ok": True}
+
         if action == "dm_directory":
             people = []
             for r in con.execute(
@@ -4139,6 +4279,7 @@ def handle_action(action, d, ip=""):
             deadline = d.get("deadline") or ""
             if not deadline:
                 raise ApiError("Set a proposal deadline.")
+            start_date = (d.get("startDate") or "").strip() or date.today().isoformat()
             actor = (d.get("actorLabel") or "Technical Team").strip()
             coord_row = con.execute(
                 "SELECT is_coordinator FROM employees WHERE name=? AND role='PAPER_WRITER' AND active=1 AND deleted_at IS NULL",
@@ -4176,11 +4317,11 @@ def handle_action(action, d, ip=""):
             elif write_picked or write_deadline:
                 raise ApiError("To pre-assign paper writing, pick at least one writer AND set a writing deadline.")
 
-            con.execute("""UPDATE clients SET proposal_writer=?, proposal_deadline=?,
+            con.execute("""UPDATE clients SET proposal_writer=?, proposal_deadline=?, proposal_start_date=?,
                            proposal_coordinator=?, proposal_awaiting_team_pick=?,
                            pre_impl_programmers=?, pre_impl_deadline=?, pre_impl_by=?,
                            pre_write_writers=?, pre_write_deadline=?, pre_write_by=? WHERE id=?""",
-                        (name, deadline, name if is_coord else "", 1 if is_coord else 0,
+                        (name, deadline, start_date, name if is_coord else "", 1 if is_coord else 0,
                          pre_impl_programmers, pre_impl_deadline, pre_impl_by,
                          pre_write_writers, pre_write_deadline, pre_write_by, c["id"]))
             note = f"Assigned to coordinator {name} — they'll write it themselves or hand it to a team member." if is_coord else ""
@@ -4448,6 +4589,7 @@ def handle_action(action, d, ip=""):
             deadline = d.get("deadline") or ""
             if not deadline:
                 raise ApiError("Set a deadline.")
+            start_date = (d.get("startDate") or "").strip() or date.today().isoformat()
             actor = (d.get("actorLabel") or "Technical TL").strip()
             if d.get("coordinatorMode"):
                 coord_name = (d.get("coordinatorName") or "").strip()
@@ -4457,8 +4599,9 @@ def handle_action(action, d, ip=""):
                 if not coord_row:
                     raise ApiError("Unknown or inactive coordinator.")
                 con.execute("""UPDATE clients SET assigned_programmers=?, implementation_deadline=?,
+                               implementation_start_date=?,
                                impl_coordinator=?, impl_awaiting_team_pick=1 WHERE id=?""",
-                            (coord_name, deadline, coord_name, c["id"]))
+                            (coord_name, deadline, start_date, coord_name, c["id"]))
                 note = f"Assigned to coordinator {coord_name} — they'll build the implementation team."
             else:
                 valid = active_names(con, "PROGRAMMER")
@@ -4466,8 +4609,9 @@ def handle_action(action, d, ip=""):
                 if not picked:
                     raise ApiError("Pick at least one programmer and a deadline.")
                 con.execute("""UPDATE clients SET assigned_programmers=?, implementation_deadline=?,
+                               implementation_start_date=?,
                                impl_coordinator='', impl_awaiting_team_pick=0 WHERE id=?""",
-                            (",".join(picked), deadline, c["id"]))
+                            (",".join(picked), deadline, start_date, c["id"]))
                 note = ""
             move_stage(con, c["id"], "IMPLEMENTATION_ASSIGNED", actor, note)
             con.commit()
@@ -4599,6 +4743,7 @@ def handle_action(action, d, ip=""):
             deadline = d.get("deadline") or ""
             if not deadline:
                 raise ApiError("Set a writing deadline.")
+            start_date = (d.get("startDate") or "").strip() or date.today().isoformat()
             actor = (d.get("actorLabel") or "Technical Manager").strip()
             if d.get("coordinatorMode"):
                 coord_name = (d.get("coordinatorName") or "").strip()
@@ -4607,20 +4752,21 @@ def handle_action(action, d, ip=""):
                        AND active=1 AND deleted_at IS NULL""", (coord_name,)).fetchone()
                 if not coord_row:
                     raise ApiError("Unknown or inactive coordinator.")
-                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, coordinator_name=?,
+                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=?,
+                               coordinator_name=?,
                                writing_awaiting_team_pick=1, review_level='', coordinator_rounds=0,
                                techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
-                            (coord_name, deadline, coord_name, c["id"]))
+                            (coord_name, deadline, start_date, coord_name, c["id"]))
                 note = f"Assigned to coordinator {coord_name} — they'll build the writing team."
             else:
                 valid = active_names(con, "PAPER_WRITER")
                 picked = [w for w in (d.get("writers") or []) if w in valid]
                 if not picked:
                     raise ApiError("Pick at least one paper writer.")
-                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?,
+                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=?,
                                writing_awaiting_team_pick=0, review_level='', coordinator_rounds=0,
                                techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
-                            (",".join(picked), deadline, c["id"]))
+                            (",".join(picked), deadline, start_date, c["id"]))
                 note = ""
             move_stage(con, c["id"], "PAPERWRITER_ASSIGNED", actor, note)
             con.commit()
