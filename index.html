@@ -417,7 +417,7 @@ tbody tr:last-child td{border-bottom:none}
 #pingAlert .pa-body b{display:block;font-size:14px;margin-bottom:3px}
 #pingAlert .pa-body span{font-size:13px;color:#D6E3DC;white-space:pre-wrap;word-break:break-word}
 #pingAlert .pa-body small{display:block;color:#8DA39A;font-size:11px;margin-top:5px}
-#pingAlert button{background:var(--card);color:#16241D;border:0;border-radius:9px;padding:8px 13px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
+#pingAlert button{background:var(--card);color:var(--text);border:0;border-radius:9px;padding:8px 13px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
 #pingPermBar{display:none;background:#EAF7F8;border:1px solid rgba(14,116,144,.25);color:#0E7490;font-size:13px;border-radius:12px;padding:10px 15px;margin-bottom:14px;align-items:center;gap:12px;flex-wrap:wrap}
 #pingPermBar.show{display:flex}
 #pingPermBar .btn{margin-left:auto}
@@ -2264,7 +2264,7 @@ function tcClientRow(c, actionsHtml, extraHtml){
   return `<div class="adm-bar-row" style="flex-wrap:wrap;align-items:flex-start;cursor:pointer" onclick="openDrawer(${jsq(c.id)})">
     <div style="flex:1;min-width:220px">
       <div class="lbl"><b>${esc(c.name)}</b> <span class="badge b-dim">${c.displayId||c.id}</span> <span class="badge b-dim" title="Project ID">${esc(c.projectId||c.id)}</span> ${serviceFamilyBadgeHtml(c)} ${c.onHold?'<span class="badge b-bad">On hold</span>':""} ${c.rejected?'<span class="badge b-bad">Rejected</span>':""}</div>
-      <div style="font-size:12px;color:#66827A;margin-top:4px">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"")} &bull; Deadline: ${fmtDate(c.deadlineDate)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"")} &bull; Deadline: ${fmtDate(c.deadlineDate)}</div>
       <div style="margin-top:8px"><span class="stage-chip ${chipClass(c.stage)}">${STAGE_LABEL[c.stage]}</span></div>
       ${extraHtml||""}
     </div>
@@ -2350,7 +2350,7 @@ function renderTcMessages(){
   const body = withThread.map(({c,t})=>`
     <div class="adm-bar-row" style="cursor:pointer" onclick="openChat(${jsq(c.id)},'Telecaller',${jsq(c.name)})">
       <div class="lbl"><b>${esc(c.name)}</b> <span class="badge b-dim">${c.displayId||c.id}</span>${unreadForViewer(t,myViewerKey())?`<span class="badge b-bad">${unreadForViewer(t,myViewerKey())} new</span>`:""}</div>
-      <div style="font-size:12px;color:#66827A">${esc(t.lastPreview||"")} &bull; ${fmtDateTime(t.lastAt)}</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(t.lastPreview||"")} &bull; ${fmtDateTime(t.lastAt)}</div>
     </div>`).join("");
   $("content").innerHTML = tcPanel("Client messages", withThread.length, body, "No client messages yet.");
 }
@@ -2359,7 +2359,7 @@ function renderTcTechnical(){
   let html = tcSearchBarHtml();
   const list = clients.filter(c=>!c.rejected && phaseIdx(c.stage)>=2 && c.stage!=='COMPLETED').filter(matchesSearch);
   const body = list.map(c=>tcClientRow(c,"",
-    `<div style="font-size:12px;color:#66827A;margin-top:6px">${c.assignedProgrammers.length?("Programmer(s): "+esc(c.assignedProgrammers.join(", "))+" &bull; "):""}${c.assignedWriters.length?("Writer(s): "+esc(c.assignedWriters.join(", "))):""}</div>`)).join("");
+    `<div style="font-size:12px;color:var(--muted);margin-top:6px">${c.assignedProgrammers.length?("Programmer(s): "+esc(c.assignedProgrammers.join(", "))+" &bull; "):""}${c.assignedWriters.length?("Writer(s): "+esc(c.assignedWriters.join(", "))):""}</div>`)).join("");
   html += tcPanel("Ongoing with the Technical Team", list.length, body, "No client is with the Technical Team right now.");
   $("content").innerHTML = html;
 }
@@ -2525,7 +2525,7 @@ function renderTcRejected(){
     <div class="adm-bar-row" style="flex-wrap:wrap;align-items:flex-start">
       <div style="flex:1;min-width:220px">
         <div class="lbl"><b>${esc(c.name)}</b> <span class="badge b-dim">${c.displayId||c.id}</span> ${serviceFamilyBadgeHtml(c)}</div>
-        <div style="font-size:12px;color:#66827A;margin-top:4px">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"no phone")} &bull; ${esc(c.address||"no address")}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"no phone")} &bull; ${esc(c.address||"no address")}</div>
         ${c.rejectReason?`<div style="font-size:12px;color:#B42318;margin-top:6px">Reason: ${esc(c.rejectReason)}</div>`:""}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -4484,12 +4484,12 @@ function myAssignedTasksHtml(name){
     const c = admTaskClient(t);
     html += `<div class="pay-row" style="cursor:pointer" onclick="admOpenTaskDetail(${t.id})">
       <div class="pay-top"><b>${esc(t.title)}</b>
-        ${t.task_type?`<span class="badge" style="background:#fff;color:#111;border:1px solid #111">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}
+        ${t.task_type?`<span class="badge" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}
         <span class="adm-status" style="background:#111;color:#fff;border:1px solid #111">${TASK_STATUS_LABEL[t.status]||t.status}</span></div>
       <div class="pay-meta">${c?esc(c.name)+' &bull; ':''}${t.finish_date?('Due '+fmtDate(t.finish_date)):'No deadline'} &bull; Priority: ${esc(t.priority)}</div>
       ${t.status==='SUBMITTED' ? `<div class="pc-meta" style="margin-top:6px">Marked done — waiting on Technical Manager / TL approval.</div>` : ""}
       ${(t.status!=='COMPLETED' && t.status!=='SUBMITTED') ? `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:8px">
-        ${t.status!=='IN_PROGRESS'?`<button class="btn ghost small" style="background:#fff;color:#111;border:1px solid #111" onclick="admUpdateTaskStatus(${t.id},'IN_PROGRESS')">Start</button>`:""}
+        ${t.status!=='IN_PROGRESS'?`<button class="btn ghost small" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)" onclick="admUpdateTaskStatus(${t.id},'IN_PROGRESS')">Start</button>`:""}
         <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="myMarkTaskDone(${t.id})">${taskDoneButtonLabel(t)}</button>
       </div>` : ""}
     </div>`;
@@ -4727,7 +4727,7 @@ function admDonutHtml(segments, size){
   const legend = segments.map(s=>`
     <div style="display:flex;align-items:center;gap:10px;font-size:13px;margin-bottom:10px">
       <span style="width:11px;height:11px;border-radius:50%;background:${s.color};display:inline-block;flex-shrink:0"></span>
-      <span style="color:#16241D">${esc(s.label)}</span><b style="margin-left:auto">${s.value}</b>
+      <span style="color:var(--text)">${esc(s.label)}</span><b style="margin-left:auto">${s.value}</b>
     </div>`).join("");
   return `<div style="display:flex;align-items:center;gap:26px;flex-wrap:wrap">
     <div style="position:relative;width:${size}px;height:${size}px;flex-shrink:0">
@@ -5177,7 +5177,7 @@ function adminCalendarHtml(y, m){
       style="cursor:pointer;display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:8px;width:100%;box-sizing:border-box">
     <input type="checkbox" style="flex:none;margin:0;width:15px;height:15px;pointer-events:none" ${calFilter[key]?"checked":""}>
     <i style="flex:none;display:inline-block;width:11px;height:11px;border-radius:3px;background:${color}"></i>
-    <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;text-transform:none;letter-spacing:normal;color:#3E4F49;${calFilter[key]?"":"opacity:.5;text-decoration:line-through"}">${label}</span>
+    <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;text-transform:none;letter-spacing:normal;color:var(--muted);${calFilter[key]?"":"opacity:.5;text-decoration:line-through"}">${label}</span>
   </div>`;
   const legend = `<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
     ${legendRow("deadline","#DC2626","Deadline")}
@@ -5986,7 +5986,7 @@ function admProjDiscussionTab(c){
       <div style="max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
         ${msgs.length ? msgs.map(m=>`
           <div style="align-self:${m.senderType==='staff'?'flex-end':'flex-start'};max-width:70%;background:${m.senderType==='staff'?'#E7F6EE':'#F3F6F4'};border-radius:10px;padding:8px 12px">
-            <div style="font-size:10px;color:#66827A;font-weight:700;margin-bottom:2px">${esc(m.senderName)}</div>
+            <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px">${esc(m.senderName)}</div>
             <div style="font-size:13px">${esc(m.body||"")}</div>
           </div>`).join("") : `<div class="adm-empty">No messages yet — say hello.</div>`}
       </div>
@@ -6476,14 +6476,14 @@ function admProfileProfileTab(c){
     if(c.stage==="MANAGER_REVIEW"){
       actionBanner = `<div class="adm-panel" style="margin-bottom:14px;border-color:#0E9A6C">
         <div class="adm-panel-body" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-          <div><b style="color:#16241D">Waiting for your approval</b><div style="font-size:12.5px;color:#66827A">Verified by Marketing TL — approve to send this client on to Accounts.</div></div>
+          <div><b style="color:var(--text)">Waiting for your approval</b><div style="font-size:12.5px;color:var(--muted)">Verified by Marketing TL — approve to send this client on to Accounts.</div></div>
           <button class="btn" onclick="managerApprove(${jsq(c.id)})">Approve &rarr; Accounts</button>
         </div>
       </div>`;
     } else if(c.stage==="NEW" || c.stage==="TL_REVIEW"){
       actionBanner = `<div class="adm-panel" style="margin-bottom:14px">
         <div class="adm-panel-body" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-          <div><b style="color:#16241D">Still earlier in the pipeline</b><div style="font-size:12.5px;color:#66827A">Currently: ${STAGE_LABEL[c.stage]} — you can skip ahead and send it straight to Accounts.</div></div>
+          <div><b style="color:var(--text)">Still earlier in the pipeline</b><div style="font-size:12.5px;color:var(--muted)">Currently: ${STAGE_LABEL[c.stage]} — you can skip ahead and send it straight to Accounts.</div></div>
           <button class="btn ghost" onclick="managerFastTrack(${jsq(c.id)})">Fast-track &rarr; Accounts</button>
         </div>
       </div>`;
@@ -6521,7 +6521,7 @@ function admProfileProfileTab(c){
     <div class="adm-kpi"><h4>Total Projects</h4><div class="frac" style="font-size:26px">${totalProjects}</div><div class="note">${published} published</div></div>
     <div class="adm-kpi"><h4>Ongoing Projects</h4><div class="frac" style="font-size:26px">${ongoing}</div><div class="note">${daysToFinish!=null?daysToFinish+" days to finish":"No deadline set"}</div></div>
     <div class="adm-kpi"><h4>Total Paid</h4><div class="frac" style="font-size:22px">Rs. ${clientPaid.toLocaleString("en-IN")}</div><div class="note">${pctOfCompany}% of company total</div></div>
-    <div class="adm-kpi"><h4>Last Note</h4><div class="note" style="font-size:13px;color:#16241D">${esc(lastNote)||"No notes yet."}</div></div>
+    <div class="adm-kpi"><h4>Last Note</h4><div class="note" style="font-size:13px;color:var(--text)">${esc(lastNote)||"No notes yet."}</div></div>
   </div>`;
 }
 function admProfileProjectsTab(c){
@@ -7475,7 +7475,7 @@ function admTaskCommentsHtml(t){
       <div style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
         ${comments.length ? comments.map(cm=>`
           <div style="background:#F3F6F4;border-radius:10px;padding:8px 12px">
-            <div style="font-size:10px;color:#66827A;font-weight:700;margin-bottom:2px">${esc(cm.author)} · ${fmtDateTime(cm.at)}</div>
+            <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px">${esc(cm.author)} · ${fmtDateTime(cm.at)}</div>
             <div style="font-size:13px">${esc(cm.body)}</div>
           </div>`).join("") : `<div class="adm-empty">No comments yet.</div>`}
       </div>

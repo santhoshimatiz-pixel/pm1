@@ -291,7 +291,49 @@ to confirm the change landed correctly. No database schema changes.
    (index.html — :root[data-theme="dark"], setTheme/toggleTheme/
    currentTheme, #themeToggleBtn, the inline boot script in <head>)
 
+8. TEXT INVISIBLE IN DARK MODE (Technical Manager dashboard donut
+   chart labels, and other spots across the whole app)
+   ------------------------------------------------------------
+   Several pieces of text throughout the app had their color
+   hardcoded to a near-black value (#16241D, #111) instead of the
+   theme-aware var(--text)/var(--muted). In light mode this looked
+   fine (dark text on a white card), but once dark mode was added,
+   those same cards turned dark while the text color stayed
+   hardcoded dark — making the text blend into the background and
+   disappear. This is exactly what was happening on the Technical
+   Manager dashboard's donut chart: the colored dot and the number
+   were visible, but the label next to each dot (e.g. "To Do") was
+   invisible because of this.
+   Audited every hardcoded text color in the file (checked each one's
+   actual contrast ratio against both themes, not just guessed) and
+   fixed every one that was actually broken or borderline:
+     - color:#16241D (5 places, including the donut/pie chart
+       legend labels, KPI card notes, and the pending-approval
+       banner text) -> var(--text)
+     - color:#111 on two task-type badges/buttons (paired with a
+       hardcoded white background, so not invisible, but jarring
+       and inconsistent in dark mode) -> var(--card)/var(--text)/
+       var(--line-strong), so the whole badge follows the theme
+     - color:#3E4F49 (calendar filter checkbox labels — contrast
+       ratio was 1.88:1, essentially unreadable even before dark
+       mode was a factor) -> var(--muted)
+     - color:#66827A (8 places — secondary/meta text under client
+       names, message previews, etc. — contrast ratio 3.9:1 on
+       dark, under the readability threshold for small text)
+       -> var(--muted)
+   Left untouched on purpose: colors intentionally paired with
+   their own fixed background regardless of theme (white text on
+   the purple/gold buttons and the always-dark sidebar; dark text
+   on gold badges; status colors like red/green pills) — those
+   were never broken and shouldn't change with the toggle.
+   (index.html — admDonutHtml/admPieHtml legend, #pingAlert button,
+   admProfileDashboardTab pending-approval banner, calendar filter
+   checkboxes, and every other spot using these three colors)
+
 ------------------------------------------------------------
 Verification performed: server.py parses cleanly (ast.parse), all
-script blocks in index.html pass a Node.js syntax check.
+script blocks in index.html pass a Node.js syntax check. Contrast
+ratios for every fixed color were calculated against both the light
+and dark theme backgrounds (WCAG relative-luminance formula) to
+confirm they're now readable rather than just "probably fine".
 ============================================================
