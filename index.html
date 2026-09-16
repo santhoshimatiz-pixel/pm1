@@ -2280,9 +2280,11 @@ function tcRejectBtn(c){
 }
 
 function renderTcDashboard(){
-  const mine = clients.filter(c=>c.stage==='NEW' && !c.rejected);
+  const mine0 = clients.filter(c=>c.stage==='NEW' && !c.rejected);
   const rest0 = clients.filter(c=>c.stage!=='NEW' && !c.rejected);
   let html = "";
+  html += tcSearchBarHtml();
+  const mine = mine0.filter(matchesSearch);
   const leadsBody = mine.map(c=>{
     const canSend = c.calls.length>0;
     return tcClientRow(c, `
@@ -2290,11 +2292,12 @@ function renderTcDashboard(){
       ${tcRejectBtn(c)}
       <button class="btn gold small" ${canSend?"":"disabled title='Log at least one call first'"} onclick="sendToTL(${jsq(c.id)})">Send to Marketing TL &#8594;</button>`);
   }).join("");
-  html += tcPanel("My leads — ready to work", mine.length, leadsBody, "No new leads. Add your first client to start.");
-  html += tcSearchBarHtml();
+  html += tcPanel("My leads — ready to work", mine.length, leadsBody,
+    (searchQuery.trim()||searchStage) ? "No leads match your search." : "No new leads. Add your first client to start.");
   const rest = rest0.filter(matchesSearch);
   const restBody = rest.map(c=>tcClientRow(c,"")).join("");
-  html += tcPanel("Already in the pipeline", rest.length, restBody, "Clients you send onward appear here.");
+  html += tcPanel("Already in the pipeline", rest.length, restBody,
+    (searchQuery.trim()||searchStage) ? "No clients match your search." : "Clients you send onward appear here.");
   $("content").innerHTML = html;
 }
 
@@ -6114,10 +6117,10 @@ function admProjExtensionsTab(c){
 function admProjPaymentTab(c){
   const rows = activePayKeys(c).filter(k=>k==="reg").map(k=>{
     const p = c.payments[k]||{};
-    return `<tr><td><b>${esc(PAY_LABELS[k])}</b></td><td>${p.status==='paid'?'<span class="adm-status good">Paid</span>':'<span class="adm-status warn">Pending</span>'}</td><td>${p.amount?('Rs. '+esc(p.amount)):'—'}</td><td>${p.date?fmtDate(p.date):'—'}</td></tr>`;
+    return `<tr><td><b>${esc(PAY_LABELS[k])}</b></td><td>${p.status==='paid'?'<span class="adm-status good">Paid</span>':'<span class="adm-status warn">Pending</span>'}</td><td>${p.amount?('Rs. '+esc(p.amount)):'—'}</td><td>${p.date?fmtDate(p.date):'—'}</td><td>${p.status==='paid'?paymentProofLinkHtml(c.id, PAY_LABELS[k]):'—'}</td></tr>`;
   }).join("");
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Payment information</h3><span class="badge b-purp">Rs. ${c.totalAmount||0} total</span></div>
-    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Stage</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Stage</th><th>Status</th><th>Amount</th><th>Date</th><th>Proof</th></tr></thead><tbody>${rows}</tbody></table></div>
   </div>${admInstallmentPlanHtml(c)}`;
 }
 function admInstallmentPlanHtml(c){
@@ -6134,13 +6137,14 @@ function admInstallmentPlanHtml(c){
       <td>${it.status==='paid'?'<span class="adm-status good">Paid</span>':'<span class="adm-status warn">Pending</span>'}</td>
       <td>Rs. ${(parseFloat(it.amount)||0).toLocaleString("en-IN")}</td>
       <td>${it.paidDate?fmtDate(it.paidDate):'—'}</td>
+      <td>${it.status==='paid'?paymentProofLinkHtml(c.id, it.title):'—'}</td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
-        ${canPay && it.status!=='paid' ? `<button class="btn small" onclick="admMarkInstallmentPaid(${it.id})">Mark as paid</button>` : ""}
+        ${canPay && it.status!=='paid' ? `<button class="btn small" onclick="openInstallmentPayModal(${it.id},${jsq(c.id)},${jsq(it.title)},${parseFloat(it.amount)||0})">Mark as paid</button>` : ""}
         ${canEdit && it.status!=='paid' ? `<button class="xmini" onclick="admDeleteInstallment(${it.id},${jsq(c.id)})" title="Remove">&times;</button>` : ""}
       </td>
     </tr>`).join("");
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Custom installment plan${planName?` — ${esc(planName)}`:""}</h3>${items.length?`<span class="badge b-purp">Rs. ${planTotal.toLocaleString("en-IN")} total</span>`:""}</div>
-    ${items.length ? `<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Installment</th><th>Status</th><th>Amount</th><th>Paid on</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="adm-panel-body"><div class="adm-empty">No custom installments added yet.</div></div>`}
+    ${items.length ? `<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Installment</th><th>Status</th><th>Amount</th><th>Paid on</th><th>Proof</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="adm-panel-body"><div class="adm-empty">No custom installments added yet.</div></div>`}
     ${canEdit ? `<div class="adm-panel-body" style="border-top:1px solid rgba(15,40,30,.08)" onclick="event.stopPropagation()">
       <div class="svc-add" style="margin-bottom:10px">
         <input placeholder="Plan name (e.g. 2-installment plan)" id="planName-${c.id}" value="${esc(planName)}">
@@ -6179,10 +6183,31 @@ async function admDeleteInstallment(installmentId, clientId){
   await refresh(); rerenderCurrent();
   toast("Installment removed");
 }
-async function admMarkInstallmentPaid(installmentId){
-  try{ await api("mark_installment_paid", {installmentId}); }catch(e){ toast(e.message); return; }
-  await refresh(); rerenderCurrent();
-  toast("Installment marked as paid");
+async function openInstallmentPayModal(installmentId, clientId, title, amount){
+  openModal(`
+    <h3>Mark as paid</h3><p class="msub">${esc(title)} — Rs. ${(parseFloat(amount)||0).toLocaleString("en-IN")}</p>
+    <div class="field"><label>Payment proof (image only) *</label><input id="ip_proof" type="file" accept="image/*">
+      <p style="font-size:12px;color:var(--muted);margin-top:5px">Required — a photo or screenshot of the payment confirmation. Only image files are accepted; PDFs and other document types are not.</p></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModalIfConfirmed()">Cancel</button><button class="btn" onclick="confirmInstallmentPaid(${installmentId},${jsq(clientId)},${jsq(title)})">Save payment</button></div>`);
+}
+async function confirmInstallmentPaid(installmentId, clientId, title){
+  const fileEl = $("ip_proof");
+  const file = fileEl && fileEl.files[0];
+  if(!file){ toast("Attach a payment proof image before marking this as paid"); return; }
+  if(!file.type || !file.type.startsWith("image/")){ toast("Only image files (JPG, PNG, etc.) are accepted as payment proof — not PDFs or other documents"); return; }
+  if(file.size > 6_000_000){ toast("That image is too large (max ~6MB)"); return; }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = reader.result.split(",")[1];
+    try{
+      const doc = await api("add_client_document", {clientId, fileName: `Payment proof — ${title} — ${todayISO()}`, fileType: file.type, fileData: b64, actorName: roleTitle()});
+      await api("mark_installment_paid", {installmentId, proofDocumentId: doc && doc.id});
+    }catch(e){ toast(e.message); return; }
+    closeModal(); await refresh(); rerenderCurrent();
+    toast("Installment marked as paid and proof attached");
+  };
+  reader.onerror = () => toast("Could not read that image file — try a different photo/screenshot");
+  reader.readAsDataURL(file);
 }
 function admProjQueryTab(c){
   const rows = clientQueries.filter(q=>q.client_id===c.id);
@@ -8508,6 +8533,36 @@ function serviceBreakdownHtml(c, k, canEdit){
       </div>` : ""}
   </div>`;
 }
+// Finds the payment-proof image uploaded for a given client + payment label (see
+// markPaid / confirmInstallmentPaid, which tag it "Payment proof — <label> — <date>")
+// and renders a small "View proof" link. Used both in the drawer (Telecaller,
+// Marketing TL/Manager, Accounts Team — who don't have the full Documents & Links
+// tab) and can be reused anywhere else a payment status is shown.
+function paymentProofLinkHtml(clientId, label){
+  const docs = clientDocuments.filter(d=>d.client_id===clientId && (d.file_name||"").startsWith("Payment proof — "+label));
+  if(!docs.length) return "";
+  const doc = docs.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+  return `<div class="pay-meta" style="margin-top:2px" onclick="event.stopPropagation()">
+    <a href="#" onclick="event.preventDefault();admViewDocument(${doc.id});return false;" style="color:var(--purple);font-weight:700;text-decoration:underline">&#128247; View payment proof</a>
+  </div>`;
+}
+// Opens an image document straight in a new tab (proof images are meant to be
+// glanced at, not downloaded); falls back to a download for any non-image file.
+async function admViewDocument(id){
+  try{
+    const out = await api("get_client_document", {id});
+    if((out.fileType||"").startsWith("image/")){
+      const w = window.open("", "_blank");
+      if(w){
+        w.document.write(`<title>${esc(out.fileName||"Payment proof")}</title>
+          <body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh">
+          <img src="data:${esc(out.fileType)};base64,${out.fileData}" style="max-width:100%;max-height:100vh"></body>`);
+      }
+      return;
+    }
+    admDownloadDocument(id);
+  }catch(e){ toast(e.message || "Could not open that file"); }
+}
 function drawerInstallmentPlanHtml(c, canPay, canEdit){
   const items = c.installments||[];
   if(!items.length && !canEdit) return "";
@@ -8519,8 +8574,9 @@ function drawerInstallmentPlanHtml(c, canPay, canEdit){
       <div class="pay-top"><b>${esc(it.title)}</b>
         <span class="badge ${it.status==='paid'?'b-paid':'b-dim'}">${it.status==='paid'?'&#10003; Paid':'Pending'}</span></div>
       <div class="pay-meta">${it.status==='paid' ? `Rs. ${(parseFloat(it.amount)||0).toLocaleString("en-IN")} &bull; paid ${fmtDate(it.paidDate)}` : `Rs. ${(parseFloat(it.amount)||0).toLocaleString("en-IN")} &bull; not paid yet`}</div>
+      ${it.status==='paid' ? paymentProofLinkHtml(c.id, it.title) : ""}
       <div class="pay-actions" onclick="event.stopPropagation()">
-        ${canPay && it.status!=='paid' ? `<button class="btn small" onclick="markInstallmentPaidFromDrawer(${it.id})">Mark as paid</button>` : ""}
+        ${canPay && it.status!=='paid' ? `<button class="btn small" onclick="openInstallmentPayModal(${it.id},${jsq(c.id)},${jsq(it.title)},${parseFloat(it.amount)||0})">Mark as paid</button>` : ""}
         ${canEdit && it.status!=='paid' ? `<button class="xmini" onclick="deleteInstallmentFromDrawer(${it.id})" title="Remove">&times;</button>` : ""}
       </div>
     </div>`).join("");
@@ -8545,11 +8601,7 @@ async function renamePlanFromDrawer(clientId){
   await refresh(); openDrawer(clientId);
   toast("Split-up plan name saved");
 }
-async function markInstallmentPaidFromDrawer(installmentId){
-  try{ await api("mark_installment_paid", {installmentId}); }catch(e){ toast(e.message); return; }
-  await refresh();
-  toast("Installment marked as paid");
-}
+
 async function addInstallmentFromDrawer(clientId){
   const titleEl = $(`drawerInstTitle-${clientId}`), amtEl = $(`drawerInstAmt-${clientId}`);
   const title = (titleEl.value||"").trim();
@@ -8580,6 +8632,7 @@ function openDrawer(id){
       <div class="pay-top"><b>${PAY_LABELS[k]}</b>
         <span class="badge ${p.status==='paid'?'b-paid':'b-dim'}">${p.status==='paid'?'&#10003; Paid':'Pending'}</span></div>
       <div class="pay-meta">${p.status==='paid' ? `Rs. ${esc(p.amount||"—")} &bull; paid ${fmtDate(p.date)}` : "Not paid yet"}</div>
+      ${p.status==='paid' ? paymentProofLinkHtml(c.id, PAY_LABELS[k]) : ""}
       ${canPay && p.status!=='paid' ? `<div class="pay-actions"><button class="btn small" onclick="openPayModal(${jsq(c.id)},${jsq(k)})">Mark as paid</button></div>`:""}
     </div>`;
   }).join("");
@@ -10207,14 +10260,37 @@ function openPayModal(id,k){
       <div class="field"><label>Amount (Rs.)</label><input id="p_amt" type="number" placeholder="e.g. 5000" value="${sugg!=null?sugg:""}"></div>
       <div class="field"><label>Payment date</label><input id="p_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     </div>
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="markPaid(${jsq(id)},${jsq(k)})">Save payment</button></div>`);
+    <div class="field"><label>Payment proof (image only) *</label><input id="p_proof" type="file" accept="image/*">
+      <p style="font-size:12px;color:var(--muted);margin-top:5px">Required — a photo or screenshot of the payment confirmation (UPI/bank screenshot, receipt photo, etc). Only image files are accepted; PDFs and other document types are not.</p></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModalIfConfirmed()">Cancel</button><button class="btn" onclick="markPaid(${jsq(id)},${jsq(k)})">Save payment</button></div>`);
 }
+// Payment proof is mandatory and image-only (no PDFs/other documents), per policy: a
+// client can't be marked as paid without one. The proof is stored via the same
+// add_client_document API used by the Documents & Links tab, tagged with a "Payment
+// proof —" prefix so it's easy to spot there — which is how Marketing, Admin, Super
+// Admin, Technical Manager and Journal Manager (everyone with access to that tab) can
+// already see it. Accounts Team doesn't have that tab, so a "View proof" link is also
+// shown right on the payment row in their drawer (see openDrawer/drawerInstallmentPlanHtml).
 async function markPaid(id,k){
-  try{
-    await api("mark_paid",{clientId:id, payKey:k, amount:$("p_amt").value.trim(), date:$("p_date").value||null});
-  }catch(e){ toast(e.message); await refresh(); return; }
-  closeModal(); await refresh(); openDrawer(id);
-  toast("Payment saved");
+  const fileEl = $("p_proof");
+  const file = fileEl && fileEl.files[0];
+  if(!file){ toast("Attach a payment proof image before marking this as paid"); return; }
+  if(!file.type || !file.type.startsWith("image/")){ toast("Only image files (JPG, PNG, etc.) are accepted as payment proof — not PDFs or other documents"); return; }
+  if(file.size > 6_000_000){ toast("That image is too large (max ~6MB)"); return; }
+  const amount = $("p_amt").value.trim();
+  const date = $("p_date").value || null;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const b64 = reader.result.split(",")[1];
+    try{
+      const doc = await api("add_client_document", {clientId:id, fileName: `Payment proof — ${PAY_LABELS[k]} — ${date||todayISO()}`, fileType: file.type, fileData: b64, actorName: roleTitle()});
+      await api("mark_paid",{clientId:id, payKey:k, amount, date, proofDocumentId: doc && doc.id});
+    }catch(e){ toast(e.message); await refresh(); return; }
+    closeModal(); await refresh(); openDrawer(id);
+    toast("Payment saved and proof attached");
+  };
+  reader.onerror = () => toast("Could not read that image file — try a different photo/screenshot");
+  reader.readAsDataURL(file);
 }
 async function addServiceItem(id, k){
   const nameEl = $(`svcname-${id}-${k}`), amtEl = $(`svcamt-${id}-${k}`);

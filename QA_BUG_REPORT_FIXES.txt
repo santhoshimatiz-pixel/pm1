@@ -202,6 +202,56 @@ to confirm the change landed correctly. No database schema changes.
    (index.html — modalHasUnsavedInput, closeModalIfConfirmed,
     overlay click handler, Escape handler)
 
+4. TELECALLER DASHBOARD SEARCH ONLY WORKED ON "ALREADY IN THE
+   PIPELINE", NOT "MY LEADS — READY TO WORK"
+   ------------------------------------------------------------
+   The universal search bar (name/phone/client ID/project ID +
+   stage filter) sat visually between the two panels on the
+   Telecaller dashboard, but it only ever filtered the second list
+   ("Already in the pipeline") — typing a search had no effect on
+   "My leads — ready to work" above it.
+   Fixed: the search bar now applies to both panels and was moved
+   above them so it's clearly a search for the whole page, not just
+   the section below it. Also improved the "nothing here" message
+   to say "No leads/clients match your search" when a search is
+   active, instead of always showing the generic empty-dashboard
+   message even when you've just typed a search with no matches.
+   (index.html — renderTcDashboard)
+
+5. PAYMENT PROOF (IMAGE ONLY) NOW REQUIRED TO MARK A CLIENT AS PAID
+   ------------------------------------------------------------
+   "Mark as paid" (both the main Registration/stage payment and the
+   custom installment plan) now requires attaching a payment proof
+   before it can be saved — a screenshot or photo of the payment
+   confirmation. Only image files are accepted (JPG, PNG, etc.);
+   PDFs and other document types are rejected, both in the browser
+   (accept="image/*" + a MIME-type check) and on the server (which
+   verifies the uploaded file is a real image before allowing the
+   payment to be marked paid — this can't be skipped by calling the
+   API directly).
+   Visibility: the proof is stored as a tagged document ("Payment
+   proof — <stage> — <date>"), so it automatically shows up in the
+   existing Documents & Links tab that Marketing, Admin, Super
+   Admin, Technical Manager and Journal Manager already have. Since
+   Accounts Team works from the client "drawer" panel rather than
+   that tabbed page, a "📷 View payment proof" link was also added
+   directly on the payment row there (and mirrored on the admin
+   Payment Information table for consistency) — clicking it opens
+   the image cleanly in a new tab.
+   Also fixed a related permission bug while touching this code:
+   mark_paid and mark_installment_paid were server-side restricted
+   to Accounts Team + Admin only, even though the "Mark as paid"
+   button has always been shown to Telecaller/Marketing TL/Marketing
+   Manager too — meaning marketing staff got a silent 403 error if
+   they ever actually tried to use it. Widened to match what the UI
+   already offers (the same fix was previously applied to the
+   neighboring add_client_installments/delete_client_installment
+   actions, but was missed here).
+   (index.html — openPayModal/markPaid, openInstallmentPayModal/
+   confirmInstallmentPaid, paymentProofLinkHtml, admViewDocument /
+   server.py — require_payment_proof_image, mark_paid,
+   mark_installment_paid, ACTION_ROLES)
+
 ------------------------------------------------------------
 Verification performed: server.py parses cleanly (ast.parse), all
 script blocks in index.html pass a Node.js syntax check.

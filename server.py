@@ -262,6 +262,22 @@ def sanitize_upload_filetype(mime):
     return mime
 
 
+def require_payment_proof_image(con, client_id, proof_document_id):
+    """Policy: a payment can't be marked paid without an attached proof image
+    (screenshot/photo of the payment confirmation) — enforced here as well as in
+    the UI so it can't be skipped by calling the API directly. The document must
+    already exist (uploaded via add_client_document), belong to this same client,
+    and be an actual image file — not a PDF or other document type."""
+    if not proof_document_id:
+        raise ApiError("A payment proof image is required before this can be marked as paid.")
+    row = con.execute("SELECT client_id, file_type FROM client_documents WHERE id=?",
+                       (proof_document_id,)).fetchone()
+    if not row or row["client_id"] != client_id:
+        raise ApiError("The payment proof image couldn't be found — try attaching it again.")
+    if not (row["file_type"] or "").startswith("image/"):
+        raise ApiError("Payment proof must be an image file (JPG, PNG, etc.) — not a PDF or other document type.")
+
+
 # =====================================================================
 # LIGHTWEIGHT IN-MEMORY RATE LIMITING (per client IP). Good enough to slow
 # down brute-force / abusive scripting against a single-process app like
@@ -692,8 +708,14 @@ ACTION_ROLES = {
     "admin_reset_client_password": ("telecaller", "marketing_tl", "marketing_manager") + _R_ADMIN,
 
     # ---- accounts / money ----
-    "mark_paid": _R_ACCOUNTS,
-    "mark_installment_paid": _R_ACCOUNTS,
+    # BUGFIX: widened from _R_ACCOUNTS, same class of bug already fixed below for
+    # add_client_installments/delete_client_installment (see the note there). The UI's
+    # own canPay checks (openDrawer, admInstallmentPlanHtml, drawerInstallmentPlanHtml)
+    # have always shown "Mark as paid" to Telecaller/Marketing TL/Marketing Manager too,
+    # not just Accounts Team/Admin — but this authorization gate ran first and silently
+    # rejected them with a 403 before mark_paid/mark_installment_paid's own logic ran.
+    "mark_paid": _R_MARKETING + ("account_team",),
+    "mark_installment_paid": _R_MARKETING + ("account_team",),
     # BUGFIX: widened from _R_ACCOUNTS. The handler itself (see MARKETING_ROLES inside the
     # add_client_installments/delete_client_installment actions below) has always allowed
     # Telecaller/Marketing TL/Marketing Manager/Admin to manage the installment split-up,
@@ -3436,6 +3458,7 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             k = d.get("payKey") or ""
             check_pay_key(k)
+            require_payment_proof_image(con, c["id"], d.get("proofDocumentId"))
             amount = None if d.get("amount") in (None, "") else float(d["amount"])
             pay_date = d.get("date") or date.today().isoformat()
             con.execute("""UPDATE payments SET status='paid', amount=?, pay_date=?
@@ -3507,6 +3530,7 @@ def handle_action(action, d, ip=""):
             row = con.execute("SELECT * FROM client_installments WHERE id=?", (inst_id,)).fetchone()
             if not row:
                 raise ApiError("That installment no longer exists.")
+            require_payment_proof_image(con, row["client_id"], d.get("proofDocumentId"))
             amount = row["amount"] if d.get("amount") in (None, "") else float(d["amount"])
             pay_date = d.get("date") or date.today().isoformat()
             con.execute("""UPDATE client_installments SET status='paid', amount=?, paid_date=?
