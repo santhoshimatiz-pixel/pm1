@@ -1281,6 +1281,16 @@ window.addEventListener("unhandledrejection", function(e){
   try{ toast("Something went wrong: " + ((e.reason && e.reason.message) || String(e.reason))); }catch(_){}
 });
 function findClient(id){ return clients.find(c=>c.id===id); }
+// Wraps FileReader in a Promise so it can be awaited inside an async function
+// (e.g. addClient) instead of needing its own onload callback each time.
+function readFileAsBase64(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = () => reject(new Error("Could not read that image file — try a different photo/screenshot"));
+    reader.readAsDataURL(file);
+  });
+}
 // A client taking multiple services shows up as multiple records (same displayId, different
 // service). "Total clients" should count unique people/organisations, not one per service -
 // use this instead of clients.length (or list.length on a filtered subset) for that stat.
@@ -3108,6 +3118,7 @@ function renderTechnicalManagerModern(){
   setHead(isTL ? "Technical TL Dashboard" : "Technical Manager Dashboard",
     "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team",
     `<button class="btn ghost" onclick="openAssignedWorkOverview()" title="See every client with active work, who it's assigned to, and the deadline">&#128203; Assigned Work</button>
+     <button class="btn ghost" onclick="openCompletedWorkOverview()" title="See every finished proposal, implementation, and paper-writing task, and who did it">&#9989; Completed Work</button>
      <button class="btn gold" onclick="openPingTeam()" title="Call a team member to your cabin or the conference room">&#128222; Call</button>`);
   renderTMDashboard();
 }
@@ -3155,6 +3166,37 @@ function openAssignedWorkOverview(){
       }).join("")}
     </div>` : `<div class="adm-empty">Nothing currently assigned — every proposal, implementation and paper-writing slot is either unassigned or already delivered.</div>`;
   openModal(`<h3>Assigned Work</h3><p class="msub">Every client with active work right now — what it is, who's doing it, and when it's due. Click a row to open that client.</p>${body}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+}
+// The companion task tmCreateCompanionTask() creates alongside every proposal/
+// implementation/paper-writing assignment is the one clean record of "this piece of
+// work finished, here's who did it and what the deadline was" — client.stage moves on
+// to the next step and stops carrying that history, but the task row (status COMPLETED)
+// stays put. So, unlike Assigned Work (which reads live off client.stage), Completed
+// Work reads off the tasks list itself.
+const COMPLETED_WORK_TYPE_LABEL = {PROPOSAL:"Proposal Writing", IMPLEMENTATION:"Code Implementation", PAPER_WRITING:"Paper Writing"};
+function completedWorkRows(){
+  return tasks.filter(t=>t.status==='COMPLETED' && COMPLETED_WORK_TYPE_LABEL[t.task_type])
+    .map(t=>({task:t, client:findClient(t.client_id), type:COMPLETED_WORK_TYPE_LABEL[t.task_type]}))
+    .filter(r=>r.client)
+    .sort((a,b)=> new Date(b.task.created_at) - new Date(a.task.created_at)); // most recently completed first
+}
+function openCompletedWorkOverview(){
+  const rows = completedWorkRows();
+  const body = rows.length ? `<div style="max-height:60vh;overflow-y:auto">
+      ${rows.map(r=>{
+        return `<div class="adm-bar-row" style="cursor:pointer" onclick="closeModal();admOpenProjectTab(${jsq(r.client.id)},'dashboard')">
+          <div class="lbl">
+            <b>${esc(r.client.name)}</b> <span class="badge b-paid" style="margin:0 6px">${esc(r.type)}</span><br>
+            <small style="color:#8DA39A">${esc(r.task.assigned_to||"—")}</small>
+          </div>
+          <div style="flex:0 0 auto;text-align:right">
+            <small style="color:var(--muted)">${r.task.finish_date ? "Deadline was "+fmtDate(r.task.finish_date) : "No deadline set"}</small>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>` : `<div class="adm-empty">No proposal, implementation, or paper-writing task has been marked completed yet.</div>`;
+  openModal(`<h3>Completed Work</h3><p class="msub">Every finished proposal, implementation, and paper-writing task, most recent first — who did it and what the deadline was. Click a row to open that client.</p>${body}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
 function admOpenProjectTab(id, tab){
@@ -9932,6 +9974,8 @@ function openAddClient(){
         <div class="field"><label>Registration amount paid (Rs.) *</label><input id="f_regAmt" type="number" placeholder="e.g. 25000" oninput="renderInstallmentBuilder()"></div>
       </div>
       <p style="color:var(--muted);font-size:12.5px;margin:-6px 0 0">The client must pay this to be registered — this marks the Registration payment as paid immediately.</p>
+      <div class="field"><label>Registration payment proof (image only) *</label><input id="f_regProof" type="file" accept="image/*">
+        <p style="font-size:12px;color:var(--muted);margin-top:5px">Required — a photo or screenshot of the payment confirmation (UPI/bank screenshot, receipt photo, etc). Only image files are accepted; PDFs and other document types are not.</p></div>
       <div id="f_paySummary"></div>
       <div class="pay-split-box">
         <label>Split-up for the remaining amount</label>
@@ -10080,6 +10124,14 @@ async function addClient(){
   if(!totalAmount || parseFloat(totalAmount)<=0){ toast("Enter the total amount for this service"); return; }
   if(!regAmount || parseFloat(regAmount)<=0){ toast("Enter the registration amount the client paid — this is required to register them"); return; }
   if(parseFloat(regAmount) > parseFloat(totalAmount)){ toast(`Registration (Rs. ${parseFloat(regAmount).toLocaleString("en-IN")}) can't be more than the Total amount (Rs. ${parseFloat(totalAmount).toLocaleString("en-IN")})`); return; }
+  // Every other payment stage (markPaid, above) requires a proof image before it can
+  // be marked paid — Registration is marked paid the instant a client is added here,
+  // so it needs the same requirement, just enforced on this form instead.
+  const regProofEl = $("f_regProof");
+  const regProofFile = regProofEl && regProofEl.files[0];
+  if(!regProofFile){ toast("Attach a payment proof image for the registration amount before saving"); return; }
+  if(!regProofFile.type || !regProofFile.type.startsWith("image/")){ toast("Only image files (JPG, PNG, etc.) are accepted as payment proof — not PDFs or other documents"); return; }
+  if(regProofFile.size > 6_000_000){ toast("That image is too large (max ~6MB)"); return; }
   if(addClientInstallments.length){
     const remaining = installmentRemaining();
     const splitSum = addClientInstallments.reduce((s,it)=>s+(parseFloat(it.amount)||0),0);
@@ -10101,6 +10153,10 @@ async function addClient(){
       regDate:$("f_reg").value, deadlineDate:deadline, address:$("f_addr").value.trim(), notes:$("f_notes").value.trim(),
       actorLabel, serviceKey, regAmount, installmentPlanName: ($("f_splitName")||{}).value?.trim() || ""});
   }catch(e){ toast(e.message); await refresh(); return; }
+  try{
+    const b64 = await readFileAsBase64(regProofFile);
+    await api("add_client_document", {clientId: out.id, fileName: `Payment proof — ${PAY_LABELS.reg} — ${$("f_reg").value || todayISO()}`, fileType: regProofFile.type, fileData: b64, actorName: actorLabel});
+  }catch(e){ toast(`${name} added, but the payment proof couldn't be attached: ` + e.message); }
   closeModal(); await refresh();
   toast(`${name} added — client ID ${out.id}, project ${out.projectId} (share it for their login)`);
   if(addClientInstallments.length){
