@@ -330,10 +330,104 @@ to confirm the change landed correctly. No database schema changes.
    admProfileDashboardTab pending-approval banner, calendar filter
    checkboxes, and every other spot using these three colors)
 
+9. CALENDAR TOO LARGE ON THE TECHNICAL MANAGER DASHBOARD
+   ------------------------------------------------------------
+   The month calendar's day cells were sized purely by dividing up
+   whatever width the surrounding panel gave them (7 equal columns,
+   each cell a square). On the Technical Manager dashboard the
+   calendar sits in a wide column next to the case-status donut
+   chart, so each day cell stretched into an oversized square and
+   the whole calendar ended up much bigger than it needed to be.
+   Capped the calendar's overall width and each day cell's size, and
+   centered it within its panel, so it now stays a compact, sensible
+   size no matter how wide the column around it is. This applies
+   everywhere the same calendar component is used (Admin, Marketing
+   Manager, Technical Manager/TL, Journal Manager dashboards), so
+   it's fixed consistently rather than just patched for one screen.
+   (index.html — .adm-cal / .adm-cal .cell CSS)
+
+10. HOVERING A ROW MADE TEXT DISAPPEAR IN DARK MODE (every table,
+    every dashboard)
+    ------------------------------------------------------------
+    Table row hover, calendar day-cell hover, the calendar arrow
+    buttons, and the notification bell all had their "highlight on
+    hover" background hardcoded to a light color (#F5FBFC / #E6F5F7)
+    regardless of theme. In light mode this was a subtle tint; in
+    dark mode, the row's text is light-colored to be readable on the
+    dark card — so the moment you hovered a row, it flashed to a
+    near-white background with light text still on top of it,
+    making the whole row unreadable until the cursor moved away.
+    This is exactly what the screenshot showed: hovering "Krishna
+    mohan A V" turned that row white and its text vanished into it.
+    Fixed by switching every one of these hover backgrounds from a
+    fixed light color to a translucent brand-tinted overlay
+    (rgba, not an opaque color), which sits on top of whichever
+    theme's surface is underneath instead of replacing it — so
+    hovering a row now shows a subtle highlight in both light and
+    dark mode without ever fighting the text color. This was a
+    handful of shared CSS rules, so it's fixed at once across every
+    table and dashboard that uses them (Clients, Projects, Team,
+    Tasks, Journals, the calendar grid, etc.) rather than needing a
+    per-screen patch.
+    (index.html — tbody tr:hover, table.adm-table tbody tr:hover
+    [+ its sticky last-column hover], .adm-cal .cell:hover,
+    .adm-cal-arrow:hover, .bell-btn:hover)
+
+11. TECHNICAL MANAGER TASK ASSIGNMENT — three related problems
+    ------------------------------------------------------------
+    a) Assigning via "Assign Work" could silently fail to reach the
+       employee. Assign Work correctly moves the client forward in
+       the pipeline immediately, but the actual task record (the
+       thing that makes it show up in that employee's "My assigned
+       tasks") was created as a separate, "best-effort" step
+       afterwards — and if that step ever failed, the error was
+       swallowed completely silently. The pipeline would say
+       "assigned" but the employee might never see it. Fixed: any
+       failure here now tells the manager directly, so they know to
+       add the task manually instead of assuming it went through.
+       (index.html — tmCreateCompanionTask)
+
+    b) A client could get stuck endlessly reappearing in "New Work
+       To Assign" for the same stage. This happened because there
+       are two different ways to "assign" Proposal/Implementation/
+       Paper Writing work: the dedicated Assign Work queue (which
+       correctly moves the client's pipeline stage forward) and the
+       general-purpose "+ Add Task" screen (which only creates a
+       standalone task and was never wired to move the pipeline
+       stage at all). If a manager used Add Task instead of Assign
+       Work for one of these three task types, the task got created
+       and assigned to an employee just fine, but the client's stage
+       never advanced — so it kept showing up needing "proposal"
+       (or implementation/paper writing) assignment again and again,
+       even though someone had technically already been assigned.
+       Fixed: Add Task now detects this exact situation live as
+       you fill in the client and task type, shows a clear warning
+       banner explaining that creating a task here won't move the
+       client forward and pointing to Assign Work instead, and asks
+       for confirmation before letting you proceed anyway (so it's
+       a warning, not a hard block — there can be legitimate reasons
+       to log a side task). This does not retroactively fix clients
+       already stuck in this state from before — those need one
+       real assignment through Assign Work to move forward.
+       (index.html — tmTaskTypeStillNeedsQueueAssignment, tkRefreshWarning)
+
+    c) No warning when assigning the same stage of work twice. Add
+       Task had no idea whether a client already had a Proposal /
+       Implementation / Paper Writing task in progress or completed,
+       so it was easy to accidentally create a second, competing
+       task for work that was already assigned to (or finished by)
+       someone else. Fixed: Add Task now checks for an existing task
+       of the same type for that client and, if found, shows who it's
+       assigned to and its current status (open / in progress /
+       submitted / needs correction / completed) — both as a live
+       banner while filling the form and as a final confirmation
+       before saving — so the manager makes an informed choice
+       instead of finding out later that two people were assigned
+       the same work.
+       (index.html — existingTaskFor, TASK_STATUS_PLAIN_LABEL,
+       tkRefreshWarning, admSaveTask)
+
 ------------------------------------------------------------
 Verification performed: server.py parses cleanly (ast.parse), all
-script blocks in index.html pass a Node.js syntax check. Contrast
-ratios for every fixed color were calculated against both the light
-and dark theme backgrounds (WCAG relative-luminance formula) to
-confirm they're now readable rather than just "probably fine".
+script blocks in index.html pass a Node.js syntax check.
 ============================================================

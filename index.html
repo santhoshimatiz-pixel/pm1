@@ -287,7 +287,7 @@ table{width:100%;border-collapse:collapse;min-width:640px}
 th{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);text-align:left;padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;font-weight:700;background:var(--card2)}
 td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle}
 tbody tr{transition:background .12s var(--ease)}
-tbody tr:hover{background:#F5FBFC}
+tbody tr:hover{background:rgba(14,116,144,.12)}
 tbody tr:last-child td{border-bottom:none}
 .cl-name{font-weight:600}
 .cl-name small{display:block;color:var(--muted);font-weight:600;font-size:11.5px;font-family:var(--mono);letter-spacing:.01em}
@@ -566,7 +566,7 @@ tbody tr:last-child td{border-bottom:none}
 .adm-kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow-sm);transition:transform .14s var(--ease),box-shadow .14s var(--ease)}
 .adm-kpi[onclick]:hover,.adm-panel[onclick]:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .adm-chip[onclick]:hover{opacity:.75}
-.adm-cal .cell[onclick]:hover{background:#E6F5F7}
+.adm-cal .cell[onclick]:hover{background:rgba(14,116,144,.16)}
 .adm-kpi h4{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:10px}
 .adm-kpi .frac{font-family:var(--disp);font-size:25px;font-weight:700;color:var(--text);display:flex;align-items:baseline;gap:4px;letter-spacing:-.02em}
 .adm-kpi .frac span{font-size:14px;color:var(--faint);font-weight:600}
@@ -612,11 +612,11 @@ table.adm-table{width:100%;border-collapse:collapse;min-width:760px}
 table.adm-table thead th{background:var(--card2);padding:10px 14px;white-space:nowrap;border-bottom:1px solid var(--line);vertical-align:middle}
 table.adm-table td{padding:13px 16px;font-size:13px;color:var(--text);border-bottom:1px solid var(--line)}
 table.adm-table tbody tr{cursor:pointer;transition:background .12s}
-table.adm-table tbody tr:hover{background:#F5FBFC}
+table.adm-table tbody tr:hover{background:rgba(14,116,144,.12)}
 table.adm-table tbody tr:last-child td{border-bottom:none}
 table.adm-table th:last-child,table.adm-table td:last-child{position:sticky;right:0;background:var(--card,#fff);box-shadow:-6px 0 6px -6px rgba(0,0,0,.12)}
 table.adm-table thead th:last-child{background:var(--card2);z-index:2}
-table.adm-table tbody tr:hover td:last-child{background:#F5FBFC}
+table.adm-table tbody tr:hover td:last-child{background:rgba(14,116,144,.12)}
 .adm-th-row{display:flex;align-items:center;gap:6px}
 .adm-th-row-plain{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
 .adm-th-icon{width:13px;height:13px;color:var(--faint);flex-shrink:0}
@@ -665,10 +665,10 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-status.warn{background:#FEF3E2;color:var(--warn)}
 .adm-status.bad{background:#FDECEC;color:#B42318}
 
-.adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:380px;margin:0 auto}
 .adm-cal .dow{font-size:10px;color:var(--faint);font-weight:700;text-align:center;padding-bottom:4px;text-transform:uppercase}
-.adm-cal .cell{aspect-ratio:1;border-radius:8px;background:var(--card2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--faint);position:relative;transition:background .12s}
-.adm-cal .cell:hover{background:#E6F5F7;color:var(--text)}
+.adm-cal .cell{aspect-ratio:1;max-width:50px;border-radius:8px;background:var(--card2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--faint);position:relative;transition:background .12s}
+.adm-cal .cell:hover{background:rgba(14,116,144,.16);color:var(--text)}
 .adm-cal .cell.has{color:var(--text);font-weight:600}
 .adm-cal .cell .dot{width:6px;height:6px;border-radius:50%}
 .adm-cal .cell .dot.deadline{background:#DC2626}
@@ -680,7 +680,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .adm-cal-nav{display:flex;align-items:center;gap:6px}
 .adm-cal-arrow{width:28px;height:28px;border-radius:8px;border:1px solid var(--line-strong);background:var(--card);color:var(--text);font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .12s}
-.adm-cal-arrow:hover{background:#E6F5F7;border-color:var(--purple);color:var(--purple)}
+.adm-cal-arrow:hover{background:rgba(14,116,144,.16);border-color:var(--purple);color:var(--purple)}
 .cal-mini-select{border:1px solid var(--line-strong);border-radius:8px;background:var(--card);color:var(--text);font-size:12.5px;font-weight:600;padding:5px 6px;cursor:pointer;max-width:104px;text-transform:none;letter-spacing:normal}
 
 .adm-empty{padding:30px;text-align:center;color:var(--faint);font-size:13px}
@@ -752,7 +752,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .proj-pill.act{background:linear-gradient(135deg,rgba(34,166,179,.4),rgba(14,116,144,.24));color:#fff;box-shadow:inset 0 0 0 1px rgba(34,166,179,.4)}
 .proj-pill small{opacity:.75;font-weight:500;font-size:11px}
 .bell-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:var(--card);border:1px solid var(--line);color:var(--text);font-size:17px;cursor:pointer;box-shadow:var(--shadow-sm);transition:background .15s var(--ease)}
-.bell-btn:hover{background:#E6F5F7}
+.bell-btn:hover{background:rgba(14,116,144,.16)}
 .bell-dot{position:absolute;top:2px;right:2px;min-width:16px;height:16px;padding:0 3px;border-radius:9px;background:var(--bad);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1}
 .pay-progress-wrap{margin:10px 0 14px}
 .pay-progress-track{height:9px;border-radius:6px;background:var(--card2);overflow:hidden}
@@ -3439,13 +3439,20 @@ function tmDeliveryHtml(){
   </div>${awaitingHtml}`;
 }
 async function tmCreateCompanionTask(clientId, taskType, taskLabel, assignedTo, deadline, startDate){
-  // Best-effort tracking record so the assignment shows up in "My assigned tasks",
-  // the Work Approval flow, and the Total Proposal/Implementation/Paper Writing stat boxes.
-  // The REAL pipeline stage change already happened via the assign_* API call before this runs.
+  // Tracking record so the assignment shows up in "My assigned tasks", the Work
+  // Approval flow, and the Total Proposal/Implementation/Paper Writing stat boxes.
+  // The REAL pipeline stage change already happened via the assign_* API call before
+  // this runs, so a failure here never blocks the assignment itself — but it used to
+  // fail completely silently, which meant the employee could end up with no visible
+  // task for work that was, from the pipeline's point of view, already assigned to
+  // them. Now the manager is told if this step didn't go through, so they know to
+  // create the task manually instead of assuming it's there.
   try{
     await api("add_task", {title: taskLabel, clientId, priority:"MEDIUM", taskType,
       startDate: startDate || todayISO(), finishDate: deadline, assignedTo, actorName: taskActorName()});
-  }catch(e){ /* non-fatal */ }
+  }catch(e){
+    toast(`Assigned in the pipeline, but couldn't create the tracking task (${e.message || "unknown error"}) — add it manually from Tasks > Add Task so ${assignedTo} sees it in their list.`);
+  }
 }
 async function tmAssignProposalNow(id){
   const nameEl = $("aw-pw-"+id), dlEl = $("aw-pwdl-"+id), sdEl = $("aw-pwsd-"+id);
@@ -7110,10 +7117,11 @@ function admOpenAddTask(prefillClientId){
   const options = scopedClientsForCurrentView().slice().sort((a,b)=>a.name.localeCompare(b.name))
     .map(c=>`<option value="${c.id}" ${c.id===prefillClientId?'selected':''}>${clientOptionLabel(c)}</option>`).join("");
   openModal(`<h3>Add task</h3><p class="msub">${tmQuickAssignMode?'Create a task and assign it to one or more technical team members. You can add several tasks (Proposal, Implementation, Paper Writing…) for this client one after another without closing this window.':'Create a task and optionally link it to a client / project.'}</p>
+    <div id="tk_warn"></div>
     <div class="grid2">
       <div class="field"><label>Task Name *</label><input id="tk_title" placeholder="e.g. Prepare proposal draft"></div>
       <div class="field"><label>Task Type</label>
-        <select id="tk_type" onchange="admRefreshTaskAssignBox()">
+        <select id="tk_type" onchange="admRefreshTaskAssignBox();tkRefreshWarning()">
           <option value="">Other / general</option>
           <option value="PROPOSAL">Proposal Writing</option>
           <option value="IMPLEMENTATION">Code Implementation</option>
@@ -7122,7 +7130,7 @@ function admOpenAddTask(prefillClientId){
       </div>
     </div>
     <div class="field"><label>Client / Project *</label>
-      <select id="tk_client"><option value="">Select a client…</option>${options}</select>
+      <select id="tk_client" onchange="tkRefreshWarning()"><option value="">Select a client…</option>${options}</select>
     </div>
     <div class="grid2">
       <div class="field"><label>Priority</label>
@@ -7134,7 +7142,7 @@ function admOpenAddTask(prefillClientId){
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
     <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
-  admRefreshTaskAssignBox();
+  admRefreshTaskAssignBox(); tkRefreshWarning();
 }
 // Journal Manager's Add Task — same modal shape, but the task type is a closed set
 // (Proofreading / Formatting / Submission only — no Paper Writing or Code Implementation,
@@ -7253,12 +7261,63 @@ function tkClearFieldErrors(){
   const trig = $("tk_assign_trigger"); if(trig) trig.classList.remove("field-invalid");
   const err = $("tk_assign_err"); if(err) err.style.display = "none";
 }
+// Checks whether this client's pipeline is actually still waiting for this exact
+// stage of work to be assigned via the dedicated "Assign Work" queue (Technical
+// Manager/TL only — that queue is what actually moves TECH_ASSIGNED /
+// PROPOSAL_APPROVED / IMPLEMENTATION_APPROVED clients forward). Creating a task
+// here for one of these three types does NOT move the client's stage — only
+// Assign Work does — so this is used to warn before that confusion happens.
+function tmTaskTypeStillNeedsQueueAssignment(client, taskType){
+  if(!client || !["PROPOSAL","IMPLEMENTATION","PAPER_WRITING"].includes(taskType)) return false;
+  if(!(role==="technical_manager" || role==="technical_tl")) return false;
+  const conf = serviceConf(client);
+  if(taskType==="PROPOSAL") return client.stage==="TECH_ASSIGNED" && conf.hasImplementation;
+  if(taskType==="IMPLEMENTATION") return client.stage==="PROPOSAL_APPROVED";
+  if(taskType==="PAPER_WRITING") return (client.stage==="TECH_ASSIGNED" && !conf.hasImplementation) || client.stage==="IMPLEMENTATION_APPROVED";
+  return false;
+}
+// Finds any existing task already covering this same client + task type, so the
+// manager can be told "this work is already assigned to X / already done" instead
+// of silently creating a duplicate that looks like a second, competing assignment.
+function existingTaskFor(clientId, taskType){
+  if(!taskType) return null;
+  const matches = tasks.filter(t=>t.client_id===clientId && t.task_type===taskType);
+  if(!matches.length) return null;
+  // Prefer the most recent one that isn't cancelled/rejected-equivalent; any match is worth flagging.
+  return matches.slice().sort((a,b)=> new Date(b.created_at) - new Date(a.created_at))[0];
+}
+const TASK_STATUS_PLAIN_LABEL = {OPEN:"open", IN_PROGRESS:"in progress", SUBMITTED:"submitted — awaiting your approval",
+  NEEDS_CORRECTION:"sent back for correction", COMPLETED:"completed"};
+// Live warning banner in the Add Task modal — updates as soon as the client or task
+// type changes, so the manager sees the conflict before filling in the rest of the
+// form, not just at the moment they hit Save.
+function tkRefreshWarning(){
+  const box = $("tk_warn");
+  if(!box) return;
+  const clientId = ($("tk_client")||{}).value || "";
+  const taskType = ($("tk_type")||{}).value || "";
+  const client = clientId ? findClient(clientId) : null;
+  if(!client){ box.innerHTML = ""; return; }
+  const notes = [];
+  const existing = existingTaskFor(clientId, taskType);
+  if(existing){
+    const statusLabel = TASK_STATUS_PLAIN_LABEL[existing.status] || existing.status;
+    notes.push(`${esc(client.name)} already has a ${esc(TASK_TYPE_LABEL[taskType]||taskType)} task — assigned to ${esc(existing.assigned_to||"someone")}, currently <b>${esc(statusLabel)}</b>.`);
+  }
+  if(tmTaskTypeStillNeedsQueueAssignment(client, taskType)){
+    notes.push(`${esc(client.name)} is still waiting in the <b>Assign Work</b> queue for this exact stage — a task created here won't move them forward in the pipeline. Use Assign Work instead if you want this client to actually progress.`);
+  }
+  box.innerHTML = notes.length
+    ? `<div style="background:rgba(180,35,24,.08);border:1px solid rgba(180,35,24,.25);color:var(--text);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:14px">${notes.map(n=>`&#9888; ${n}`).join("<br><br>")}</div>`
+    : "";
+}
 async function admSaveTask(){
   tkClearFieldErrors();
   const title = $("tk_title").value.trim();
   const clientId = $("tk_client").value;
   const startDate = $("tk_start").value;
   const finishDate = $("tk_finish").value;
+  const taskType = $("tk_type").value;
   const assignedNames = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value);
   const assignedTo = assignedNames.join(", ");
 
@@ -7280,8 +7339,20 @@ async function admSaveTask(){
     return;
   }
 
+  const client = findClient(clientId);
+  const existing = existingTaskFor(clientId, taskType);
+  if(existing){
+    const statusLabel = TASK_STATUS_PLAIN_LABEL[existing.status] || existing.status;
+    const ok = confirm(`${client?client.name:"This client"} already has a ${TASK_TYPE_LABEL[taskType]||taskType} task — assigned to ${existing.assigned_to||"someone"}, currently ${statusLabel}.\n\nAdd another one anyway?`);
+    if(!ok) return;
+  }
+  if(tmTaskTypeStillNeedsQueueAssignment(client, taskType)){
+    const ok = confirm(`${client?client.name:"This client"} is still waiting in the "Assign Work" queue for this exact stage — creating a task here will NOT move them forward in the pipeline (only Assign Work does that).\n\nCreate this as a standalone task anyway? (Cancel, then use Assign Work instead, if you want this client to actually progress.)`);
+    if(!ok) return;
+  }
+
   try{
-    await api("add_task", {title, clientId, priority: $("tk_priority").value, taskType: $("tk_type").value,
+    await api("add_task", {title, clientId, priority: $("tk_priority").value, taskType,
       startDate, finishDate, description: $("tk_desc").value.trim(),
       assignedTo, actorName: roleTitle()});
     await loadData();
