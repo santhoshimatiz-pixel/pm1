@@ -252,6 +252,45 @@ to confirm the change landed correctly. No database schema changes.
    server.py — require_payment_proof_image, mark_paid,
    mark_installment_paid, ACTION_ROLES)
 
+6. TELECALLER DASHBOARD: "MY LEADS" AND "ALREADY IN THE PIPELINE"
+   NOW CLICKABLE TABS INSTEAD OF ONE LONG STACKED PAGE
+   ------------------------------------------------------------
+   Both sections used to render one below the other on the same
+   page, so "Already in the pipeline" was easy to miss and there
+   was no way to look at just one list at a time.
+   Fixed: added a small tab bar at the top of the Telecaller
+   dashboard with "My leads — ready to work" and "Already in the
+   pipeline" as two clickable options (each showing its own count),
+   matching the pattern used elsewhere in the app (e.g. the Client
+   Profile tabs). Clicking one shows only that list; the universal
+   search bar sits above both and filters whichever tab is active.
+   (index.html — tcDashSubTab, renderTcDashboard)
+
+7. ADDED DARK MODE / LIGHT MODE
+   ------------------------------------------------------------
+   The app had leftover dark-mode plumbing (a `data-theme` attribute,
+   a `matiz_theme` storage key) that was actually being forced back
+   to light and wiped on every single page load — so dark mode
+   never really worked, and there was no dark color palette defined
+   for it to switch to anyway.
+   Added a full dark theme (background/card/text/border colors,
+   tuned shadows) alongside the existing light one, and a toggle:
+     - "Dark mode" / "Light mode" button in the sidebar (under your
+       name, above Log out) for every signed-in view.
+     - A small theme button in the top-right corner of the login
+       screen, so the choice is available before signing in too.
+   The choice is remembered (saved to the browser) and re-applied
+   instantly on the next visit before the page paints, so there's
+   no flash of the wrong theme. A number of structural surfaces
+   (panel/card/tab/menu backgrounds) that were hardcoded to white
+   were switched to follow the theme so they don't stay stuck
+   white in dark mode; a few decorative/branding elements (the
+   logo tile, the always-dark sidebar itself, chart colors) are
+   intentionally unaffected by the toggle since they're not meant
+   to change with theme.
+   (index.html — :root[data-theme="dark"], setTheme/toggleTheme/
+   currentTheme, #themeToggleBtn, the inline boot script in <head>)
+
 ------------------------------------------------------------
 Verification performed: server.py parses cleanly (ast.parse), all
 script blocks in index.html pass a Node.js syntax check.
