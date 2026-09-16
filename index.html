@@ -3494,7 +3494,7 @@ async function tmAssignImplementationNow(id){
   const dlEl = $("aw-dl-"+id), sdEl = $("aw-sd-"+id);
   const dl = dlEl ? dlEl.value : "";
   const startDate = sdEl ? sdEl.value : "";
-  if(!picked.length || !dl){ toast("Pick at least one programmer and a deadline"); return; }
+  if(!picked.length || !dl){ toast("Pick a programmer and a deadline"); return; }
   if(startDate && dl && startDate > dl){ toast("Start date can't be after the deadline"); return; }
   try{ await api("assign_programmers",{clientId:id, programmers:picked, deadline:dl, startDate, actorLabel: taskActorName()}); }
   catch(e){ toast(e.message); await refresh(); return; }
@@ -3507,7 +3507,7 @@ async function tmAssignWritersNow(id){
   const dlEl = $("aw-wdl-"+id), sdEl = $("aw-wsd-"+id);
   const dl = dlEl ? dlEl.value : "";
   const startDate = sdEl ? sdEl.value : "";
-  if(!picked.length || !dl){ toast("Pick at least one paper writer and a writing deadline"); return; }
+  if(!picked.length || !dl){ toast("Pick a paper writer and a writing deadline"); return; }
   if(startDate && dl && startDate > dl){ toast("Start date can't be after the deadline"); return; }
   try{ await api("assign_writers",{clientId:id, writers:picked, deadline:dl, startDate, actorLabel: taskActorName()}); }
   catch(e){ toast(e.message); await refresh(); return; }
@@ -3536,10 +3536,10 @@ function tmAssignWorkHtml(){
         <button class="btn small" style="margin-top:8px" onclick="tmAssignProposalNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>
         ${preAssignExtraHtml(c.id,'aw')}</div>`;
     } else if(type==="IMPLEMENTATION"){
-      const boxes = programmerNames().map(n=>`<label class="ms-select-opt"><input type="checkbox" data-aw-prog="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this)"> ${esc(programmerLabel(n))}</label>`).join("");
+      const boxes = programmerNames().map(n=>`<label class="ms-select-opt"><input type="radio" name="aw-prog-${c.id}" data-aw-prog="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this);msCloseAllPops()"> ${esc(programmerLabel(n))}</label>`).join("");
       const picker = programmerNames().length ? `<div class="ms-select">
           <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
-            <span class="ms-select-display" data-placeholder="Select programmer(s)…">Select programmer(s)…</span>
+            <span class="ms-select-display" data-placeholder="Select programmer…">Select programmer…</span>
             <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
@@ -3549,10 +3549,10 @@ function tmAssignWorkHtml(){
         <input type="date" class="mini-date" min="${todayISO()}" id="aw-dl-${c.id}" placeholder="Implementation deadline" title="Implementation deadline">
         <button class="btn small" style="margin-top:8px" onclick="tmAssignImplementationNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button></div>`;
     } else {
-      const boxes = writerNames().map(n=>`<label class="ms-select-opt"><input type="checkbox" data-aw-writer="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this)"> ${esc(writerLabel(n))}</label>`).join("");
+      const boxes = writerNames().map(n=>`<label class="ms-select-opt"><input type="radio" name="aw-writer-${c.id}" data-aw-writer="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this);msCloseAllPops()"> ${esc(writerLabel(n))}</label>`).join("");
       const picker = writerNames().length ? `<div class="ms-select">
           <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
-            <span class="ms-select-display" data-placeholder="Select paper writer(s)…">Select paper writer(s)…</span>
+            <span class="ms-select-display" data-placeholder="Select paper writer…">Select paper writer…</span>
             <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
@@ -7169,7 +7169,7 @@ function admOpenAddTask(prefillClientId){
     </div>
     <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employee — assign to one *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox(); tkRefreshWarning();
 }
@@ -7203,7 +7203,7 @@ function jmOpenAddTask(prefillClientId){
     </div>
     <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employee — assign to one *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox();
 }
@@ -7228,7 +7228,7 @@ function mktOpenAddTask(prefillClientId){
     </div>
     <div class="field"><label>Start Date *</label><input id="tk_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Task Description</label><textarea id="tk_desc" rows="3"></textarea></div>
-    <div class="field"><label>To Employees — assign to one or more *</label><div id="tk_assign_wrap"></div></div>
+    <div class="field"><label>To Employee — assign to one *</label><div id="tk_assign_wrap"></div></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">${tmQuickAssignMode?'Done':'Cancel'}</button><button class="btn" onclick="admSaveTask()">Add task</button></div>`);
   admRefreshTaskAssignBox();
 }
@@ -7252,14 +7252,14 @@ function admRefreshTaskAssignBox(){
   wrap.innerHTML = names.length
     ? `<div class="ms-select" id="tk_assign_ms">
         <div class="ms-select-trigger" id="tk_assign_trigger" onclick="tkToggleEmpDropdown(event)">
-          <span class="ms-select-display" id="tk_assign_display">Select employee(s)…</span>
+          <span class="ms-select-display" id="tk_assign_display">Select employee…</span>
           <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <div class="ms-select-pop" id="tk_assign_pop" onclick="event.stopPropagation()">
-          ${names.map(n=>`<label class="ms-select-opt"><input type="checkbox" class="tk-emp" value="${esc(n)}" onchange="tkUpdateEmpDisplay()"> ${esc(n)}</label>`).join("")}
+          ${names.map(n=>`<label class="ms-select-opt"><input type="radio" name="tk-emp-group" class="tk-emp" value="${esc(n)}" onchange="tkUpdateEmpDisplay();msCloseAllPops()"> ${esc(n)}</label>`).join("")}
         </div>
       </div>
-      <div class="field-err-msg" id="tk_assign_err" style="display:none">Select at least one employee.</div>`
+      <div class="field-err-msg" id="tk_assign_err" style="display:none">Select an employee.</div>`
     : `<span style="color:var(--muted);font-size:13px">${isJournalModern() ? "No journal team members yet — add Proofreaders/Formatters/Submission staff from the Team page."
         : isMktModern() ? "No telecallers yet — add them from the Team page."
         : "No technical team members yet — add Programmers/Paper Writers from the Team page."}</span>`;
@@ -7359,7 +7359,7 @@ function tkUpdateEmpDisplay(){
   const checked = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value);
   const disp = $("tk_assign_display");
   if(disp){
-    disp.textContent = checked.length ? checked.join(", ") : "Select employee(s)…";
+    disp.textContent = checked.length ? checked.join(", ") : "Select employee…";
     disp.classList.toggle("has-value", checked.length>0);
   }
   const trig = $("tk_assign_trigger");
