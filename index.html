@@ -1934,6 +1934,7 @@ function tcSearchBarHtml(){
 }
 function rerenderCurrent(){
   if(!currentViewFn) return;
+  if(typeof msCloseAllPops==="function") msCloseAllPops();
   const el = document.activeElement;
   const isField = el && (el.tagName==="INPUT" || el.tagName==="TEXTAREA") && el.id;
   const fid = isField ? el.id : null;
@@ -7269,13 +7270,67 @@ function admRefreshTaskAssignBox(){
 // long sprawling row of individual checkbox boxes. Works off the clicked element's
 // own DOM position rather than a fixed id, since Assign Work can have several of
 // these open on the page at once (one per client row).
+// Dropdown "pops" (like the programmer/writer picker above) live inside panels that
+// use overflow:hidden so their rounded corners clip correctly. That's fine for normal
+// content, but it silently clips a long checkbox list too — the list *can* scroll
+// internally, but anything past the panel's edge is invisible, so it looks like
+// there's only one option and no way to reach the rest. To fix that without touching
+// overflow on every panel (which would break the rounded-corner clipping elsewhere),
+// we temporarily move ("portal") the open pop out to <body> with position:fixed,
+// positioned under its trigger — so it floats above everything and isn't clipped —
+// then move it back to its original spot the moment it closes.
+function msFindPop(trigger){
+  const sib = trigger.nextElementSibling;
+  if(!sib) return null;
+  if(sib.classList && sib.classList.contains("ms-select-pop")) return sib;
+  if(sib._msPop) return sib._msPop; // sib is the placeholder left behind while pop is portaled to <body>
+  return null;
+}
+function msPositionPop(trigger, pop){
+  const rect = trigger.getBoundingClientRect();
+  const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+  pop.style.position = "fixed";
+  pop.style.left = Math.min(rect.left, maxLeft) + "px";
+  pop.style.top = (rect.bottom + 6) + "px";
+  pop.style.width = rect.width + "px";
+  pop.style.right = "auto";
+  pop.style.maxHeight = Math.max(120, Math.min(220, window.innerHeight - rect.bottom - 16)) + "px";
+}
+function msOpenPop(trigger, pop){
+  const anchor = document.createElement("span");
+  anchor.style.display = "none";
+  pop.parentNode.insertBefore(anchor, pop);
+  anchor._msPop = pop;
+  pop._msAnchor = anchor;
+  pop._msTrigger = trigger;
+  document.body.appendChild(pop);
+  msPositionPop(trigger, pop);
+  pop.classList.add("open");
+  if(!window.__msReposition){
+    window.__msReposition = ()=>document.querySelectorAll(".ms-select-pop.open").forEach(p=>{ if(p._msTrigger) msPositionPop(p._msTrigger, p); });
+    window.addEventListener("scroll", window.__msReposition, true);
+    window.addEventListener("resize", window.__msReposition);
+  }
+}
+function msClosePop(pop){
+  if(pop._msAnchor && pop._msAnchor.parentNode){
+    pop._msAnchor.parentNode.insertBefore(pop, pop._msAnchor);
+    pop._msAnchor.parentNode.removeChild(pop._msAnchor);
+  }
+  pop._msAnchor = null; pop._msTrigger = null;
+  pop.style.position = ""; pop.style.left = ""; pop.style.top = ""; pop.style.width = ""; pop.style.right = ""; pop.style.maxHeight = "";
+  pop.classList.remove("open");
+}
+function msCloseAllPops(){
+  document.querySelectorAll(".ms-select-pop.open").forEach(msClosePop);
+}
 function msToggleDropdown(ev, trigger){
   if(ev) ev.stopPropagation();
-  const pop = trigger.nextElementSibling;
-  if(!pop || !pop.classList.contains("ms-select-pop")) return;
+  const pop = msFindPop(trigger);
+  if(!pop) return;
   const isOpen = pop.classList.contains("open");
-  document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open"));
-  if(!isOpen) pop.classList.add("open");
+  msCloseAllPops();
+  if(!isOpen) msOpenPop(trigger, pop);
 }
 function msUpdateDisplay(checkboxEl){
   const ms = checkboxEl.closest(".ms-select");
@@ -7288,13 +7343,14 @@ function msUpdateDisplay(checkboxEl){
 }
 function tkToggleEmpDropdown(ev){
   if(ev) ev.stopPropagation();
+  const trigger = $("tk_assign_trigger");
   const pop = $("tk_assign_pop");
-  if(!pop) return;
+  if(!trigger || !pop) return;
   const isOpen = pop.classList.contains("open");
-  document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open"));
-  if(!isOpen) pop.classList.add("open");
+  msCloseAllPops();
+  if(!isOpen) msOpenPop(trigger, pop);
 }
-document.addEventListener("click", ()=>document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open")));
+document.addEventListener("click", ()=>msCloseAllPops());
 function tkUpdateEmpDisplay(){
   const checked = Array.from(document.querySelectorAll(".tk-emp:checked")).map(el=>el.value);
   const disp = $("tk_assign_display");
