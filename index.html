@@ -3107,8 +3107,55 @@ function renderTechnicalManagerModern(){
   }
   setHead(isTL ? "Technical TL Dashboard" : "Technical Manager Dashboard",
     "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team",
-    `<button class="btn gold" onclick="openPingTeam()" title="Call a team member to your cabin or the conference room">&#128222; Call</button>`);
+    `<button class="btn ghost" onclick="openAssignedWorkOverview()" title="See every client with active work, who it's assigned to, and the deadline">&#128203; Assigned Work</button>
+     <button class="btn gold" onclick="openPingTeam()" title="Call a team member to your cabin or the conference room">&#128222; Call</button>`);
   renderTMDashboard();
+}
+// Rows: one per client per currently-active piece of work (a client can have more than
+// one row if, say, paper writing starts while a correction round is still open). Each
+// stage below has someone actively holding the ball right now — proposal/implementation/
+// paper-writing stages that are just "waiting for someone to pick it up" (no writer or
+// programmer assigned yet) are deliberately left out, since there'd be no employee name
+// or deadline to show for those. Covers Technical Manager and Technical TL.
+const ASSIGNED_WORK_STAGES = {
+  PROPOSAL_ASSIGNED: {type:"Proposal Writing", employee:c=>c.proposalWriter, deadline:c=>c.proposalDeadline},
+  PROPOSAL_SUBMITTED: {type:"Proposal Writing", employee:c=>c.proposalWriter, deadline:c=>c.proposalDeadline},
+  IMPLEMENTATION_ASSIGNED: {type:"Code Implementation", employee:c=>(c.assignedProgrammers||[]).join(", "), deadline:c=>c.implementationDeadline},
+  PAPERWRITER_ASSIGNED: {type:"Paper Writing", employee:c=>(c.assignedWriters||[]).join(", "), deadline:c=>c.writingDeadline},
+  WRITER_FIXING: {type:"Paper Writing (correction)", employee:c=>(c.assignedWriters||[]).join(", "), deadline:c=>c.writingDeadline},
+  PROOFREAD_CORRECTION: {type:"Paper Writing (proofread fix)", employee:c=>(c.assignedWriters||[]).join(", "), deadline:c=>c.writingDeadline},
+};
+function assignedWorkRows(){
+  const rows = [];
+  clients.forEach(c=>{
+    const cfg = ASSIGNED_WORK_STAGES[c.stage];
+    if(!cfg) return;
+    const employee = cfg.employee(c);
+    if(!employee) return; // stage matched but nobody's actually assigned yet — skip
+    rows.push({client:c, type:cfg.type, employee, deadline:cfg.deadline(c)});
+  });
+  // Soonest deadline first; no-deadline rows sink to the bottom.
+  rows.sort((a,b)=> (a.deadline||"9999-99-99").localeCompare(b.deadline||"9999-99-99"));
+  return rows;
+}
+function openAssignedWorkOverview(){
+  const rows = assignedWorkRows();
+  const body = rows.length ? `<div style="max-height:60vh;overflow-y:auto">
+      ${rows.map(r=>{
+        const overdue = daysOverdue(r.deadline);
+        return `<div class="adm-bar-row" style="cursor:pointer" onclick="closeModal();admOpenProjectTab(${jsq(r.client.id)},'dashboard')">
+          <div class="lbl">
+            <b>${esc(r.client.name)}</b> <span class="badge b-purp" style="margin:0 6px">${esc(r.type)}</span><br>
+            <small style="color:#8DA39A">${esc(r.employee)}</small>
+          </div>
+          <div style="flex:0 0 auto;text-align:right">
+            <small style="color:${overdue?'#DC2626':'var(--muted)'}">${r.deadline ? (overdue ? (fmtDate(r.deadline)+" — "+overdue+"d overdue") : fmtDate(r.deadline)) : "No deadline set"}</small>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>` : `<div class="adm-empty">Nothing currently assigned — every proposal, implementation and paper-writing slot is either unassigned or already delivered.</div>`;
+  openModal(`<h3>Assigned Work</h3><p class="msub">Every client with active work right now — what it is, who's doing it, and when it's due. Click a row to open that client.</p>${body}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
 function admOpenProjectTab(id, tab){
   adminProjectClientId = id; admProjTab = tab;
