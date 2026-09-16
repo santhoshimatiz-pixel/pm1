@@ -1887,6 +1887,22 @@ function statsHtml(arr){
   return arr.map(s=>`<div class="stat ${s[2]||""}"><b>${s[0]}</b><span>${s[1]}</span></div>`).join("");
 }
 let currentViewFn = null, searchQuery = "", searchStage = "";
+// Every universal search box re-renders the whole page section on each keystroke
+// (via rerenderCurrent()), which recreates the <input> element itself — that used to
+// silently steal focus after every single character, forcing a re-click to type the
+// next letter. All of these boxes share one id (only one is ever mounted at a time,
+// since only one page is shown in #content at once), so after the re-render we can
+// reliably find it again and restore focus + put the cursor back at the end.
+function handleSearchInput(val){
+  searchQuery = val;
+  rerenderCurrent();
+  const el = $("universalSearchInput");
+  if(el){
+    el.focus();
+    const pos = el.value.length;
+    try{ el.setSelectionRange(pos, pos); }catch(e){}
+  }
+}
 function matchesSearch(c){
   const q = searchQuery.trim().toLowerCase();
   if(q){
@@ -1899,8 +1915,8 @@ function matchesSearch(c){
 function searchBarHtml(){
   const opts = STAGES.map(s=>`<option value="${s}" ${searchStage===s?"selected":""}>${STAGE_LABEL[s]}</option>`).join("");
   return `<div class="panel sec-prebar" style="padding:12px 16px;margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap">
-    <input id="searchBox" placeholder="Search by name, phone, client ID, or project ID" value="${esc(searchQuery)}"
-      oninput="searchQuery=this.value;rerenderCurrent()" style="flex:2;min-width:220px">
+    <input id="universalSearchInput" placeholder="Search by name, phone, client ID, or project ID" value="${esc(searchQuery)}"
+      oninput="handleSearchInput(this.value)" style="flex:2;min-width:220px">
     <select id="searchStageSel" onchange="searchStage=this.value;rerenderCurrent()" style="flex:1;min-width:200px">
       <option value="">All stages</option>${opts}
     </select>
@@ -1909,8 +1925,8 @@ function searchBarHtml(){
 function tcSearchBarHtml(){
   const opts = STAGES.map(s=>`<option value="${s}" ${searchStage===s?"selected":""}>${STAGE_LABEL[s]}</option>`).join("");
   return `<div class="adm-panel sec-prebar" style="padding:12px 16px;margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap">
-    <input id="searchBox" placeholder="Search by name, phone, client ID, or project ID" value="${esc(searchQuery)}"
-      oninput="searchQuery=this.value;rerenderCurrent()" style="flex:2;min-width:220px">
+    <input id="universalSearchInput" placeholder="Search by name, phone, client ID, or project ID" value="${esc(searchQuery)}"
+      oninput="handleSearchInput(this.value)" style="flex:2;min-width:220px">
     <select id="searchStageSel" onchange="searchStage=this.value;rerenderCurrent()" style="flex:1;min-width:200px">
       <option value="">All stages</option>${opts}
     </select>
@@ -3357,7 +3373,7 @@ function tmWorkValidationTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Work Validation</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="rerenderCurrent()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
@@ -3519,16 +3535,28 @@ function tmAssignWorkHtml(){
         <button class="btn small" style="margin-top:8px" onclick="tmAssignProposalNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>
         ${preAssignExtraHtml(c.id,'aw')}</div>`;
     } else if(type==="IMPLEMENTATION"){
-      const boxes = programmerNames().map(n=>`<label class="check"><input type="checkbox" data-aw-prog="${c.id}" value="${esc(n)}"> ${esc(programmerLabel(n))}</label>`).join("")
-        || '<span style="color:var(--muted);font-size:13px">No programmers yet — add one in the Team tab.</span>';
-      body = `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div>
+      const boxes = programmerNames().map(n=>`<label class="ms-select-opt"><input type="checkbox" data-aw-prog="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this)"> ${esc(programmerLabel(n))}</label>`).join("");
+      const picker = programmerNames().length ? `<div class="ms-select">
+          <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
+            <span class="ms-select-display" data-placeholder="Select programmer(s)…">Select programmer(s)…</span>
+            <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
+        </div>` : '<span style="color:var(--muted);font-size:13px">No programmers yet — add one in the Team tab.</span>';
+      body = `<div onclick="event.stopPropagation()">${picker}
         <input type="date" class="mini-date" id="aw-sd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
         <input type="date" class="mini-date" min="${todayISO()}" id="aw-dl-${c.id}" placeholder="Implementation deadline" title="Implementation deadline">
         <button class="btn small" style="margin-top:8px" onclick="tmAssignImplementationNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button></div>`;
     } else {
-      const boxes = writerNames().map(n=>`<label class="check"><input type="checkbox" data-aw-writer="${c.id}" value="${esc(n)}"> ${esc(writerLabel(n))}</label>`).join("")
-        || '<span style="color:var(--muted);font-size:13px">No paper writers yet — add one in the Team tab.</span>';
-      body = `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div>
+      const boxes = writerNames().map(n=>`<label class="ms-select-opt"><input type="checkbox" data-aw-writer="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this)"> ${esc(writerLabel(n))}</label>`).join("");
+      const picker = writerNames().length ? `<div class="ms-select">
+          <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
+            <span class="ms-select-display" data-placeholder="Select paper writer(s)…">Select paper writer(s)…</span>
+            <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
+        </div>` : '<span style="color:var(--muted);font-size:13px">No paper writers yet — add one in the Team tab.</span>';
+      body = `<div onclick="event.stopPropagation()">${picker}
         <input type="date" class="mini-date" id="aw-wsd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
         <input type="date" class="mini-date" min="${todayISO()}" id="aw-wdl-${c.id}" placeholder="Writing deadline" title="Writing deadline">
         <button class="btn gold small" style="margin-top:8px" onclick="tmAssignWritersNow(${jsq(c.id)})">Assign to Paper Writing &#8594;</button></div>`;
@@ -5397,7 +5425,7 @@ function adminClientsTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Clients</h3>
-      <div class="adm-search"><span>&#128269;</span><input id="admClientSearch" placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <button class="btn small" style="padding:9px 16px" onclick="rerenderCurrent()">Search</button>
       <div style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
@@ -5464,7 +5492,7 @@ function adminClientQueryHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Client's Query</h3>
-      <div class="adm-search"><span>&#128269;</span><input id="admQuerySearch" placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="admOpenBulkImport('queries')">Import</button>
         <button class="btn ghost small" onclick="admExportQueriesCsv()">Export</button>
@@ -5685,7 +5713,7 @@ function admNewProjectsTableHtml(scope){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>New Projects</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${list.length ? `<table class="adm-table"><thead><tr>
@@ -5738,7 +5766,7 @@ function admDateExtensionsTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Date Extension Requests</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admExportExtensionsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${list.length ? `<table class="adm-table"><thead><tr>
@@ -5806,7 +5834,7 @@ function adminProjectsTableHtml(scope){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Projects</h3>
-      <div class="adm-search"><span>&#128269;</span><input id="admProjSearch" placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
@@ -6564,7 +6592,7 @@ function admProfileReferralsTab(c){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Client's Contact</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('referrals',${jsq(c.id)})">Import</button><button class="btn small" onclick="admOpenAddReferral(${jsq(c.id)})">+ Add contact</button></div>
     </div>
     <div class="adm-table-wrap">
@@ -6605,7 +6633,7 @@ function admProfileDocumentsTab(c){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Client's Documents</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
     </div>
     <div class="adm-panel-body">
       <div class="grid2">
@@ -6686,7 +6714,7 @@ function admProfileNotesTab(c){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Notes</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('notes',${jsq(c.id)})">Import</button><button class="btn ghost small" onclick="admExportProfileNotesCsv(${jsq(c.id)})">Export</button></div>
     </div>
     <div class="adm-table-wrap">
@@ -6811,7 +6839,7 @@ function mktProjectsTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Projects</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
         <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
@@ -6849,7 +6877,7 @@ function mktPaymentsTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Payments</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('payments')">Import</button><button class="btn ghost small" onclick="admExportPaymentsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
@@ -6959,7 +6987,7 @@ function mktTasksTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Tasks</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('tasks')">Import</button><button class="btn ghost small" onclick="admExportTasksCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
@@ -7033,7 +7061,7 @@ function tmTasksTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Tasks</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search by client, task, member, priority, status..." value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search by client, task, member, priority, status..." value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <select onchange="tmTaskStatusFilter=this.value;rerenderCurrent()" style="max-width:170px">
         ${filterOpts.map(([v,l])=>`<option value="${v}" ${tmTaskStatusFilter===v?"selected":""}>${l}</option>`).join("")}
       </select>
@@ -7100,7 +7128,7 @@ function jmTasksTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Tasks</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admExportTasksCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${rows.length ? `<table class="adm-table"><thead><tr>
@@ -7234,6 +7262,29 @@ function admRefreshTaskAssignBox(){
     : `<span style="color:var(--muted);font-size:13px">${isJournalModern() ? "No journal team members yet — add Proofreaders/Formatters/Submission staff from the Team page."
         : isMktModern() ? "No telecallers yet — add them from the Team page."
         : "No technical team members yet — add Programmers/Paper Writers from the Team page."}</span>`;
+}
+// Generic version of the same "clean dropdown" multi-select checkbox pattern used
+// in Add Task (below) and now also in Assign Work's Implementation/Paper Writing
+// pickers — matching the compact look Proposal's picker already had, instead of a
+// long sprawling row of individual checkbox boxes. Works off the clicked element's
+// own DOM position rather than a fixed id, since Assign Work can have several of
+// these open on the page at once (one per client row).
+function msToggleDropdown(ev, trigger){
+  if(ev) ev.stopPropagation();
+  const pop = trigger.nextElementSibling;
+  if(!pop || !pop.classList.contains("ms-select-pop")) return;
+  const isOpen = pop.classList.contains("open");
+  document.querySelectorAll(".ms-select-pop.open").forEach(p=>p.classList.remove("open"));
+  if(!isOpen) pop.classList.add("open");
+}
+function msUpdateDisplay(checkboxEl){
+  const ms = checkboxEl.closest(".ms-select");
+  if(!ms) return;
+  const disp = ms.querySelector(".ms-select-display");
+  if(!disp) return;
+  const checked = Array.from(ms.querySelectorAll("input:checked")).map(el=>el.value);
+  disp.textContent = checked.length ? checked.join(", ") : (disp.dataset.placeholder || "Select…");
+  disp.classList.toggle("has-value", checked.length>0);
 }
 function tkToggleEmpDropdown(ev){
   if(ev) ev.stopPropagation();
@@ -7666,7 +7717,7 @@ function renderJournalsTable(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Journals</h3>
-      <div class="adm-search"><span>&#128269;</span><input placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admExportJournalsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">
@@ -7768,7 +7819,7 @@ function admTeamMembersTableHtml(){
   return `<div class="adm-panel">
     <div class="adm-panel-head">
       <h3>Team Member</h3>
-      <div class="adm-search"><span>&#128269;</span><input id="admTeamSearch" placeholder="Search" value="${esc(searchQuery)}" oninput="searchQuery=this.value;rerenderCurrent()"></div>
+      <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('team')">Import</button><button class="btn ghost small" onclick="admExportTeamCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">

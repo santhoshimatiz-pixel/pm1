@@ -427,6 +427,46 @@ to confirm the change landed correctly. No database schema changes.
        (index.html — existingTaskFor, TASK_STATUS_PLAIN_LABEL,
        tkRefreshWarning, admSaveTask)
 
+12. UNIVERSAL SEARCH: COULD ONLY TYPE ONE LETTER AT A TIME
+    (every dashboard, every tab that has a search box — including
+    Work Log and Journal, which is where this was reported)
+    ------------------------------------------------------------
+    Every search box in the app re-rendered the entire page section
+    on each keystroke (to filter the list live) — but that re-render
+    replaces the whole content area with fresh HTML, which recreates
+    the search `<input>` itself as a brand-new DOM element. Browsers
+    don't keep focus on an element that's been destroyed and
+    replaced, so the box silently lost focus after every single
+    character — meaning you had to click back into it before typing
+    each next letter. This wasn't specific to Work Log/Journal; it
+    was every one of the 18 search boxes across the app, all built
+    from the same pattern.
+    Fixed centrally: search input now goes through one shared
+    function that, right after the list re-renders, finds the (now
+    recreated) search box again and restores focus with the cursor
+    at the end — so typing flows normally with no re-clicking.
+    (index.html — handleSearchInput, id="universalSearchInput" on
+    every search box)
+
+13. ASSIGN WORK: IMPLEMENTATION / PAPER WRITING EMPLOYEE PICKER
+    DIDN'T MATCH THE CLEAN LOOK OF THE PROPOSAL PICKER
+    ------------------------------------------------------------
+    On the Technical Manager's "Assign Work" queue, picking a
+    Proposal writer is a single tidy dropdown. Picking Implementation
+    programmers or Paper Writers, though, showed every team member
+    as its own large checkbox box laid out in a sprawling wrapping
+    row (see the screenshot) — inconsistent with the Proposal picker
+    right above it, and it gets harder to scan the more team members
+    there are.
+    Fixed: Implementation and Paper Writing now use the same compact
+    "Select employee(s)…" dropdown pattern already used elsewhere in
+    the app (e.g. Add Task's employee picker) — a single clean
+    trigger that opens a small checklist, closing the gap with how
+    Proposal already looked. Still fully multi-select (you can still
+    pick more than one programmer/writer) — only the layout changed,
+    not the functionality.
+    (index.html — tmAssignWorkHtml, msToggleDropdown, msUpdateDisplay)
+
 ------------------------------------------------------------
 Verification performed: server.py parses cleanly (ast.parse), all
 script blocks in index.html pass a Node.js syntax check.
