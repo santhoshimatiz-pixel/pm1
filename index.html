@@ -10703,6 +10703,11 @@ function openSettings(){
     <div class="field"><label>To email (all steps for now)</label><input id="s_to" value="${esc(settings.toEmail)}" placeholder="receiver@email.com"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveSettingsForm()">Save settings</button></div>
     <div style="height:1px;background:var(--line);margin:18px 0"></div>`;
+  const dbSection = (role==="super_admin" || role==="md_admin") ? `
+    <div style="height:1px;background:var(--line);margin:18px 0"></div>
+    <h3>Database Management</h3>
+    <p class="msub">Export a backup, or permanently clear client &amp; project data from the database.</p>
+    <button class="btn ghost" onclick="closeModal();openDatabaseManagement()">&#128451; Open Database Management &#8594;</button>` : "";
   openModal(`
     ${emailSection}
     <h3>Change my password</h3>
@@ -10710,7 +10715,8 @@ function openSettings(){
     <div class="field"><label>Current password</label><input id="s_curpwd" type="password" placeholder="Current password"></div>
     <div class="field"><label>New password</label><input id="s_newpwd" type="password" placeholder="New password"></div>
     <div class="field"><label>Confirm new password</label><input id="s_newpwd2" type="password" placeholder="Re-enter new password"></div>
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMyPassword()">Save password</button></div>`);
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMyPassword()">Save password</button></div>
+    ${dbSection}`);
 }
 async function saveMyPassword(){
   const currentPassword = $("s_curpwd").value.trim();
@@ -10732,6 +10738,108 @@ async function saveSettingsForm(){
   try{ await api("save_settings",{fromEmail, toEmail}); }catch(e){ toast(e.message); await refresh(); return; }
   settings.fromEmail = fromEmail; settings.toEmail = toEmail;
   closeModal(); toast("Email settings saved for the whole team");
+}
+
+/* ================= DATABASE MANAGEMENT (Super Admin / MD Admin only) =================
+   Export-then-clear flow: pick "Complete" (everything) or a custom registration-date
+   range, download a JSON backup of exactly that scope, then confirm the permanent
+   delete by typing DELETE and re-entering the admin password. The Clear button stays
+   disabled until a backup matching the current mode/dates has actually been
+   downloaded — changing the mode or dates afterward invalidates it, so what gets
+   deleted always matches what was just backed up. */
+let cdLastBackupScope = null;
+function openDatabaseManagement(){
+  const today = todayISO();
+  openModal(`
+    <h3>Database Management</h3>
+    <p class="msub">Export a backup of client &amp; project data, or permanently clear it from the database.</p>
+    <div class="field">
+      <label>What do you want to clear?</label>
+      <select id="cd_mode" onchange="cdModeChanged()">
+        <option value="all">Complete data — everything</option>
+        <option value="range">Custom date range — clients registered in a range</option>
+      </select>
+    </div>
+    <div id="cd_rangeFields" style="display:none">
+      <div class="grid2">
+        <div class="field"><label>From (registration date)</label><input id="cd_start" type="date" value="${today}" onchange="cdScopeChanged()"></div>
+        <div class="field"><label>To (registration date)</label><input id="cd_end" type="date" value="${today}" onchange="cdScopeChanged()"></div>
+      </div>
+    </div>
+    <div style="height:1px;background:var(--line);margin:16px 0"></div>
+    <h4 class="am-section-head">Step 1 — Download a backup first</h4>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px">Downloads everything that would be removed, as one JSON file, before anything is deleted. There's no way to recover the data afterward, so do this first.</p>
+    <button class="btn gold" id="cd_downloadBtn" onclick="downloadDataBackup()">&#11015; Download backup</button>
+    <div id="cd_backupStatus" style="margin-top:8px;font-size:12.5px;color:var(--muted)">No backup downloaded yet for the current selection.</div>
+    <div style="height:1px;background:var(--line);margin:16px 0"></div>
+    <h4 class="am-section-head" style="color:#DC2626">Step 2 — Confirm &amp; delete</h4>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px">This permanently deletes data from the database. It cannot be undone.</p>
+    <div class="field"><label>Type <b>DELETE</b> to confirm</label><input id="cd_confirm" placeholder="DELETE"></div>
+    <div class="field"><label>Your password</label><input id="cd_pwd" type="password" placeholder="Re-enter your password"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="cd_deleteBtn" style="background:#DC2626;border-color:#DC2626" disabled onclick="confirmClearData()">Clear data</button>
+    </div>`);
+  cdLastBackupScope = null;
+}
+function cdCurrentScope(){
+  const mode = ($("cd_mode")||{}).value || "all";
+  const startDate = mode==="range" ? (($("cd_start")||{}).value||"") : "";
+  const endDate = mode==="range" ? (($("cd_end")||{}).value||"") : "";
+  return {mode, startDate, endDate};
+}
+function cdScopeChanged(){
+  cdLastBackupScope = null;
+  const status = $("cd_backupStatus"); if(status) status.textContent = "No backup downloaded yet for the current selection.";
+  const delBtn = $("cd_deleteBtn"); if(delBtn) delBtn.disabled = true;
+}
+function cdModeChanged(){
+  const mode = ($("cd_mode")||{}).value;
+  const rf = $("cd_rangeFields"); if(rf) rf.style.display = mode==="range" ? "block" : "none";
+  cdScopeChanged();
+}
+async function downloadDataBackup(){
+  const {mode, startDate, endDate} = cdCurrentScope();
+  if(mode==="range" && (!startDate || !endDate)){ toast("Pick a start and end date first"); return; }
+  if(mode==="range" && startDate > endDate){ toast("Start date can't be after the end date"); return; }
+  const btn = $("cd_downloadBtn");
+  if(btn){ btn.disabled = true; btn.textContent = "Preparing backup…"; }
+  let out;
+  try{ out = await api("admin_export_data", {mode, startDate, endDate}); }
+  catch(e){ toast(e.message); if(btn){ btn.disabled=false; btn.textContent="⬇ Download backup"; } return; }
+  const blob = new Blob([JSON.stringify(out, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+  a.href = url; a.download = `imatiz-backup-${mode}-${stamp}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  cdLastBackupScope = {mode, startDate, endDate};
+  const status = $("cd_backupStatus");
+  if(status) status.innerHTML = `<span style="color:var(--ok)">&#10003; Backup downloaded</span> — ${(out.clients||[]).length} client(s) included. Check your downloads folder.`;
+  const delBtn = $("cd_deleteBtn"); if(delBtn) delBtn.disabled = false;
+  if(btn){ btn.disabled = false; btn.textContent = "⬇ Download backup again"; }
+  toast("Backup downloaded");
+}
+async function confirmClearData(){
+  const scope = cdCurrentScope();
+  if(!cdLastBackupScope || cdLastBackupScope.mode!==scope.mode ||
+     cdLastBackupScope.startDate!==scope.startDate || cdLastBackupScope.endDate!==scope.endDate){
+    toast("Download a fresh backup for this exact selection first"); return;
+  }
+  const confirmPhrase = $("cd_confirm").value.trim();
+  const password = $("cd_pwd").value;
+  if(confirmPhrase !== "DELETE"){ toast("Type DELETE exactly (all capitals) to confirm"); return; }
+  if(!password){ toast("Enter your password to confirm"); return; }
+  const warnMsg = scope.mode==="all"
+    ? "This will permanently delete ALL client and project data. This cannot be undone. Continue?"
+    : `This will permanently delete every client registered between ${scope.startDate} and ${scope.endDate}, and everything linked to them. This cannot be undone. Continue?`;
+  if(!confirm(warnMsg)) return;
+  let out;
+  try{ out = await api("admin_clear_data", {mode:scope.mode, startDate:scope.startDate, endDate:scope.endDate, confirmPhrase, password}); }
+  catch(e){ toast(e.message); return; }
+  closeModal(); await refresh();
+  toast(`Done — ${out.clientsRemoved} client(s) and all linked data removed`);
 }
 
 /* ================= CALL (Technical Manager -> employee notifications) =================

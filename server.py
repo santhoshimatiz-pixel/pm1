@@ -807,6 +807,8 @@ ACTION_ROLES = {
     "set_role_access": _R_ADMIN,
     "delete_client": _R_ADMIN,
     "save_settings": _R_ADMIN,
+    "admin_export_data": _R_ADMIN,
+    "admin_clear_data": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
 
     # ---- client-portal actions (staff may also drive them where the UI allows) ----
@@ -5970,6 +5972,111 @@ def handle_action(action, d, ip=""):
                                                          to_email=excluded.to_email""", (frm, to))
             con.commit()
             return {"ok": True}
+
+        # ----- Admin Panel > Database Management -----------------------------------
+        # SECURITY: both actions are super_admin/md_admin only (see ACTION_ROLES).
+        # admin_clear_data additionally re-checks the caller's own password here —
+        # separately from session auth — because this deletes data permanently and a
+        # hijacked/left-open admin session shouldn't be enough on its own to trigger it.
+        if action == "admin_export_data":
+            mode = (d.get("mode") or "all").strip()
+            start_date = (d.get("startDate") or "").strip()
+            end_date = (d.get("endDate") or "").strip()
+            if mode not in ("all", "range"):
+                raise ApiError("Invalid export mode.")
+            if mode == "range":
+                if not start_date or not end_date:
+                    raise ApiError("Pick a start and end date for the export.")
+                if start_date > end_date:
+                    raise ApiError("Start date can't be after the end date.")
+
+            if mode == "range":
+                client_rows = con.execute(
+                    "SELECT * FROM clients WHERE reg_date BETWEEN ? AND ?", (start_date, end_date)).fetchall()
+            else:
+                client_rows = con.execute("SELECT * FROM clients").fetchall()
+            client_ids = [r["id"] for r in client_rows]
+
+            def rows_for(table, id_col="client_id"):
+                if mode == "all":
+                    return [dict(r) for r in con.execute(f"SELECT * FROM {table}").fetchall()]
+                if not client_ids:
+                    return []
+                placeholders = ",".join(["?"] * len(client_ids))
+                return [dict(r) for r in con.execute(
+                    f"SELECT * FROM {table} WHERE {id_col} IN ({placeholders})", tuple(client_ids)).fetchall()]
+
+            export = {
+                "exportedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "mode": mode, "startDate": start_date, "endDate": end_date,
+                "clients": [dict(r) for r in client_rows],
+                "calls": rows_for("calls"),
+                "payments": rows_for("payments"),
+                "history": rows_for("history"),
+                "work_updates": rows_for("work_updates"),
+                "service_items": rows_for("service_items"),
+                "client_installments": rows_for("client_installments"),
+                "journal_targets": rows_for("journal_targets"),
+                "messages": rows_for("messages"),
+                "client_queries": rows_for("client_queries"),
+                "tasks": rows_for("tasks"),
+                "client_documents": rows_for("client_documents"),
+                "client_notes_v2": rows_for("client_notes_v2"),
+                "client_referrals": rows_for("client_referrals"),
+            }
+            # These aren't tied to any client, so there's no meaningful client-date
+            # range to scope them by — only included (and only cleared) in "all" mode.
+            if mode == "all":
+                export["calendar_events"] = [dict(r) for r in con.execute("SELECT * FROM calendar_events").fetchall()]
+                export["dm_messages"] = [dict(r) for r in con.execute("SELECT * FROM dm_messages").fetchall()]
+                export["dm_reads"] = [dict(r) for r in con.execute("SELECT * FROM dm_reads").fetchall()]
+                export["emp_calls"] = [dict(r) for r in con.execute("SELECT * FROM emp_calls").fetchall()]
+            return export
+
+        if action == "admin_clear_data":
+            mode = (d.get("mode") or "").strip()
+            start_date = (d.get("startDate") or "").strip()
+            end_date = (d.get("endDate") or "").strip()
+            confirm_phrase = (d.get("confirmPhrase") or "").strip()
+            password = d.get("password") or ""
+            if mode not in ("all", "range"):
+                raise ApiError("Invalid clear mode.")
+            if mode == "range":
+                if not start_date or not end_date:
+                    raise ApiError("Pick a start and end date to clear.")
+                if start_date > end_date:
+                    raise ApiError("Start date can't be after the end date.")
+            if confirm_phrase != "DELETE":
+                raise ApiError("Type DELETE exactly (all capitals) to confirm — this cannot be undone.")
+            session = get_principal()
+            if not session:
+                raise ApiError("Your session has expired. Please log in again.", 401)
+            u = con.execute("SELECT * FROM users WHERE role=?", (session["role"] or "",)).fetchone()
+            if not u or not verify_password(password, u["password"] or ""):
+                raise ApiError("Incorrect password — re-enter your current password to confirm.")
+
+            if mode == "all":
+                clients_removed = con.execute("SELECT COUNT(*) AS c FROM clients").fetchone()["c"]
+                # DELETE FROM clients cascades to every client-linked table (calls,
+                # payments, history, work_updates, service_items, client_installments,
+                # journal_targets, messages, thread_reads, client_queries, tasks/
+                # task_comments/task_stages, client_documents, client_notes_v2,
+                # client_referrals) automatically via each table's ON DELETE CASCADE.
+                con.execute("DELETE FROM clients")
+                con.execute("DELETE FROM tasks")          # catches orphan (no-client) tasks too
+                con.execute("DELETE FROM calendar_events")
+                con.execute("DELETE FROM dm_messages")
+                con.execute("DELETE FROM dm_reads")
+                con.execute("DELETE FROM emp_calls")
+                # Deliberately untouched: users, employees, settings, sessions,
+                # login_captchas — so logins keep working right after a clear.
+            else:
+                clients_removed = con.execute(
+                    "SELECT COUNT(*) AS c FROM clients WHERE reg_date BETWEEN ? AND ?",
+                    (start_date, end_date)).fetchone()["c"]
+                con.execute("DELETE FROM clients WHERE reg_date BETWEEN ? AND ?", (start_date, end_date))
+            con.commit()
+            return {"ok": True, "mode": mode, "clientsRemoved": clients_removed}
 
         raise ApiError("Unknown action.", 404)
     finally:
