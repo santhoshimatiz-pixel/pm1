@@ -7295,6 +7295,10 @@ function msPositionPop(trigger, pop){
   pop.style.width = rect.width + "px";
   pop.style.right = "auto";
   pop.style.maxHeight = Math.max(120, Math.min(220, window.innerHeight - rect.bottom - 16)) + "px";
+  // Once portaled to <body>, the pop becomes a sibling of .modal-bg (z-index:60) instead
+  // of a descendant of it, so it needs its own higher z-index or it paints underneath
+  // an open modal and silently eats clicks meant for its checkboxes.
+  pop.style.zIndex = "9999";
 }
 function msOpenPop(trigger, pop){
   const anchor = document.createElement("span");
@@ -7318,7 +7322,7 @@ function msClosePop(pop){
     pop._msAnchor.parentNode.removeChild(pop._msAnchor);
   }
   pop._msAnchor = null; pop._msTrigger = null;
-  pop.style.position = ""; pop.style.left = ""; pop.style.top = ""; pop.style.width = ""; pop.style.right = ""; pop.style.maxHeight = "";
+  pop.style.position = ""; pop.style.left = ""; pop.style.top = ""; pop.style.width = ""; pop.style.right = ""; pop.style.maxHeight = ""; pop.style.zIndex = "";
   pop.classList.remove("open");
 }
 function msCloseAllPops(){
