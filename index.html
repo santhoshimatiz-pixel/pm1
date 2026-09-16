@@ -7337,11 +7337,21 @@ function msToggleDropdown(ev, trigger){
   if(!isOpen) msOpenPop(trigger, pop);
 }
 function msUpdateDisplay(checkboxEl){
-  const ms = checkboxEl.closest(".ms-select");
-  if(!ms) return;
-  const disp = ms.querySelector(".ms-select-display");
+  // The checkbox/radio's pop may currently be portaled out to <body> (see msOpenPop)
+  // to escape a clipping ancestor, which breaks closest(".ms-select") since the pop
+  // is no longer a descendant of its trigger. Use the trigger reference msOpenPop
+  // stored on the pop itself; fall back to closest() for a pop that hasn't been
+  // opened yet (still sitting in its original spot next to its trigger).
+  const pop = checkboxEl.closest(".ms-select-pop");
+  if(!pop) return;
+  let trigger = pop._msTrigger;
+  if(!trigger){
+    const wrap = pop.closest(".ms-select");
+    trigger = wrap ? wrap.querySelector(".ms-select-trigger") : null;
+  }
+  const disp = trigger ? trigger.querySelector(".ms-select-display") : null;
   if(!disp) return;
-  const checked = Array.from(ms.querySelectorAll("input:checked")).map(el=>el.value);
+  const checked = Array.from(pop.querySelectorAll("input:checked")).map(el=>el.value);
   disp.textContent = checked.length ? checked.join(", ") : (disp.dataset.placeholder || "Select…");
   disp.classList.toggle("has-value", checked.length>0);
 }
