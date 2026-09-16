@@ -3559,6 +3559,10 @@ def handle_action(action, d, ip=""):
             for key, col in col_map.items():
                 if key in d:
                     updates[col] = (d.get(key) or "").strip()
+            if "phone" in updates and updates["phone"] and not re.match(r"^\d{10}$", updates["phone"]):
+                raise ApiError("Enter a valid 10-digit phone number.")
+            if "email" in updates and updates["email"] and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", updates["email"]):
+                raise ApiError("Enter a valid email address.")
 
             # Non-text fields handled separately (boolean / numeric).
             numeric_changes = []

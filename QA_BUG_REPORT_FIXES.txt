@@ -138,8 +138,71 @@ four <script> blocks in index.html pass a Node.js syntax check
 (node --check), and every edited section was re-read after editing
 to confirm the change landed correctly. No database schema changes.
 
-Known follow-up (not a code bug, needs a one-time manual data fix):
-the 5 existing employee records with Branch = "Banglore" in the
-live database should be re-saved once (Team > that member > Edit >
-Save) so the new normalizer corrects their spelling to "Bengaluru".
+============================================================
+ FOLLOW-UP FIXES — round 2 (same day)
+============================================================
+
+1. PHONE FIELD STILL LET LETTERS THROUGH ON SOME FORMS
+   ------------------------------------------------------------
+   The Add Client phone field (and a few others — the quick "Edit
+   client" modal's Phone field, and the Update Team Member modal's
+   Phone field) weren't wired up to the same digit-blocking used
+   elsewhere in the app (blockNonDigitKey / digitsOnlyInput), so
+   letters could still be typed there and only got caught by the
+   validation message at Save time. All phone fields across the
+   app now consistently block non-digit keystrokes as you type
+   (and strip anything that slips through via paste/autofill), so
+   there's nothing to catch at Save time any more. Email fields on
+   these same forms were also missing both the HTML email type and
+   server-side format validation — added both.
+   (index.html — ec_phone/ec_email, up_phone/up_email, up_mem_phone
+    / server.py — update_client)
+
+   NOTE: if you're testing this against the live pm1-1.onrender.com
+   site rather than this zip, you'll still see the old behavior
+   until this fixed zip is actually deployed there — these are
+   local file fixes, not a live change.
+
+2. PAGE REFRESH BRIEFLY FLASHED THE LOGIN SCREEN BEFORE AUTO
+   SIGNING BACK IN
+   ------------------------------------------------------------
+   On refresh, the app asks the server "who am I?" (session check)
+   before deciding whether to show the login screen or the app. If
+   that first check was slow — a slightly slow connection, or (on
+   free-tier hosting) the server waking up from being idle — it
+   could fail within the old retry budget (3 tries, 500ms apart,
+   ~1.5s total) even though the login cookie was still completely
+   valid, showing the real login screen for a few seconds before
+   snapping back once a retry finally succeeded.
+   Fixed: more retries with a longer, growing pause between them
+   (up to ~9s of patience total), and the loading spinner now stays
+   up for the whole retry window (raised its own safety-net timeout
+   to match) instead of being removed early and exposing the login
+   screen mid-retry. A person who is genuinely logged out still
+   sees the login screen normally — this only affects the "actually
+   still logged in, just a slow check" case.
+   (index.html — restoreSession, #bootLoading safety-net timeout)
+
+3. CLICKING AWAY FROM "ADD CLIENT" LOST EVERYTHING TYPED SO FAR
+   ------------------------------------------------------------
+   Clicking the dark overlay outside a modal (or pressing Escape)
+   closed it immediately, silently discarding anything typed into
+   the form — easy to trigger by accident while filling in a new
+   client's details.
+   Fixed: if the open modal has any unsaved information in it,
+   clicking outside or pressing Escape now asks "You have
+   information entered in this form that hasn't been saved. Close
+   anyway?" before closing. An empty/untouched modal still closes
+   immediately with no prompt. This applies modal-wide (not just
+   Add Client), and the Add Client and client-profile "Update"
+   forms' own Cancel buttons now go through the same check. Forms
+   that close themselves automatically after a successful Save are
+   unaffected — you'll never see this prompt after saving
+   successfully.
+   (index.html — modalHasUnsavedInput, closeModalIfConfirmed,
+    overlay click handler, Escape handler)
+
+------------------------------------------------------------
+Verification performed: server.py parses cleanly (ast.parse), all
+script blocks in index.html pass a Node.js syntax check.
 ============================================================
