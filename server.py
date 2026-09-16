@@ -162,6 +162,29 @@ def verify_password(raw_password, stored):
         return False
 
 
+# Standardizes free-typed branch/city names so the same place is always stored
+# identically, mirroring normalizeBranchName() in index.html. Applied server-side
+# too so imports and direct API calls can't bypass the UI's normalization.
+_BRANCH_ALIASES = {
+    "banglore": "Bengaluru", "bangalore": "Bengaluru", "bengaluru": "Bengaluru", "blr": "Bengaluru",
+    "chennai": "Chennai", "madras": "Chennai",
+    "hyderabad": "Hyderabad", "hyd": "Hyderabad",
+    "mumbai": "Mumbai", "bombay": "Mumbai",
+    "delhi": "Delhi", "new delhi": "Delhi",
+    "pune": "Pune", "coimbatore": "Coimbatore",
+}
+
+
+def normalize_branch_name(raw):
+    v = (raw or "").strip()
+    if not v:
+        return ""
+    key = v.lower()
+    if key in _BRANCH_ALIASES:
+        return _BRANCH_ALIASES[key]
+    return re.sub(r"\s+", " ", v).title()
+
+
 # SECURITY: file-upload hygiene. Files are stored as base64 blobs in SQLite (never written
 # to disk under a user-controlled name), which already rules out path traversal — but the
 # filename and declared MIME type are still attacker-controlled strings that get echoed back
@@ -2873,7 +2896,7 @@ def _import_team_rows(con, rows):
                     (name, role, team_type, (rec.get("email") or "").strip(), uid,
                      "",   # SECURITY: no password set — the manager must issue one
                      (rec.get("joiningDate") or "").strip(), (rec.get("dateOfBirth") or "").strip(),
-                     (rec.get("branch") or "").strip(), (rec.get("department") or "").strip(),
+                     normalize_branch_name(rec.get("branch")), (rec.get("department") or "").strip(),
                      (rec.get("phone") or "").strip(), (rec.get("designation") or "").strip()))
         added += 1
     con.commit()
@@ -3289,6 +3312,11 @@ def handle_action(action, d, ip=""):
             deadline = d.get("deadlineDate") or ""
             if not name or not phone:
                 raise ApiError("Client name and phone are required.")
+            if not re.match(r"^\d{10}$", phone):
+                raise ApiError("Enter a valid 10-digit phone number.")
+            email_check = (d.get("email") or "").strip()
+            if email_check and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email_check):
+                raise ApiError("Enter a valid email address.")
             if not deadline:
                 raise ApiError("Project deadline date is required.")
             service_key = (d.get("serviceKey") or "").strip().upper()
@@ -3306,6 +3334,8 @@ def handle_action(action, d, ip=""):
                 total_amount = float(d.get("totalAmount")) if d.get("totalAmount") not in (None, "") else 0.0
             except (TypeError, ValueError):
                 raise ApiError("Enter a valid total amount.")
+            if total_amount > 0 and reg_amount > total_amount:
+                raise ApiError("Registration amount can't be more than the Total amount.")
 
             reg = d.get("regDate") or date.today().isoformat()
             email = (d.get("email") or "").strip()
@@ -5205,7 +5235,7 @@ def handle_action(action, d, ip=""):
             joining_date = (d.get("joiningDate") or "").strip()
             date_of_birth = (d.get("dateOfBirth") or "").strip()
             manual_uid = (d.get("empUid") or "").strip()
-            branch = (d.get("branch") or "").strip()
+            branch = normalize_branch_name(d.get("branch") or "")
             department = (d.get("department") or "").strip()
             phone = (d.get("phone") or "").strip()
             designation = (d.get("designation") or "").strip()
@@ -5274,7 +5304,10 @@ def handle_action(action, d, ip=""):
             fields, vals = [], []
             for key, col in col_map.items():
                 if key in d:
-                    fields.append(f"{col}=?"); vals.append((d.get(key) or "").strip())
+                    val = (d.get(key) or "").strip()
+                    if key == "branch":
+                        val = normalize_branch_name(val)
+                    fields.append(f"{col}=?"); vals.append(val)
             if "name" in d and not (d.get("name") or "").strip():
                 raise ApiError("Name cannot be empty.")
             if not fields:
@@ -5515,6 +5548,9 @@ def handle_action(action, d, ip=""):
             # / admin_reset_client_password actions instead, which carry their own admin-only
             # permission checks.
             new_pwd = (d.get("newPassword") or "").strip()
+            current_pwd = (d.get("currentPassword") or "").strip()
+            if not current_pwd:
+                raise ApiError("Enter your current password.")
             if len(new_pwd) < MIN_PASSWORD_LENGTH:
                 raise ApiError("Choose a password at least %d characters long." % MIN_PASSWORD_LENGTH)
             emp_id = d.get("empId")
@@ -5522,16 +5558,20 @@ def handle_action(action, d, ip=""):
             if emp_id:
                 if actor_role != "employee":
                     raise ApiError("You can only change your own password.")
-                row = con.execute("SELECT id FROM employees WHERE id=?", (emp_id,)).fetchone()
+                row = con.execute("SELECT id, password FROM employees WHERE id=?", (emp_id,)).fetchone()
                 if not row:
                     raise ApiError("Unknown employee.")
+                if not verify_password(current_pwd, row["password"]):
+                    raise ApiError("Current password is incorrect.")
                 con.execute("UPDATE employees SET password=? WHERE id=?", (hash_password(new_pwd), emp_id))
             else:
                 if actor_role == "employee":
                     raise ApiError("Log in as yourself (Employee Login) to change your own password.")
-                row = con.execute("SELECT role FROM users WHERE role=?", (actor_role,)).fetchone()
+                row = con.execute("SELECT role, password FROM users WHERE role=?", (actor_role,)).fetchone()
                 if not row:
                     raise ApiError("Unknown role.")
+                if not verify_password(current_pwd, row["password"]):
+                    raise ApiError("Current password is incorrect.")
                 con.execute("UPDATE users SET password=? WHERE role=?", (hash_password(new_pwd), actor_role))
             con.commit()
             return {"ok": True}

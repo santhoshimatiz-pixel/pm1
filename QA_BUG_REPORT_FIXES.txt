@@ -1,0 +1,145 @@
+============================================================
+ FIXES APPLIED — iMatiz QA Bug Report (12 bugs, 15 Sept 2026)
+============================================================
+
+BUG-01 — Phone field accepted non-numeric garbage
+------------------------------------------------------------
+Add Client's Phone field now strips non-digits as you type and
+caps at 10 characters. Save is blocked client-side unless the
+phone is exactly 10 digits, and the same check now runs on the
+server (add_client), so the rule can't be skipped by calling the
+API directly.
+(index.html — Add Client form, addClient / server.py — add_client)
+
+BUG-02 — Email field accepted invalid text
+------------------------------------------------------------
+Email now uses a real email input type and is validated against
+a standard pattern before saving, both client-side and
+server-side. Empty email is still allowed (it's optional) — only
+non-empty invalid text is rejected.
+(index.html — addClient / server.py — add_client)
+
+BUG-03 — Client rows not clickable / Action hidden behind scroll
+------------------------------------------------------------
+The row itself already opens the client profile on click in this
+codebase. What was genuinely broken was the Action column (the
+only way to Edit/Delete) sitting off-screen behind ~10 columns of
+horizontal scroll. The Action column is now sticky (pinned to the
+right edge of every admin table), so it's always visible without
+scrolling — this also resolves BUG-12 below.
+(index.html — table.adm-table CSS)
+
+BUG-04 — "Save password" gave no feedback, no confirm, no re-auth
+------------------------------------------------------------
+Settings > Change my password now has three fields: Current
+password, New password, and Confirm new password. The form
+blocks submission with a clear toast if current password is
+blank, new password is blank, or the two new-password entries
+don't match. The server now verifies the current password against
+the stored hash before allowing the change, for both individual
+employee logins and shared department logins.
+(index.html — openSettings / saveMyPassword / server.py — change_password)
+
+BUG-05 — Escape key didn't close modals
+------------------------------------------------------------
+Added a global Escape-key listener that closes the open modal,
+matching standard dialog behavior. Clicking the overlay or a
+Cancel/Close button still works as before.
+(index.html — openModal / closeModal)
+
+BUG-06 — "Branch" free text produced duplicate city spellings
+------------------------------------------------------------
+Add Member / Update Member's Branch field is now a text input
+backed by a dropdown (datalist) of every branch already on file,
+so staff can pick an existing value instead of retyping it. A
+normalizer collapses known variants (banglore/bangalore/bengaluru
+-> "Bengaluru", etc.) and title-cases anything new. This runs
+both client-side and server-side (employee_create, employee_update,
+and the bulk team-import path), so the standardization can't be
+bypassed via import or direct API calls. Note: this does not
+retroactively fix the 5 existing "Banglore" records already in
+the live database — those still need a one-time manual correction
+(edit each and re-save; the normalizer will fix the spelling).
+(index.html — normalizeBranchName / branchDatalistHtml /
+ server.py — normalize_branch_name)
+
+BUG-07 — Dashboard "Target (last month)" stuck at 0
+------------------------------------------------------------
+The widget was artificially flooring last month's collection at a
+minimum of 1 (rounds to "0k" either way) and always phrased the
+caption as "X ahead of last month" even when there was no real
+last-month figure to compare against. Removed the artificial
+floor and fixed the caption: when last month genuinely had no
+recorded collection, it now says so plainly instead of implying a
+comparison that isn't there. If your real last month figure is
+still 0 after this fix, that reflects the actual payment records
+(no `pay_date` fell in that calendar month) rather than a display
+bug — worth spot-checking a few older payment records for a
+missing/blank pay_date if that seems wrong.
+(index.html — renderAdminDashboard)
+
+BUG-08 — Google Fonts request returns HTTP 503 on every load
+------------------------------------------------------------
+The font stylesheet now loads non-render-blocking (media="print"
+swapped to "all" on success) and removes itself on error instead
+of leaving a failed request hanging on every single page load.
+The app already falls back to system fonts cleanly, so this is a
+network-hygiene fix rather than a visual one — it won't stop
+fonts.googleapis.com from occasionally returning 503 (that's on
+Google's / the network's side), but it stops that failure from
+being a repeated blocking request.
+(index.html — <head>)
+
+BUG-09 — No way to delete/archive a client record
+------------------------------------------------------------
+Client deletion already existed but was buried in the Overview
+table's hidden ⋮ menu. Added a visible "Delete client" button
+directly on the Client Profile page itself (Super Admin / MD
+Admin only, same permission check as before), which now also
+navigates back to the Overview list automatically after deleting.
+This also gives you a direct way to remove the CL-1127 test
+record from the audit — open its profile and use the new button.
+(index.html — renderClientProfile / admDeleteClient)
+
+BUG-10 — "Tasks" sidebar vs Dashboard "Tasks" widget confusion
+------------------------------------------------------------
+Renamed the sidebar entry from "Tasks" to "Work Log" everywhere it
+appears (Admin, Marketing, Technical Manager, Journal Manager
+shells), updated its page heading, and added a note on that page
+pointing to the actual project task list (Projects > Tasks / Task
+Board). The Dashboard's "Tasks" KPI card is unchanged — it already
+opens a clear "Tasks due this week" list.
+(index.html — ADMIN_NAV_ITEMS / MKT_NAV_ITEMS / JOURNAL_NAV_ITEMS,
+ renderAdminTasks)
+
+BUG-11 — Registration amount could exceed Total with no warning
+------------------------------------------------------------
+"Remaining to Split" no longer silently clamps a negative value to
+Rs. 0 — it now shows the actual shortfall and a clear warning
+message when Registration is more than Total. Saving the client is
+now blocked (both client-side and server-side) if Registration
+exceeds Total, with a message telling the user to fix one of the
+two amounts first.
+(index.html — renderInstallmentBuilder / addClient /
+ server.py — add_client)
+
+BUG-12 — Horizontal scroll snapped back on the Clients table
+------------------------------------------------------------
+Resolved as a side effect of the BUG-03 fix: since the Action
+column is now pinned to the right edge (sticky) instead of
+requiring a scroll to reach, there's no longer anything to lose
+your scroll position on — the action is always in view regardless
+of scroll state.
+(index.html — table.adm-table CSS)
+
+------------------------------------------------------------
+Verification performed: server.py parses cleanly (ast.parse), all
+four <script> blocks in index.html pass a Node.js syntax check
+(node --check), and every edited section was re-read after editing
+to confirm the change landed correctly. No database schema changes.
+
+Known follow-up (not a code bug, needs a one-time manual data fix):
+the 5 existing employee records with Branch = "Banglore" in the
+live database should be re-saved once (Team > that member > Edit >
+Save) so the new normalizer corrects their spelling to "Bengaluru".
+============================================================
