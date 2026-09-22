@@ -1992,8 +1992,8 @@ const TC_NAV_ITEMS = [
 // A couple of dashboards have a work/team tab toggle; a section only exists in the "work"
 // tab, so picking a section from the sidebar must switch back to that tab first.
 const SECTION_TAB_RESET = {
-  marketing_tl: "mktTab='work'", marketing_manager: "mktTab='work'",
-  technical_manager: "tmTab='work'", technical_tl: "tmTab='work'",
+  marketing_tl: ()=>{ mktTab='work'; }, marketing_manager: ()=>{ mktTab='work'; },
+  technical_manager: ()=>{ tmTab='work'; }, technical_tl: ()=>{ tmTab='work'; },
 };
 // A few dashboards also want a plain action button (not a toggleable section) pinned
 // above their section list, e.g. "+ Add client".
@@ -2274,7 +2274,7 @@ function applyDashSections(){
 function selectDashSection(id){
   const key = dashSectionKey();
   const reset = SECTION_TAB_RESET[role];
-  if(reset) eval(reset);
+  if(reset) reset();
   if(id) dashActiveSection[key] = id; else delete dashActiveSection[key];
   rerenderCurrent();
 }
