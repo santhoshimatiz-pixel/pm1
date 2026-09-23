@@ -1,0 +1,43 @@
+BACKUP UPLOAD + REAL INSTALLMENT COUNT — what changed
+=====================================================
+
+1) Settings > Database Management > "Upload backup (restore data)"   (Super Admin / MD Admin)
+   - Pick the imatiz-backup-....json file downloaded from the same screen and click
+     "Upload & restore".
+   - Every record is restored with all its original fields (stage, assigned programmers /
+     writers / proofreaders, journal name & status, task type, assigned_to, installments,
+     payments, documents, notes, messages...). So each client goes back to the same team's
+     dashboard it was on: Marketing, Accounts, Technical or Journal.
+   - After the upload you see a table of what was restored, plus how many clients now sit
+     on each team's dashboard.
+   - Safe to repeat: records already in the database are skipped, never overwritten.
+     If an old id is now used by a different live record, the restored record gets a new id
+     (task stages/comments are re-linked automatically).
+   - Large backups are sent in batches (<= 3 MB each), so documents don't hit the request limit.
+   - Records whose parent no longer exists (e.g. a "call to cabin" alert for an employee who
+     was deleted) are reported as "Not restored".
+   - Backups now also include task stages, task comments and message read markers.
+     Older backup files still upload fine.
+   Server: new actions admin_import_data / admin_import_summary (admin only).
+
+2) Client Profile > "Payments · Installments" card (every dashboard that opens it)
+   - The count now follows the client's real plan: Registration + the installments entered
+     for that client (+ any stage payment Accounts recorded). No more fixed "/ 4".
+       reg + 2 installments           -> x / 3
+       paid everything at once        -> 1 / 1   "No dues — paid in full" (single payment)
+       all installments paid          -> n / n   "No dues — paid in full"
+       balance not split yet          -> counted as one pending payment, shown in the note
+   - Shows the amount still due when not fully paid.
+   - The same logic is used for the "Installments" column in client tables, the
+     "Pending payments" chip/list and the "Pending Amount" list, so fully-paid clients no
+     longer appear there.
+   - Old clients with no Total amount / split-up keep the old service-stage count.
+
+3) seed_demo_data.py fixed (python seed_demo_data.py works again on PostgreSQL)
+   - Team members were created with the wrong field, so every one failed with
+     "You don't have permission to add team members". Fixed.
+   - Two SQLite-only date expressions (datetime('now','localtime',...)) replaced with
+     the PostgreSQL equivalent.
+   - If a previous run stopped half-way, existing team members are reused instead of
+     failing with "... is already on the team".
+   - The random login passwords for the demo team are printed once at the end.

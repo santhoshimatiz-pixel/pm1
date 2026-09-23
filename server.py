@@ -809,6 +809,8 @@ ACTION_ROLES = {
     "save_settings": _R_ADMIN,
     "admin_export_data": _R_ADMIN,
     "admin_clear_data": _R_ADMIN,
+    "admin_import_data": _R_ADMIN,
+    "admin_import_summary": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
 
     # ---- client-portal actions (staff may also drive them where the UI allows) ----
@@ -6023,7 +6025,25 @@ def handle_action(action, d, ip=""):
                 "client_documents": rows_for("client_documents"),
                 "client_notes_v2": rows_for("client_notes_v2"),
                 "client_referrals": rows_for("client_referrals"),
+                "thread_reads": rows_for("thread_reads"),
             }
+            # Task sub-records (stages / comments) hang off tasks, not clients, so
+            # they're scoped by the exported task ids. Needed so an upload can bring
+            # the Technical/Journal team task boards back exactly as they were.
+            task_ids = [t["id"] for t in export["tasks"]]
+            if mode == "all":
+                export["task_stages"] = [dict(r) for r in con.execute("SELECT * FROM task_stages").fetchall()]
+                export["task_comments"] = [dict(r) for r in con.execute("SELECT * FROM task_comments").fetchall()]
+            elif task_ids:
+                ph = ",".join(["?"] * len(task_ids))
+                export["task_stages"] = [dict(r) for r in con.execute(
+                    f"SELECT * FROM task_stages WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
+                export["task_comments"] = [dict(r) for r in con.execute(
+                    f"SELECT * FROM task_comments WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
+            else:
+                export["task_stages"] = []
+                export["task_comments"] = []
+            export["backupFormat"] = 2
             # These aren't tied to any client, so there's no meaningful client-date
             # range to scope them by — only included (and only cleared) in "all" mode.
             if mode == "all":
@@ -6032,6 +6052,39 @@ def handle_action(action, d, ip=""):
                 export["dm_reads"] = [dict(r) for r in con.execute("SELECT * FROM dm_reads").fetchall()]
                 export["emp_calls"] = [dict(r) for r in con.execute("SELECT * FROM emp_calls").fetchall()]
             return export
+
+        # ----- Admin Panel > Database Management > Upload (restore) a backup -------------
+        # Takes the JSON file produced by "Download backup" and writes it back into the
+        # database. Every row is restored with ALL of its original columns — stage,
+        # assigned programmers/writers, proofreaders, journal name/status, task type,
+        # assigned_to, thread_with, etc. — so each record lands back on the same team's
+        # dashboard it came from (Marketing / Technical / Journal / Accounts), exactly
+        # as it was when the backup was taken.
+        #
+        # The browser sends the file in batches (one table at a time, in parent-before-
+        # child order) so large backups stay under MAX_BODY_BYTES. Each call is:
+        #     {table: "<name>", rows: [...]}      — tasks may carry "__stages"/"__comments"
+        # Safe to run more than once: records that already exist are skipped, never
+        # overwritten, so live data entered after the backup is never clobbered.
+        if action == "admin_import_data":
+            table = (d.get("table") or "").strip()
+            rows = d.get("rows")
+            if table not in _IMPORT_TABLES:
+                raise ApiError("That backup section isn't recognised.")
+            if not isinstance(rows, list):
+                raise ApiError("Invalid backup data.")
+            if len(rows) > 5000:
+                raise ApiError("Too many rows in one upload batch.")
+            result = _import_backup_rows(con, table, rows)
+            con.commit()
+            return {"ok": True, "table": table, **result}
+
+        if action == "admin_import_summary":
+            # Where the restored clients now sit, team by team — shown after an upload.
+            counts = {"marketing": 0, "accounts": 0, "technical": 0, "journal": 0, "completed": 0}
+            for r in con.execute("SELECT stage FROM clients").fetchall():
+                counts[_stage_team(r["stage"])] += 1
+            return {"ok": True, "teams": counts}
 
         if action == "admin_clear_data":
             mode = (d.get("mode") or "").strip()
@@ -6081,6 +6134,194 @@ def handle_action(action, d, ip=""):
         raise ApiError("Unknown action.", 404)
     finally:
         con.close()
+
+
+
+# =====================================================================
+# BACKUP UPLOAD (restore) helpers — used by the admin_import_data action.
+# =====================================================================
+# Tables a backup may restore, and the columns that identify "the same record"
+# when its original id is already taken by a different live row. Matching on
+# these (rather than on id alone) keeps repeat uploads from creating duplicates.
+_IMPORT_TABLES = {
+    "clients":             None,                      # text primary key — id is the identity
+    "calls":               ("client_id", "call_type", "note", "created_at"),
+    "payments":            ("client_id", "pay_key"),
+    "history":             ("client_id", "stage", "actor", "created_at"),
+    "work_updates":        ("client_id", "emp_name", "milestone", "created_at"),
+    "service_items":       ("client_id", "pay_key", "name", "created_at"),
+    "client_installments": ("client_id", "title", "sort_order", "created_at"),
+    "journal_targets":     ("client_id", "name", "created_at"),
+    "messages":            ("client_id", "thread_with", "sender_name", "body", "created_at"),
+    "thread_reads":        ("client_id", "thread_with", "viewer_key"),
+    "client_queries":      ("client_id", "query_text", "query_date", "created_at"),
+    "tasks":               ("title", "client_id", "created_by", "created_at"),
+    "task_stages":         ("task_id", "name", "sort_order", "created_at"),
+    "task_comments":       ("task_id", "author", "body", "created_at"),
+    "client_documents":    ("client_id", "file_name", "created_at"),
+    "client_notes_v2":     ("client_id", "title", "created_at"),
+    "client_referrals":    ("client_id", "name", "created_at"),
+    "calendar_events":     ("title", "event_date", "created_by", "created_at"),
+    "dm_messages":         ("p1", "p2", "sender_key", "body", "created_at"),
+    "dm_reads":            ("p1", "p2", "viewer_key"),
+    "emp_calls":           ("emp_id", "message", "created_at"),
+}
+
+_STAGE_INDEX = {st: i for i, st in enumerate(STAGES)}
+
+
+def _stage_team(stage):
+    """Which team's dashboard a client at this stage shows up on."""
+    i = _STAGE_INDEX.get(stage or "", 0)
+    if stage == "COMPLETED":
+        return "completed"
+    if i < _STAGE_INDEX["ACCOUNT_REVIEW"]:
+        return "marketing"
+    if i == _STAGE_INDEX["ACCOUNT_REVIEW"]:
+        return "accounts"
+    if i < _STAGE_INDEX["JOURNAL_MANAGER_REVIEW"]:
+        return "technical"
+    return "journal"
+
+
+def _table_columns(cur, table):
+    cur.execute("""SELECT column_name, is_nullable, column_default
+                   FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = %s""", (table,))
+    return {r["column_name"]: r for r in cur.fetchall()}
+
+
+def _clean_import_row(row, cols):
+    """Keep only columns that exist in this database, and let column defaults fill
+    in NOT NULL columns the backup left empty (older backups miss newer columns)."""
+    out = {}
+    for k, v in row.items():
+        if k not in cols or k == "id":
+            continue
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v)
+        if v is None and cols[k]["is_nullable"] == "NO":
+            continue
+        out[k] = v
+    return out
+
+
+def _import_one(cur, table, cols, row, ident, id_map_parent=None):
+    """Insert one backup row. Returns (status, new_id) where status is
+    'added' | 'skipped' | 'orphan'."""
+    orig_id = row.get("id")
+    data = _clean_import_row(row, cols)
+
+    # Re-point task children at the task's id in THIS database.
+    if table in ("task_stages", "task_comments"):
+        new_tid = (id_map_parent or {}).get(str(data.get("task_id")))
+        if new_tid is None:
+            return "orphan", None
+        data["task_id"] = new_tid
+
+    # Parent must exist, otherwise the row has nothing to attach to.
+    if data.get("client_id"):
+        cur.execute("SELECT 1 FROM clients WHERE id=%s", (data["client_id"],))
+        if not cur.fetchone():
+            return "orphan", None
+    elif "client_id" in cols and cols["client_id"]["is_nullable"] == "NO":
+        return "orphan", None
+    if table == "emp_calls":
+        cur.execute("SELECT 1 FROM employees WHERE id=%s", (data.get("emp_id"),))
+        if not cur.fetchone():
+            return "orphan", None
+
+    if table == "clients":
+        if not orig_id:
+            return "orphan", None
+        cur.execute("SELECT 1 FROM clients WHERE id=%s", (orig_id,))
+        if cur.fetchone():
+            return "skipped", orig_id
+        data["id"] = orig_id
+    else:
+        # Same record already here (e.g. the backup was uploaded before)?
+        keys = [k for k in ident if k in cols]
+        if keys:
+            where = " AND ".join(f"{k} IS NOT DISTINCT FROM %s" for k in keys)
+            cur.execute(f"SELECT id FROM {table} WHERE {where} LIMIT 1",
+                        tuple(data.get(k) for k in keys))
+            hit = cur.fetchone()
+            if hit:
+                return "skipped", hit["id"]
+        # Keep the original id when it's free, so links between records survive;
+        # otherwise let Postgres hand out a fresh one.
+        if orig_id is not None:
+            cur.execute(f"SELECT 1 FROM {table} WHERE id=%s", (orig_id,))
+            if not cur.fetchone():
+                data["id"] = orig_id
+
+    names = list(data.keys())
+    sql = (f"INSERT INTO {table} ({', '.join(names)}) VALUES ({', '.join(['%s'] * len(names))}) "
+           f"ON CONFLICT DO NOTHING" + ("" if table == "clients" else " RETURNING id"))
+    cur.execute(sql, tuple(data[n] for n in names))
+    if table == "clients":
+        return ("added" if cur.rowcount else "skipped"), orig_id
+    got = cur.fetchone()
+    return ("added", got["id"]) if got else ("skipped", None)
+
+
+def _import_backup_rows(con, table, rows):
+    raw = con._conn
+    cur = raw.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cols = _table_columns(cur, table)
+    if not cols:
+        raise ApiError(f"The {table} table doesn't exist in this database.")
+    ident = _IMPORT_TABLES[table] or ()
+    stats = {"added": 0, "skipped": 0, "orphan": 0, "failed": 0}
+    child_stats = {"added": 0, "skipped": 0, "orphan": 0, "failed": 0}
+
+    def run(tbl, tcols, tident, r, id_map=None):
+        cur.execute("SAVEPOINT imp_row")
+        try:
+            res = _import_one(cur, tbl, tcols, r, tident, id_map)
+            cur.execute("RELEASE SAVEPOINT imp_row")
+            return res
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT imp_row")
+            return "failed", None
+
+    stage_cols = comment_cols = None
+    for r in rows:
+        if not isinstance(r, dict):
+            stats["failed"] += 1
+            continue
+        status, new_id = run(table, cols, ident, r)
+        stats[status] += 1
+        # Tasks arrive with their stages/comments attached, so the child rows can be
+        # re-linked to the task's id in this database even if it had to change.
+        if table == "tasks" and new_id is not None:
+            id_map = {str(r.get("id")): new_id}
+            for key, child in (("__stages", "task_stages"), ("__comments", "task_comments")):
+                kids = r.get(key) or []
+                if not kids:
+                    continue
+                if child == "task_stages":
+                    stage_cols = stage_cols or _table_columns(cur, child)
+                    ccols = stage_cols
+                else:
+                    comment_cols = comment_cols or _table_columns(cur, child)
+                    ccols = comment_cols
+                for kid in kids:
+                    if isinstance(kid, dict):
+                        st, _ = run(child, ccols, _IMPORT_TABLES[child], kid, id_map)
+                        child_stats[st] += 1
+
+    # Move SERIAL counters past the restored ids, or the next "Add ..." would collide.
+    touched = [table] + (["task_stages", "task_comments"] if table == "tasks" else [])
+    for t in touched:
+        if t == "clients":
+            continue
+        cur.execute(f"""SELECT setval(pg_get_serial_sequence('{t}', 'id'),
+                                      COALESCE((SELECT MAX(id) FROM {t}), 0) + 1, false)""")
+    out = dict(stats)
+    if table == "tasks":
+        out["children"] = child_stats
+    return out
 
 
 # ---------------------------------------------------------- HTTP server

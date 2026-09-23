@@ -50,13 +50,26 @@ def main():
     # 1) TEAM — technical + journal team members so assignments have
     #    real people to point to, and the Team page isn't empty.
     # ---------------------------------------------------------------
+    # employee_create expects the CALLER's role in "role" (must be a staff-management
+    # role) and the new person's role in "empRole". Passing the employee role as
+    # "role" made every call fail with "You don't have permission to add team members".
+    # If a previous run stopped half-way, the employees already exist — reuse them
+    # instead of failing with "... is already on the team".
+    created_logins = []
+
     def add_employee(name, role, team_type="", is_coordinator=False, coordinator_id=None):
+        row = con.execute("""SELECT id FROM employees WHERE LOWER(name)=LOWER(?)
+                             AND active=1 AND deleted_at IS NULL""", (name,)).fetchone()
+        if row:
+            return row["id"], name
         out = server.handle_action("employee_create", {
-            "name": name, "role": role, "teamType": team_type,
+            "role": "super_admin", "empRole": role,
+            "name": name, "teamType": team_type,
             "email": name.lower().replace(" ", ".") + "@matiz.demo",
             "isCoordinator": is_coordinator, "coordinatorId": coordinator_id,
             "joiningDate": d_ago(random.randint(60, 700)),
         })
+        created_logins.append((out["empUid"], name, out.get("password", "")))
         row = con.execute("SELECT id FROM employees WHERE emp_uid=?", (out["empUid"],)).fetchone()
         return row["id"], name
 
@@ -113,7 +126,7 @@ def main():
 
     def add_history(cid, stage, actor, note="", days_ago=0):
         con.execute("""INSERT INTO history (client_id, stage, actor, note, created_at)
-                       VALUES (?,?,?,?, datetime('now','localtime','-%d days'))""" % days_ago,
+                       VALUES (?,?,?,?, to_char(now() - interval '%d days', 'YYYY-MM-DD HH24:MI:SS'))""" % days_ago,
                     (cid, stage, actor, note))
 
     def set_payment(cid, key, amount, days_ago):
@@ -162,7 +175,7 @@ def main():
 
         for w in (work_updates or []):
             con.execute("""INSERT INTO work_updates (client_id, emp_name, milestone, note, created_at)
-                           VALUES (?,?,?,?, datetime('now','localtime','-%d days'))""" % w[2],
+                           VALUES (?,?,?,?, to_char(now() - interval '%d days', 'YYYY-MM-DD HH24:MI:SS'))""" % w[2],
                         (cid, w[0], w[1], w[3] if len(w) > 3 else ""))
 
         if journal_name:
@@ -278,6 +291,11 @@ def main():
     print("Covers: new leads, TL/Manager/Accounts review, technical (proposal +")
     print("implementation + paper writing), journal team (proofreading, formatting,")
     print("submission, published), a rejected lead, and overdue deadlines.")
+    if created_logins:
+        print()
+        print("Demo team logins (passwords are random and shown only now — note them down):")
+        for uid, name, pwd in created_logins:
+            print("  %-10s %-22s %s" % (uid, name, pwd))
     print("Start the app with:  python server.py")
 
 

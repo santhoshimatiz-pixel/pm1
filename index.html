@@ -2769,7 +2769,7 @@ function renderMktDashboard(){
   const total = uniqueClientCount();
   const activeClients = clients.filter(c=>c.stage!=="COMPLETED" && !c.rejected);
   const pendingDeadlines = clients.filter(c=>c.stage!=="COMPLETED" && c.deadlineDate && (new Date(c.deadlineDate)-now)<=7*86400000).length;
-  const pendingPayments = clients.filter(c=>activePayKeys(c).some(k=>c.payments[k] && c.payments[k].status!=="paid")).length;
+  const pendingPayments = clients.filter(c=>{ const pl = clientPaymentPlan(c); return pl.count && !pl.fullyPaid; }).length;
   const clientPendingCt = clients.filter(c=>["PROPOSAL_CLIENT_REVIEW","IMPLEMENTATION_CLIENT_REVIEW","CLIENT_REVIEW"].includes(c.stage)).length;
   const withJournal = clients.filter(c=>c.journalName);
   const published = withJournal.filter(c=>c.journalStatus==="PUBLISHED").length;
@@ -2782,11 +2782,12 @@ function renderMktDashboard(){
   let pendingAmtTotal = 0;
   const pendingAmtClients = [];
   clients.forEach(c=>{
-    let clientPending = 0; const pendingKeys = [];
-    activePayKeys(c).forEach(k=>{
-      const p = c.payments && c.payments[k];
-      if(!p || p.status!=="paid"){ const amt = suggestedAmount(c,k)||0; clientPending += amt; pendingKeys.push(PAY_LABELS[k]); }
-    });
+    // Uses the client's real plan, so a client who paid in full (or whose split has
+    // fewer installments than the service's default stage list) isn't shown as owing.
+    const pl = clientPaymentPlan(c);
+    const clientPending = pl.fullyPaid ? 0 : pl.due;
+    const pendingKeys = pl.fullyPaid ? [] : pl.items.filter(i=>!i.paid).map(i=>i.label)
+      .concat(pl.unscheduled ? ["Balance not yet split"] : []);
     if(pendingKeys.length){ pendingAmtTotal += clientPending; pendingAmtClients.push({c, clientPending, pendingKeys}); }
   });
   const mgrQueue = clients.filter(c=>c.stage==="MANAGER_REVIEW");
@@ -4975,11 +4976,12 @@ function admOpenPendingAmount(){
   let totalPending = 0;
   const list = [];
   clients.forEach(c=>{
-    let clientPending = 0; const pendingKeys = [];
-    activePayKeys(c).forEach(k=>{
-      const p = c.payments && c.payments[k];
-      if(!p || p.status!=="paid"){ const amt = suggestedAmount(c,k)||0; clientPending += amt; pendingKeys.push(PAY_LABELS[k]); }
-    });
+    // Uses the client's real plan, so a client who paid in full (or whose split has
+    // fewer installments than the service's default stage list) isn't shown as owing.
+    const pl = clientPaymentPlan(c);
+    const clientPending = pl.fullyPaid ? 0 : pl.due;
+    const pendingKeys = pl.fullyPaid ? [] : pl.items.filter(i=>!i.paid).map(i=>i.label)
+      .concat(pl.unscheduled ? ["Balance not yet split"] : []);
     if(pendingKeys.length){ totalPending += clientPending; list.push({c, clientPending, pendingKeys}); }
   });
   list.sort((a,b)=> b.clientPending - a.clientPending);
@@ -5016,7 +5018,7 @@ function admOpenChip(kind){
   if(kind==="total"){ title="All clients"; list=clients; }
   else if(kind==="active"){ title="Active projects"; list=clients.filter(c=>c.stage!=="COMPLETED" && !c.rejected); }
   else if(kind==="deadlines"){ title="Pending deadlines (next 7 days)"; list=clients.filter(c=>c.stage!=="COMPLETED" && c.deadlineDate && (new Date(c.deadlineDate)-now)<=7*86400000); }
-  else if(kind==="payments"){ title="Pending payments"; list=clients.filter(c=>activePayKeys(c).some(k=>c.payments[k] && c.payments[k].status!=="paid")); }
+  else if(kind==="payments"){ title="Pending payments"; list=clients.filter(c=>{ const pl = clientPaymentPlan(c); return pl.count && !pl.fullyPaid; }); }
   else if(kind==="clientpending"){ title="Client pending (awaiting client action)"; list=clients.filter(c=>["PROPOSAL_CLIENT_REVIEW","IMPLEMENTATION_CLIENT_REVIEW","CLIENT_REVIEW"].includes(c.stage)); }
   else if(kind==="underpub"){ title="Under publication"; list=clients.filter(c=>c.journalName && c.journalStatus!=="PUBLISHED"); }
   else if(kind==="techpending"){ title="Technical pending"; list=clients.filter(c=>stageIdx(c.stage)>=4 && stageIdx(c.stage)<=18 && c.stage!=="COMPLETED"); }
@@ -5153,7 +5155,7 @@ function renderAdminDashboard(){
   const maxOverdueDays = Math.max(1, ...overdue.map(admDaysOver));
 
   const pendingDeadlines = clients.filter(c=>c.stage!=="COMPLETED" && c.deadlineDate && (new Date(c.deadlineDate)-now)<=7*86400000).length;
-  const pendingPayments = clients.filter(c=>activePayKeys(c).some(k=>c.payments[k] && c.payments[k].status!=="paid")).length;
+  const pendingPayments = clients.filter(c=>{ const pl = clientPaymentPlan(c); return pl.count && !pl.fullyPaid; }).length;
   const clientPending = clients.filter(c=>["PROPOSAL_CLIENT_REVIEW","IMPLEMENTATION_CLIENT_REVIEW","CLIENT_REVIEW"].includes(c.stage)).length;
   const techPending = techActive.length;
 
@@ -5720,15 +5722,59 @@ function admPubStatusLabel(c){
   if(!c.journalName) return "—";
   return JOURNAL_STATUS_LABEL[c.journalStatus] || "Submitted";
 }
-function admInstallmentsText(c){
-  if(c.installments && c.installments.length){
-    const paid = c.installments.filter(it=>it.status==='paid').length;
-    return paid+"/"+c.installments.length;
+/* ---------- The client's REAL payment plan ----------
+   Earlier every card counted the service's default stage list (Registration /
+   Start Work / Code / Paper ...), so a client always showed "x / 4" even if they
+   agreed to 3 installments or paid everything in one go. The plan is now built
+   from what was actually agreed for this client:
+     Registration payment + the custom installments entered for them
+     (+ any service-stage payment Accounts recorded separately),
+   and if part of the total hasn't been split into an installment yet, that
+   balance counts as one more pending payment. Clients created before the
+   Total-amount/split-up feature (no total, no split) fall back to the old
+   service-stage list so nothing disappears for them. */
+function clientPaymentPlan(c){
+  const pays = (c && c.payments) || {};
+  const inst = (c && c.installments) || [];
+  const total = parseFloat(c && c.totalAmount) || 0;
+  const items = [];
+  const legacy = !(total > 0 || inst.length);
+  if(!legacy){
+    const reg = pays.reg || {};
+    const regAmt = parseFloat(reg.amount) || 0;
+    if(reg.status === "paid" || regAmt > 0)
+      items.push({label: PAY_LABELS.reg, amount: regAmt, paid: reg.status === "paid", date: reg.date || ""});
+    activePayKeys(c).filter(k=>k !== "reg").forEach(k=>{
+      const p = pays[k];
+      if(p && p.status === "paid")
+        items.push({label: PAY_LABELS[k], amount: parseFloat(p.amount) || 0, paid: true, date: p.date || ""});
+    });
+    inst.forEach(it=>items.push({label: it.title, amount: parseFloat(it.amount) || 0,
+                                 paid: it.status === "paid", date: it.paidDate || ""}));
+  } else {
+    activePayKeys(c).forEach(k=>{
+      const p = pays[k] || {};
+      const paid = p.status === "paid";
+      items.push({label: PAY_LABELS[k], amount: paid ? (parseFloat(p.amount) || 0) : (suggestedAmount(c, k) || 0),
+                  paid, date: p.date || ""});
+    });
   }
-  const keys = activePayKeys(c);
-  if(!keys.length) return "0/0";
-  const paid = keys.filter(k=>c.payments[k] && c.payments[k].status==="paid").length;
-  return paid+"/"+keys.length;
+  const paidAmt = items.filter(i=>i.paid).reduce((s,i)=>s + i.amount, 0);
+  const scheduled = items.reduce((s,i)=>s + i.amount, 0);
+  const contract = total > 0 ? total : scheduled;
+  const due = Math.max(0, contract - paidAmt);
+  const unscheduled = Math.max(0, contract - scheduled);
+  const hasUnscheduled = unscheduled >= 0.5 && due >= 0.5;
+  const paidCount = items.filter(i=>i.paid).length;
+  const count = items.length + (hasUnscheduled ? 1 : 0);
+  const fullyPaid = contract > 0 ? due < 0.5 : (count > 0 && paidCount === count);
+  return {items, count, paidCount, paidAmt, total: contract, due, unscheduled: hasUnscheduled ? unscheduled : 0,
+          fullyPaid, singlePayment: fullyPaid && paidCount === 1, legacy};
+}
+function admInstallmentsText(c){
+  const plan = clientPaymentPlan(c);
+  if(!plan.count) return "0/0";
+  return plan.fullyPaid ? `${plan.paidCount}/${plan.paidCount} (paid in full)` : plan.paidCount+"/"+plan.count;
 }
 function admMembersHtml(c){
   const progs = (c.assignedProgrammers||[]).map(n=>`<span class="adm-avatar blue" title="${esc(n)} — Programmer">${initials(n)}</span>`);
@@ -6547,10 +6593,26 @@ function admProfileDashboardTab(c){
   const ongoing = fam.filter(x=>x.stage!=="COMPLETED").length;
   const completed = fam.filter(x=>x.stage==="COMPLETED").length;
 
-  const paidKeys = activePayKeys(c);
-  const paidCount = paidKeys.filter(k=>c.payments[k] && c.payments[k].status==="paid").length;
-  let clientPaid = 0;
-  paidKeys.forEach(k=>{ const p=c.payments[k]; if(p && p.status==="paid") clientPaid += (parseFloat(p.amount)||0); });
+  const plan = clientPaymentPlan(c);
+  const inr = n => "Rs. " + Math.round(n).toLocaleString("en-IN");
+  let payFrac, payStatus, payNote;
+  if(!plan.count){
+    payFrac = `0<span>/ 0</span>`;
+    payStatus = "";
+    payNote = "No payments recorded yet";
+  } else if(plan.fullyPaid){
+    // Paid off: the count is just the payments actually made (1 / 1 for a single full payment).
+    payFrac = `${plan.paidCount}<span>/ ${plan.paidCount}</span>`;
+    payStatus = `<span class="adm-status good">&#10003; No dues &mdash; paid in full</span>`;
+    payNote = plan.singlePayment
+      ? `${inr(plan.paidAmt)} paid in a single payment`
+      : `${inr(plan.paidAmt)} paid across ${plan.paidCount} installment${plan.paidCount===1?"":"s"}`;
+  } else {
+    payFrac = `${plan.paidCount}<span>/ ${plan.count}</span>`;
+    payStatus = `<span class="adm-status warn">${inr(plan.due)} due</span>`;
+    payNote = `${inr(plan.paidAmt)} paid so far` + (plan.total ? ` of ${inr(plan.total)}` : "")
+      + (plan.unscheduled ? ` &middot; ${inr(plan.unscheduled)} not yet split into installments` : "");
+  }
 
   const queries = clientQueries.filter(q=>q.client_id===c.id);
   const openQueries = queries.filter(q=>q.status!=="RESOLVED").length;
@@ -6568,7 +6630,7 @@ function admProfileDashboardTab(c){
   </div>
   <div class="adm-kpi-grid">
     <div class="adm-kpi"><h4>Total Projects Involved</h4><div class="frac" style="font-size:26px">${totalProjects}</div><div class="note">${ongoing} ongoing &middot; ${completed} completed</div></div>
-    <div class="adm-kpi"><h4>Payments &middot; Installments</h4><div class="frac" style="font-size:26px">${paidCount}<span>/ ${paidKeys.length}</span></div><div class="note">Rs. ${clientPaid.toLocaleString("en-IN")} paid so far</div></div>
+    <div class="adm-kpi"><h4>Payments &middot; Installments</h4><div class="frac" style="font-size:26px">${payFrac}</div>${payStatus ? `<div style="margin-top:6px">${payStatus}</div>` : ""}<div class="note">${payNote}</div></div>
     <div class="adm-kpi"><h4>Project Status</h4><div style="margin-top:6px"><span class="adm-status warn">${esc(admTechStatusLabel(c))}</span></div><div class="note" style="margin-top:6px">Publication: ${esc(admPubStatusLabel(c))}</div></div>
     <div class="adm-kpi"><h4>Deadline Extensions</h4><div style="margin-top:6px">${c.extRequested ? `<span class="adm-status warn">Pending — ${esc(c.extAmount||"")}</span>` : `<span class="adm-status good">None pending</span>`}</div>${c.extRequested ? `<div class="note" style="margin-top:6px">${esc(c.extReason||"")}</div>` : ""}</div>
   </div>
@@ -10706,7 +10768,7 @@ function openSettings(){
   const dbSection = (role==="super_admin" || role==="md_admin") ? `
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
     <h3>Database Management</h3>
-    <p class="msub">Export a backup, or permanently clear client &amp; project data from the database.</p>
+    <p class="msub">Export a backup, upload (restore) a backup, or permanently clear client &amp; project data from the database.</p>
     <button class="btn ghost" onclick="closeModal();openDatabaseManagement()">&#128451; Open Database Management &#8594;</button>` : "";
   openModal(`
     ${emailSection}
@@ -10752,7 +10814,14 @@ function openDatabaseManagement(){
   const today = todayISO();
   openModal(`
     <h3>Database Management</h3>
-    <p class="msub">Export a backup of client &amp; project data, or permanently clear it from the database.</p>
+    <p class="msub">Export a backup of client &amp; project data, upload a backup to restore it, or permanently clear it from the database.</p>
+    <div class="cd-upload-box" style="border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px">
+      <h4 class="am-section-head" style="margin-top:0">&#11014; Upload backup (restore data)</h4>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px">Choose a backup file downloaded from this screen (<b>imatiz-backup-….json</b>). Every client, payment, installment, task, note, document and message goes back exactly where it was &mdash; Marketing, Accounts, Technical and Journal team records each return to their own team's dashboard with the same stage and assignments. Records that already exist are skipped, so uploading the same file twice never creates duplicates.</p>
+      <input id="cd_uploadFile" type="file" accept=".json,application/json" style="margin-bottom:8px">
+      <div><button class="btn gold" id="cd_uploadBtn" onclick="uploadDataBackup()">&#11014; Upload &amp; restore</button></div>
+      <div id="cd_uploadStatus" style="margin-top:8px;font-size:12.5px;color:var(--muted)"></div>
+    </div>
     <div class="field">
       <label>What do you want to clear?</label>
       <select id="cd_mode" onchange="cdModeChanged()">
@@ -10820,6 +10889,99 @@ async function downloadDataBackup(){
   const delBtn = $("cd_deleteBtn"); if(delBtn) delBtn.disabled = false;
   if(btn){ btn.disabled = false; btn.textContent = "⬇ Download backup again"; }
   toast("Backup downloaded");
+}
+/* ---------- Upload (restore) a backup ----------
+   Sends the backup back to the server one table at a time, parents before
+   children (clients first, then everything linked to them), in size-limited
+   batches so big backups with documents don't hit the request-size cap. The
+   server restores each row with all its original columns, which is what puts
+   every record back on the same team's dashboard. */
+const CD_IMPORT_ORDER = ["clients","calls","payments","history","work_updates","service_items",
+  "client_installments","journal_targets","messages","thread_reads","client_queries","tasks",
+  "client_documents","client_notes_v2","client_referrals","calendar_events","dm_messages","dm_reads","emp_calls"];
+const CD_IMPORT_LABEL = {clients:"Clients", calls:"Call logs", payments:"Payments", history:"Stage history",
+  work_updates:"Work updates", service_items:"Service split-ups", client_installments:"Installments",
+  journal_targets:"Journal targets", messages:"Client messages", thread_reads:"Message read markers",
+  client_queries:"Client queries", tasks:"Tasks", client_documents:"Documents & links", client_notes_v2:"Notes",
+  client_referrals:"Referrals", calendar_events:"Calendar events", dm_messages:"Team messages",
+  dm_reads:"Team message read markers", emp_calls:"Call-to-cabin alerts"};
+const CD_BATCH_BYTES = 3 * 1024 * 1024;   // well under the server's request-size cap
+const CD_BATCH_ROWS = 400;
+function cdBatches(rows){
+  const out = []; let cur = [], size = 0;
+  rows.forEach(r=>{
+    const len = JSON.stringify(r).length;
+    if(cur.length && (size + len > CD_BATCH_BYTES || cur.length >= CD_BATCH_ROWS)){ out.push(cur); cur = []; size = 0; }
+    cur.push(r); size += len;
+  });
+  if(cur.length) out.push(cur);
+  return out;
+}
+async function uploadDataBackup(){
+  const input = $("cd_uploadFile");
+  const file = input && input.files && input.files[0];
+  const status = $("cd_uploadStatus");
+  const btn = $("cd_uploadBtn");
+  if(!file){ toast("Choose a backup file first"); return; }
+  if(!/\.json$/i.test(file.name)){ toast("That isn't a backup file — pick the .json file you downloaded"); return; }
+  let backup;
+  try{ backup = JSON.parse(await file.text()); }
+  catch(e){ toast("Couldn't read that file — it isn't a valid backup"); return; }
+  if(!backup || typeof backup!=="object" || !Array.isArray(backup.clients)){
+    toast("That file doesn't look like a backup from this app"); return;
+  }
+  const scope = backup.mode==="range" ? `clients registered ${backup.startDate} to ${backup.endDate}` : "complete data";
+  if(!confirm(`Restore this backup (${scope}, taken ${backup.exportedAt||"unknown date"})?\n\n${backup.clients.length} client(s) and all linked records will be added back. Anything already in the database is left as it is.`)) return;
+
+  // Task stages/comments travel with their task so the server can re-link them.
+  const stagesBy = {}, commentsBy = {};
+  (backup.task_stages||[]).forEach(r=>{ (stagesBy[r.task_id] = stagesBy[r.task_id] || []).push(r); });
+  (backup.task_comments||[]).forEach(r=>{ (commentsBy[r.task_id] = commentsBy[r.task_id] || []).push(r); });
+  const tasks = (backup.tasks||[]).map(t=>Object.assign({}, t, {__stages: stagesBy[t.id]||[], __comments: commentsBy[t.id]||[]}));
+
+  if(btn){ btn.disabled = true; btn.textContent = "Restoring…"; }
+  const totals = {};
+  let problems = 0;
+  try{
+    for(const table of CD_IMPORT_ORDER){
+      const rows = table==="tasks" ? tasks : (backup[table]||[]);
+      if(!Array.isArray(rows) || !rows.length) continue;
+      const t = totals[table] = {added:0, skipped:0, orphan:0, failed:0};
+      const batches = cdBatches(rows);
+      for(let i=0; i<batches.length; i++){
+        if(status) status.textContent = `Restoring ${CD_IMPORT_LABEL[table]||table}… (${i+1}/${batches.length})`;
+        try{
+          const out = await api("admin_import_data", {table, rows: batches[i]});
+          ["added","skipped","orphan","failed"].forEach(k=>{ t[k] += out[k]||0; });
+          if(out.children) ["added","skipped","orphan","failed"].forEach(k=>{ t[k] += out.children[k]||0; });
+        }catch(e){
+          if(/session has expired/i.test(e.message)) throw e;
+          t.failed += batches[i].length;
+        }
+      }
+      problems += t.orphan + t.failed;
+    }
+  }catch(e){
+    toast(e.message);
+    if(btn){ btn.disabled = false; btn.textContent = "⬆ Upload & restore"; }
+    return;
+  }
+  let teams = null;
+  try{ teams = (await api("admin_import_summary", {})).teams; }catch(e){}
+  const addedClients = (totals.clients||{}).added||0;
+  const rowsHtml = Object.keys(totals).map(k=>{
+    const t = totals[k];
+    return `<tr><td>${esc(CD_IMPORT_LABEL[k]||k)}</td><td style="text-align:right">${t.added}</td><td style="text-align:right">${t.skipped}</td><td style="text-align:right">${t.orphan + t.failed}</td></tr>`;
+  }).join("");
+  if(status) status.innerHTML = `
+    <div style="color:var(--ok);font-weight:700;margin-bottom:6px">&#10003; Backup restored &mdash; ${addedClients} client(s) added back</div>
+    ${teams ? `<div style="margin-bottom:8px">Clients now on each team's dashboard: Marketing <b>${teams.marketing}</b> &middot; Accounts <b>${teams.accounts}</b> &middot; Technical <b>${teams.technical}</b> &middot; Journal <b>${teams.journal}</b> &middot; Completed <b>${teams.completed}</b></div>` : ""}
+    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Records</th><th style="text-align:right">Restored</th><th style="text-align:right">Already there</th><th style="text-align:right">Not restored</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    ${problems ? `<div style="margin-top:6px;color:var(--warn)">${problems} record(s) couldn't be restored — usually because the client or team member they belong to no longer exists (e.g. an employee who was removed).</div>` : ""}`;
+  if(btn){ btn.disabled = false; btn.textContent = "⬆ Upload & restore"; }
+  if(input) input.value = "";
+  toast(`Backup restored — ${addedClients} client(s) added back`);
+  try{ await refresh(); }catch(e){}
 }
 async function confirmClearData(){
   const scope = cdCurrentScope();
