@@ -1,0 +1,47 @@
+============================================================
+ TASK BOARD: DATE & TIME FOR EVERY STAGE
+============================================================
+
+WHAT CHANGED
+------------------------------------------------------------
+Projects -> open a project -> Task Board.
+Every stage the project has reached now shows, next to it:
+
+    the date & time it reached that stage
+    who sent it there (e.g. "sent here by Marketing TL")
+
+    Lead entry (Telecaller)   15 Sept 2026, 10:05 am . added by Telecaller
+    Marketing TL review       15 Sept 2026, 4:42 pm  . sent here by Telecaller
+    Sent to Technical Team    Since 20 Sept 2026, 2:02 pm . sent here by
+                              Accounts Team . 2 days so far
+
+- The CURRENT stage says "Since ..." and how long it has been
+  waiting there.
+- If a project reached the same stage more than once (e.g. sent
+  back for correction and returned), a small "x2" / "x3" badge
+  appears. Hover over it to see every date & time.
+- Future stages stay blank until they're reached.
+- On phones the date goes under the stage name.
+
+Nothing new has to be entered: the app already recorded every
+stage change. Older projects show their dates straight away.
+(A finished stage with no record - e.g. very old data - says
+"No date recorded".)
+
+Programmers / Paper Writers opening a project also see the
+dates, but still NOT the internal stage notes. Clients don't
+see this.
+
+
+ALSO FIXED (existing bug)
+------------------------------------------------------------
+The Marketing TL's "Verify & send to Manager" button always
+failed with "You don't have permission to do that". The server
+had this step wrongly limited to the Technical roles. It now
+works for the Marketing TL (and Marketing Manager / Admin).
+
+
+FILES CHANGED
+------------------------------------------------------------
+server.py   - stage dates sent with each project; permission fix.
+index.html  - dates on the Task Board.

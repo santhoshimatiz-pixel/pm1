@@ -751,7 +751,10 @@ ACTION_ROLES = {
     "coordinator_decision": _R_ALL_STAFF,
     "techtl_decision": _R_TECH_MGMT,
     "techmgr_decision": _R_TECH_MGR,
-    "tl_verify": _R_TECH_MGMT,
+    # BUGFIX: this is the MARKETING TL's "Verify & send to Manager" step (TL_REVIEW ->
+    # MANAGER_REVIEW, recorded as "Marketing TL"), but it was mapped to the Technical
+    # roles, so the Marketing TL's button always failed with "You don't have permission".
+    "tl_verify": _R_MKT_MGMT,
     "verify_proposal": _R_TECH_MGMT,
     "submit_proposal": _R_ALL_STAFF,
     "deliver_proposal": _R_TECH_MGMT,
@@ -2496,6 +2499,7 @@ _EMPLOYEE_HIDDEN_FIELDS = _CLIENT_INTERNAL_FIELDS + (
 def scrub_client_for_client(c):
     """Client-portal view of a client record."""
     out = {k: v for k, v in c.items() if k not in _CLIENT_INTERNAL_FIELDS}
+    out.pop("stageTimes", None)     # internal routing (who moved it when) isn't portal content
     # A client may see its own chat threads, but not staff-to-staff previews.
     out.pop("messageThreads", None)
     return out
@@ -2855,6 +2859,11 @@ def all_clients(con):
             "history": [{"stage": h["stage"], "actor": h["actor"], "at": iso(h["created_at"]),
                          "note": h["note"] or ""}
                         for h in hist_by.get(cid, [])],
+            # When each pipeline stage was reached, and by whom — for the project Task Board.
+            # Kept separate from "history" (which carries internal notes and is stripped for
+            # employees) so programmers/writers opening a project still see the dates.
+            "stageTimes": [{"stage": h["stage"], "actor": h["actor"], "at": iso(h["created_at"])}
+                           for h in hist_by.get(cid, [])],
             "workUpdates": [{"empName": w["emp_name"], "milestone": w["milestone"], "note": w["note"],
                               "at": iso(w["created_at"])} for w in work_by.get(cid, [])],
             "rejected": bool(r["rejected"]), "rejectReason": r["reject_reason"] or "",

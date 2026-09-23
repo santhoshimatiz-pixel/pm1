@@ -846,6 +846,18 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
   table.adm-table.sends-table td{padding:3px 0;border:none;position:static;box-shadow:none;background:transparent!important;white-space:normal!important}
   table.adm-table.sends-table td::before{content:attr(data-label);display:block;font-size:11px;font-weight:700;color:var(--muted);margin-top:4px}
 }
+/* Task Board: date & time each stage was reached (right side; wraps below on phones). */
+.adm-tb-item .adm-tb-label{flex:0 0 340px;min-width:0}
+.adm-tb-time{font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap;padding-right:6px}
+.adm-tb-item.current .adm-tb-time{color:var(--purple);font-weight:600}
+.adm-tb-who{color:var(--faint);font-weight:500}
+.adm-tb-none{color:var(--faint);font-style:italic}
+.adm-tb-again{display:inline-block;margin-left:6px;font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 6px;border-radius:999px;background:var(--card2);border:1px solid var(--line-strong);color:var(--muted);cursor:help}
+@media (max-width:700px){
+  .adm-tb-item{flex-wrap:wrap;row-gap:2px}
+  .adm-tb-item .adm-tb-label{flex:1 1 100%}
+  .adm-tb-time{flex-basis:100%;text-align:left;white-space:normal;margin-left:0;padding-left:0}
+}
 </style>
 <script>
   // Applies the person's saved theme (light/dark) before the page paints, so there's
@@ -6312,14 +6324,46 @@ function admProjTasksTab(c){
 const PROPOSAL_IMPL_STAGES = ['PROPOSAL_ASSIGNED','PROPOSAL_SUBMITTED','PROPOSAL_VERIFIED',
   'PROPOSAL_CLIENT_REVIEW','PROPOSAL_APPROVED','IMPLEMENTATION_ASSIGNED','IMPLEMENTATION_COMPLETE',
   'IMPLEMENTATION_CLIENT_REVIEW','IMPLEMENTATION_APPROVED'];
+// Task Board dates include the year (a project can run across a new year).
+function tbDateTime(iso){
+  if(!iso) return "—";
+  const d = new Date(iso); if(isNaN(d)) return "—";
+  return d.toLocaleString("en-IN",{day:"numeric",month:"short",year:"numeric",hour:"numeric",minute:"2-digit"});
+}
+function tbDurationSince(iso){
+  const ms = Date.now() - new Date(iso).getTime();
+  if(!(ms >= 0)) return "";
+  const m = Math.floor(ms/60000), h = Math.floor(m/60), dd = Math.floor(h/24);
+  if(dd >= 1) return `${dd} day${dd===1?"":"s"} so far`;
+  if(h >= 1) return `${h} hr${h===1?"":"s"} so far`;
+  return m >= 1 ? `${m} min so far` : "just now";
+}
 function admProjTaskBoardTab(c){
   const curIdx = stageIdx(c.stage);
   const displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
+  // Every time this client reached each stage (newest first), from the stage history.
+  const times = {};
+  (c.stageTimes || c.history || []).forEach(h=>{ if(h.stage && h.at) (times[h.stage] = times[h.stage] || []).push(h); });
   const items = displayStages.map(s=>{
     const i = stageIdx(s);
-    return `<div class="adm-tb-item ${i<curIdx?'done':i===curIdx?'current':''}"><div class="adm-tb-dot"></div><div class="adm-tb-label">${esc(STAGE_LABEL[s]||s)}</div></div>`;
+    const cls = i<curIdx ? 'done' : (i===curIdx ? 'current' : '');
+    const hits = times[s] || [];
+    let meta = "";
+    if(hits.length){
+      const last = hits[0];
+      const who = last.actor ? ` <span class="adm-tb-who">&middot; ${s==="NEW"?"added":"sent here"} by ${esc(last.actor)}</span>` : "";
+      const since = i===curIdx ? `Since ` : "";
+      const waited = i===curIdx ? ` <span class="adm-tb-who">&middot; ${esc(tbDurationSince(last.at))}</span>` : "";
+      const all = hits.map(h=>tbDateTime(h.at) + (h.actor?" — by "+h.actor:"")).join("\n");
+      const again = hits.length>1 ? ` <span class="adm-tb-again" title="Reached ${hits.length} times:\n${esc(all)}">&times;${hits.length}</span>` : "";
+      meta = `<div class="adm-tb-time" title="${esc(all)}">${since}${esc(tbDateTime(last.at))}${who}${waited}${again}</div>`;
+    } else if(cls){
+      meta = `<div class="adm-tb-time adm-tb-none">No date recorded</div>`;
+    }
+    return `<div class="adm-tb-item ${cls}"><div class="adm-tb-dot"></div><div class="adm-tb-label">${esc(STAGE_LABEL[s]||s)}</div>${meta}</div>`;
   }).join("");
-  return projectSendsPanelHtml(c) + `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3></div>
+  return projectSendsPanelHtml(c) + `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3>
+      <span style="font-size:12px;color:var(--muted)">Date &amp; time each stage was reached, and who sent it there</span></div>
     <div class="adm-panel-body"><div class="adm-tb-rail">${items}</div></div>
   </div>`;
 }
