@@ -1,0 +1,100 @@
+============================================================
+ VALIDATION LOGIN + AI CHECK / PLAGIARISM CHECK / TEST PAPER
+============================================================
+
+WHAT THIS ADDS
+------------------------------------------------------------
+The Technical team now has three validation folders:
+
+    AI Check          - checks a paper for AI-generated writing
+    Plagiarism Check  - checks a paper for copied content
+    Test Paper        - a test / sample paper to check first
+
+and a new "Validation Login" for the people who check them.
+
+
+HOW IT WORKS - STEP BY STEP
+------------------------------------------------------------
+1. TECHNICAL MANAGER GIVES ACCESS
+   Technical Manager dashboard -> sidebar "Validation"
+   -> "Validation access" tab.
+   Every Programmer and Paper Writer is listed with three
+   tick boxes (AI Check / Plagiarism Check / Test Paper).
+   Tick the folders that person may check. It saves as soon
+   as you tick. Un-ticking everything removes their access
+   and signs them out of the Validation Login straight away.
+   (Technical TL can see this list but cannot change it.)
+
+2. SOMEONE SENDS A PAPER
+   Programmers and Paper Writers: new "Validation" tab next
+   to "Dashboard" / "My work". Technical Manager / TL: the
+   "+ Send a paper" button on the Validation page.
+   Pick the folder, give a title, optionally link a client,
+   add a note, attach the paper (Word or PDF), send.
+
+3. THE VALIDATOR CHECKS IT
+   Login page -> Technical Team -> "Validation Login".
+   Sign in with the SAME Employee ID and password as the
+   normal Employee Login. Only people with access (step 1)
+   can get in, and they only see the folders ticked for them.
+   For each paper they choose:
+     - Approve  (a comment and report file are optional), or
+     - Rework   (a note AND a Word/PDF document are required -
+                 e.g. the AI / plagiarism report or a
+                 marked-up copy).
+
+4. REWORK GOES BACK TO THE SENDER
+   The sender's Validation tab shows a red count badge and a
+   "Needs your rework" section with the validator's note and
+   the attached document to download.
+   They click "Upload updated version", attach the fixed
+   paper (Word/PDF), and it goes back into the SAME folder
+   as the next round (Round 2, Round 3 ...).
+
+5. HISTORY
+   Every paper keeps its full history: each version sent,
+   each decision, who did it, when, the notes, and every
+   file - all downloadable from "History".
+
+
+RULES THE SYSTEM ENFORCES (server-side, not just the screen)
+------------------------------------------------------------
+- The Validation Login can ONLY see the validation folders.
+  It cannot open clients, messages, payments or anything else.
+- A validator only sees / downloads papers in their folders.
+- A validator can't approve their own paper - someone else
+  has to check it.
+- Only the person who sent a paper can upload its updated
+  version, and only while it is waiting for rework.
+- If two validators click at the same moment, only the first
+  decision counts; the second is told to refresh.
+- Only Word (.doc / .docx) and PDF files are accepted. The file
+  contents are checked too, so a renamed file is refused.
+- Max file size: 8 MB (change with the VALIDATION_MAX_FILE_BYTES
+  environment variable if needed).
+- Employees can only link a paper to a client they are
+  already working on.
+
+
+GOOD TO KNOW
+------------------------------------------------------------
+- Validators keep their normal Employee Login for their usual
+  work. The Validation Login is an extra, separate way in.
+- To change password, use the normal Employee Login ->
+  Settings. Both logins share the same password.
+- Admin backups (Database Management) now include validation
+  papers, history and files. "Clear all data" also clears them.
+  Restoring a backup brings them back.
+- The database changes are added automatically the first time
+  the updated server starts. Nothing to run by hand. Existing
+  data is not touched.
+
+
+FILES CHANGED
+------------------------------------------------------------
+server.py   - Validation Login, folder access, the six new
+              validation actions, database tables, backup
+              support.
+index.html  - Validation Login card, validator dashboard,
+              "Validation" tab for Programmers / Paper Writers,
+              "Validation" page for Technical Manager / TL.

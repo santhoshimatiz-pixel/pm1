@@ -813,6 +813,18 @@ ACTION_ROLES = {
     "admin_import_summary": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
 
+    # ---- Validation folders (AI Check / Plagiarism Check / Test Paper) ----
+    # "validator" is the dedicated Validation login (an employee whose Technical
+    # Manager granted them folder access). It can reach ONLY the actions below —
+    # never bootstrap, client data, DMs, etc. Each handler re-checks ownership /
+    # folder access itself; this matrix is just the first, coarse gate.
+    "validation_list": ("employee", "validator") + _R_TECH,
+    "validation_get_file": ("employee", "validator") + _R_TECH,
+    "validation_submit": ("employee",) + _R_TECH,
+    "validation_resubmit": ("employee",) + _R_TECH,
+    "validation_decide": ("validator",),
+    "validation_set_access": _R_TECH_MGR,
+
     # ---- client-portal actions (staff may also drive them where the UI allows) ----
     "client_approve_proposal": _R_ALL_STAFF,
     "client_approve_paper": _R_ALL_STAFF,
@@ -873,7 +885,7 @@ def session_identity(session):
     """
     if not session:
         return {"key": "", "label": ""}
-    if session["kind"] == "employee":
+    if session["kind"] in ("employee", "validator"):
         return {"key": "EMP:%s" % session["emp_id"],
                 "label": session["emp_name"] or "Employee"}
     if session["kind"] == "client":
@@ -975,6 +987,18 @@ def get_session(con, token):
         e = con.execute("SELECT active, deleted_at FROM employees WHERE id=?",
                         (row["emp_id"],)).fetchone()
         if not e or not e["active"] or e["deleted_at"]:
+            con.execute("DELETE FROM sessions WHERE token=?", (hashed,))
+            con.commit()
+            return None
+    elif row["kind"] == "validator":
+        # A Validation login stays valid only while the employee is active AND the
+        # Technical Manager still grants them at least one folder. Revoking access
+        # therefore signs them out of the Validation login on their next request.
+        e = con.execute("SELECT active, deleted_at, role, validation_access FROM employees WHERE id=?",
+                        (row["emp_id"],)).fetchone()
+        if (not e or not e["active"] or e["deleted_at"]
+                or e["role"] not in VALIDATION_ELIGIBLE_ROLES
+                or not parse_validation_access(e["validation_access"])):
             con.execute("DELETE FROM sessions WHERE token=?", (hashed,))
             con.commit()
             return None
@@ -1123,6 +1147,85 @@ ADMIN_ROLES = ("md_admin", "super_admin")
 # already been registered — a tighter set than "who can edit a client at all" (update_client
 # below), since the service drives the whole payment schedule.
 SERVICE_EDIT_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "md_admin", "super_admin")
+
+
+# =====================================================================
+# VALIDATION FOLDERS — the Technical team's AI Check / Plagiarism Check /
+# Test Paper checks.
+# ---------------------------------------------------------------------
+# * The Technical Manager grants individual Programmers / Paper Writers
+#   access to one or more folders (employees.validation_access, a comma list
+#   of folder keys). Only those people can sign in with the "Validation"
+#   login, and each one only sees the folders they were given.
+# * Anyone on the Technical team sends a paper (Word/PDF) into a folder.
+#   A validator then Approves it, or sends it back for Rework — a rework MUST
+#   carry a Word/PDF attachment (the AI / plagiarism report, marked-up copy,
+#   etc.). The original sender downloads it and uploads an updated version,
+#   which goes back into the same folder as the next round.
+# * Every step (submission, decision, resubmission) is one row in
+#   validation_events, which doubles as the file store and the audit trail.
+# =====================================================================
+VALIDATION_FOLDERS = {
+    "AI_CHECK": "AI Check",
+    "PLAGIARISM_CHECK": "Plagiarism Check",
+    "TEST_PAPER": "Test Paper",
+}
+VALIDATION_FOLDER_ORDER = ("AI_CHECK", "PLAGIARISM_CHECK", "TEST_PAPER")
+# Employee roles the Technical Manager may grant validation access to, and who may
+# send papers for validation — i.e. the Technical team's own individual logins.
+VALIDATION_ELIGIBLE_ROLES = ("PROGRAMMER", "PAPER_WRITER")
+# Department logins (besides Admin) that may send papers and see every folder.
+VALIDATION_DEPT_ROLES = ("technical_manager", "technical_tl", "content_coordinator")
+VALIDATION_STATUSES = ("PENDING", "APPROVED", "REWORK")
+# Word / PDF only. The MIME type stored is derived from the extension (never the
+# browser's claim), and the bytes are sniffed so a renamed .exe can't get through.
+VALIDATION_DOC_TYPES = {
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+# Papers are bigger than chat attachments. Base64 inflates by 4/3, so keep the
+# decoded cap comfortably inside MAX_BODY_BYTES (which bounds the whole request).
+VALIDATION_MAX_FILE_BYTES = min(
+    int(_env("VALIDATION_MAX_FILE_BYTES", str(8 * 1024 * 1024))),
+    max(1024 * 1024, (MAX_BODY_BYTES - 256 * 1024) * 3 // 4))
+VALIDATION_MAX_TITLE = 200
+VALIDATION_MAX_NOTE = 4000
+
+
+def parse_validation_access(raw):
+    """employees.validation_access ('AI_CHECK,TEST_PAPER') -> ordered list of valid keys."""
+    have = {p.strip().upper() for p in (raw or "").split(",") if p.strip()}
+    return [k for k in VALIDATION_FOLDER_ORDER if k in have]
+
+
+def read_validation_document(d, required=True, label="document"):
+    """Validate an uploaded Word/PDF from the request body (fileName / fileData).
+
+    Returns (file_name, file_type, base64_data) or (None, None, None) when nothing
+    was attached and required is False. Raises ApiError on anything else.
+    """
+    raw_name = (d.get("fileName") or "").strip()
+    data = d.get("fileData") or ""
+    if not raw_name and not data:
+        if required:
+            raise ApiError("Please attach the %s as a Word (.doc / .docx) or PDF file." % label)
+        return None, None, None
+    name = sanitize_upload_filename(raw_name)
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in VALIDATION_DOC_TYPES:
+        raise ApiError("Only Word (.doc / .docx) or PDF files can be attached here.")
+    b64 = check_base64_payload(data, VALIDATION_MAX_FILE_BYTES, label)
+    if not b64:
+        raise ApiError("That %s is empty. Please choose the file again." % label)
+    head = base64.b64decode(b64[:64])[:8]
+    looks_right = ((ext == "pdf" and head.startswith(b"%PDF"))
+                   or (ext == "docx" and head.startswith(b"PK\x03\x04"))
+                   or (ext == "doc" and head.startswith(b"\xd0\xcf\x11\xe0")))
+    if not looks_right:
+        raise ApiError("That file doesn't look like a real %s file. Please export it again from Word "
+                       "and re-attach it." % ext.upper())
+    return name, VALIDATION_DOC_TYPES[ext], b64
 
 
 def service_conf(key):
@@ -1296,7 +1399,7 @@ _SERIAL_ID_TABLES = {
     "client_installments", "journal_targets", "messages", "thread_reads",
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
-    "task_stages",
+    "task_stages", "validation_papers", "validation_events",
 }
 
 
@@ -1721,6 +1824,48 @@ def init_db():
     con.commit()
 
     con.execute("UPDATE employees SET role='PAPER_WRITER', is_coordinator=1 WHERE role='COORDINATOR'")
+    con.commit()
+
+    # ----- Validation folders (AI Check / Plagiarism Check / Test Paper) -----
+    # validation_access: comma list of folder keys the Technical Manager granted.
+    con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS validation_access TEXT DEFAULT ''")
+    con.executescript(f"""
+    CREATE TABLE IF NOT EXISTS validation_papers (
+        id SERIAL PRIMARY KEY,
+        folder TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        round INTEGER NOT NULL DEFAULT 1,
+        submitted_by_key TEXT NOT NULL DEFAULT '',
+        submitted_by_name TEXT NOT NULL DEFAULT '',
+        submitted_by_emp_id INTEGER,
+        last_reviewer_name TEXT DEFAULT '',
+        last_reviewer_emp_id INTEGER,
+        created_at TEXT DEFAULT ({_NOW_SQL}),
+        updated_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE INDEX IF NOT EXISTS idx_validation_papers_folder ON validation_papers (folder, status);
+    CREATE INDEX IF NOT EXISTS idx_validation_papers_sender ON validation_papers (submitted_by_key);
+    -- One row per step: SUBMITTED / RESUBMITTED (the paper itself) and
+    -- APPROVED / REWORK (the validator's decision; a REWORK always carries a file).
+    CREATE TABLE IF NOT EXISTS validation_events (
+        id SERIAL PRIMARY KEY,
+        paper_id INTEGER NOT NULL REFERENCES validation_papers(id) ON DELETE CASCADE,
+        round INTEGER NOT NULL DEFAULT 1,
+        event TEXT NOT NULL,
+        actor_key TEXT NOT NULL DEFAULT '',
+        actor_name TEXT NOT NULL DEFAULT '',
+        note TEXT DEFAULT '',
+        file_name TEXT DEFAULT '',
+        file_type TEXT DEFAULT '',
+        file_data TEXT,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE INDEX IF NOT EXISTS idx_validation_events_paper ON validation_events (paper_id, id);
+    """)
     con.commit()
 
     if con.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] == 0:
@@ -2373,6 +2518,118 @@ def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
     return visible
 
 
+def validation_caller(con, d):
+    """Who is calling a validation action, resolved from the session-bound fields only.
+
+    Returns a dict with:
+      kind        "validator" | "employee" | "dept"
+      key/name    the caller's identity (EMP:<id> or ROLE:<role>) and display label
+      emp_id      employee id, or None for department logins
+      folders     folders this caller may review (validators only; read live from the DB
+                  so a revoked grant takes effect immediately)
+      sees_all    True for Technical department logins / Admin (every folder, read-only)
+      manages     True if the caller may grant/revoke validation access
+    """
+    role = (d.get("role") or "").strip()
+    out = {"kind": "", "key": d.get("_principal_key") or "", "name": d.get("_principal_label") or "",
+           "emp_id": None, "folders": [], "sees_all": False, "manages": False}
+    if role == "validator":
+        e = con.execute("SELECT id, role, active, deleted_at, validation_access FROM employees WHERE id=?",
+                        (d.get("empId"),)).fetchone()
+        folders = parse_validation_access(e["validation_access"]) if e else []
+        if not e or not e["active"] or e["deleted_at"] or e["role"] not in VALIDATION_ELIGIBLE_ROLES or not folders:
+            raise ApiError("Your validation access has been removed. Please sign in again.", 401)
+        out.update(kind="validator", emp_id=e["id"], folders=folders)
+    elif role == "employee":
+        if (d.get("empRole") or "") not in VALIDATION_ELIGIBLE_ROLES:
+            raise ApiError("Validation folders are only available to the Technical team.", 403)
+        out.update(kind="employee", emp_id=d.get("empId"))
+    elif role in VALIDATION_DEPT_ROLES or role in ADMIN_ROLES:
+        out.update(kind="dept", sees_all=True,
+                   manages=role in ("technical_manager",) + ADMIN_ROLES)
+    else:
+        raise ApiError("You don't have permission to do that.", 403)
+    return out
+
+
+def validation_can_view_paper(caller, paper):
+    if caller["sees_all"]:
+        return True
+    if caller["kind"] == "validator":
+        return paper["folder"] in caller["folders"]
+    return paper["submitted_by_key"] == caller["key"]
+
+
+def validation_load_paper(con, paper_id, for_update=False):
+    try:
+        pid = int(paper_id)
+    except (TypeError, ValueError):
+        raise ApiError("That paper couldn't be found.", 404)
+    row = con.execute("SELECT * FROM validation_papers WHERE id=?" + (" FOR UPDATE" if for_update else ""),
+                      (pid,)).fetchone()
+    if not row:
+        raise ApiError("That paper couldn't be found. It may have been removed.", 404)
+    return row
+
+
+def validation_papers_out(con, rows, caller):
+    """Serialize papers + their history. File bytes are never included here —
+    they're fetched one at a time through validation_get_file."""
+    ids = [r["id"] for r in rows]
+    events_by = {}
+    if ids:
+        ph = ",".join(["?"] * len(ids))
+        for e in con.execute(
+                f"""SELECT id, paper_id, round, event, actor_name, note, file_name, file_type,
+                           file_size, created_at
+                    FROM validation_events WHERE paper_id IN ({ph}) ORDER BY id ASC""", tuple(ids)):
+            events_by.setdefault(e["paper_id"], []).append({
+                "id": e["id"], "round": e["round"], "event": e["event"], "actorName": e["actor_name"],
+                "note": e["note"] or "", "fileName": e["file_name"] or "", "fileType": e["file_type"] or "",
+                "fileSize": e["file_size"] or 0, "hasFile": bool(e["file_name"]), "at": iso(e["created_at"]),
+            })
+    client_ids = {r["client_id"] for r in rows if r["client_id"]}
+    clients_by = {}
+    if client_ids:
+        ph = ",".join(["?"] * len(client_ids))
+        for c in con.execute(f"SELECT id, name, display_id, project_id FROM clients WHERE id IN ({ph})",
+                             tuple(client_ids)):
+            clients_by[c["id"]] = c
+    out = []
+    for r in rows:
+        c = clients_by.get(r["client_id"])
+        out.append({
+            "id": r["id"], "folder": r["folder"], "folderLabel": VALIDATION_FOLDERS.get(r["folder"], r["folder"]),
+            "title": r["title"], "description": r["description"] or "", "status": r["status"],
+            "round": r["round"], "submittedByName": r["submitted_by_name"],
+            "isMine": r["submitted_by_key"] == caller["key"],
+            "lastReviewerName": r["last_reviewer_name"] or "",
+            "clientId": r["client_id"] or "", "clientName": c["name"] if c else "",
+            "clientDisplayId": (c["display_id"] or c["id"]) if c else "",
+            "projectId": (c["project_id"] or "") if c else "",
+            "createdAt": iso(r["created_at"]), "updatedAt": iso(r["updated_at"]),
+            "events": events_by.get(r["id"], []),
+        })
+    return out
+
+
+def validation_client_linkable(con, d, client_id):
+    """A paper may optionally be linked to a client. Individually-added employees may
+    only link clients they can already see on their own dashboard (same rule as
+    bootstrap), so this can't be used to discover other clients' names."""
+    if not client_id:
+        return None
+    row = con.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not row:
+        raise ApiError("That client couldn't be found.")
+    if (d.get("role") or "") == "employee":
+        tasks = [dict(r) for r in con.execute("SELECT client_id, assigned_to FROM tasks")]
+        queries = [dict(r) for r in con.execute("SELECT client_id, assigned_to FROM client_queries")]
+        if client_id not in employee_visible_client_ids(con, d.get("empId"), d.get("empName"), tasks, queries):
+            raise ApiError("You can only link a client you're working on.")
+    return row["id"]
+
+
 def all_clients(con):
     calls_by, pays_by, hist_by, work_by, svc_by, inst_by = {}, {}, {}, {}, {}, {}
     for r in con.execute("SELECT * FROM calls ORDER BY created_at DESC, id DESC"):
@@ -3023,7 +3280,7 @@ def handle_action(action, d, ip=""):
                 return {"authenticated": False}
             out = {"authenticated": True, "kind": sess["kind"], "role": sess["role"],
                    "csrfToken": sess["csrf"]}
-            if sess["kind"] == "employee":
+            if sess["kind"] in ("employee", "validator"):
                 out.update({"empId": sess["emp_id"], "empUid": sess["emp_uid"],
                             "empName": sess["emp_name"], "empRole": sess["emp_role"],
                             "empTeamType": sess["emp_team_type"] or ""})
@@ -3050,6 +3307,35 @@ def handle_action(action, d, ip=""):
             # checked (and burned) before any account lookup or password check.
             verify_login_captcha(d.get("captchaId"), d.get("captchaAnswer"))
             role = d.get("role") or ""
+            if role == "validator":
+                # The Validation login: same Employee ID + password as the person's normal
+                # login, but only for Technical-team employees the Technical Manager has
+                # granted at least one validation folder. It opens a separate, narrow
+                # session (kind "validator") that can reach nothing but the validation
+                # folders — see ACTION_ROLES.
+                uid = (d.get("empUid") or "").strip()
+                if not uid:
+                    raise ApiError("Enter your employee ID.")
+                e = con.execute("SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?) AND deleted_at IS NULL",
+                                (uid,)).fetchone()
+                # Same generic wording whether the ID is unknown or the password is wrong,
+                # so this screen can't be used to discover who has validation access.
+                if not e or not verify_password(d.get("password") or "", e["password"] or ""):
+                    raise ApiError("Incorrect employee ID or password. Please try again.")
+                if not e["active"]:
+                    raise ApiError("Your access has been disabled by the Super Admin. Contact them for help.")
+                folders = parse_validation_access(e["validation_access"])
+                if e["role"] not in VALIDATION_ELIGIBLE_ROLES or not folders:
+                    raise ApiError("You don't have validation access yet. Ask your Technical Manager to give "
+                                   "you access to a validation folder (AI Check, Plagiarism Check or Test Paper).")
+                delete_session(con, d.get("_session_token"))   # no session fixation
+                sess = create_session(con, "validator", "validator", ip=ip, emp_id=e["id"],
+                                       emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
+                                       emp_team_type=e["team_type"] or "")
+                return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
+                        "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
+                        "validationFolders": folders,
+                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
             if role == "employee":
                 uid = (d.get("empUid") or "").strip()
                 if not uid:
@@ -5975,6 +6261,161 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
+        # ----- Validation folders: AI Check / Plagiarism Check / Test Paper --------------
+        if action == "validation_list":
+            caller = validation_caller(con, d)
+            if caller["kind"] == "validator":
+                ph = ",".join(["?"] * len(caller["folders"]))
+                rows = con.execute(f"""SELECT * FROM validation_papers WHERE folder IN ({ph})
+                                       ORDER BY updated_at DESC, id DESC""", tuple(caller["folders"])).fetchall()
+            elif caller["sees_all"]:
+                rows = con.execute("SELECT * FROM validation_papers ORDER BY updated_at DESC, id DESC").fetchall()
+            else:
+                rows = con.execute("""SELECT * FROM validation_papers WHERE submitted_by_key=?
+                                      ORDER BY updated_at DESC, id DESC""", (caller["key"],)).fetchall()
+            out = {"folders": [{"key": k, "label": VALIDATION_FOLDERS[k]} for k in VALIDATION_FOLDER_ORDER],
+                   "myFolders": caller["folders"], "canManageAccess": caller["manages"],
+                   "papers": validation_papers_out(con, rows, caller),
+                   "maxFileMb": VALIDATION_MAX_FILE_BYTES // (1024 * 1024)}
+            if caller["sees_all"]:
+                ph = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
+                out["team"] = [{"id": r["id"], "name": r["name"], "empUid": r["emp_uid"] or "", "role": r["role"],
+                                "access": parse_validation_access(r["validation_access"])}
+                               for r in con.execute(
+                                   f"""SELECT id, name, emp_uid, role, validation_access FROM employees
+                                       WHERE role IN ({ph}) AND active=1 AND deleted_at IS NULL
+                                       ORDER BY role, name""", VALIDATION_ELIGIBLE_ROLES)]
+            return out
+
+        if action == "validation_set_access":
+            caller = validation_caller(con, d)
+            if not caller["manages"]:
+                raise ApiError("Only the Technical Manager can give validation access.", 403)
+            e = con.execute("SELECT id, name, role, deleted_at FROM employees WHERE id=?",
+                            (d.get("targetEmpId"),)).fetchone()
+            if not e or e["deleted_at"]:
+                raise ApiError("That employee couldn't be found.")
+            if e["role"] not in VALIDATION_ELIGIBLE_ROLES:
+                raise ApiError("Validation access can only be given to Programmers and Paper Writers.")
+            wanted = d.get("folders")
+            if not isinstance(wanted, list) or any(not isinstance(f, str) or f not in VALIDATION_FOLDERS
+                                                   for f in wanted):
+                raise ApiError("Unknown validation folder.")
+            folders = parse_validation_access(",".join(wanted))
+            con.execute("UPDATE employees SET validation_access=? WHERE id=?", (",".join(folders), e["id"]))
+            if not folders:
+                # Revoked completely: end any open Validation login for this person now,
+                # not just on their next request (get_session would also catch it).
+                con.execute("DELETE FROM sessions WHERE kind='validator' AND emp_id=?", (e["id"],))
+            con.commit()
+            return {"ok": True, "empId": e["id"], "access": folders}
+
+        if action == "validation_submit":
+            caller = validation_caller(con, d)
+            if caller["kind"] == "validator":
+                raise ApiError("Send papers from your normal login, not the Validation login.", 403)
+            folder = (d.get("folder") or "").strip().upper()
+            if folder not in VALIDATION_FOLDERS:
+                raise ApiError("Choose a folder: AI Check, Plagiarism Check or Test Paper.")
+            title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
+            if not title:
+                raise ApiError("Give the paper a title so the validator knows what it is.")
+            if len(title) > VALIDATION_MAX_TITLE:
+                raise ApiError("Keep the title under %d characters." % VALIDATION_MAX_TITLE)
+            description = (d.get("description") or "").strip()[:VALIDATION_MAX_NOTE]
+            client_id = validation_client_linkable(con, d, (d.get("clientId") or "").strip())
+            fname, ftype, fdata = read_validation_document(d, required=True, label="paper")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = con.execute("""INSERT INTO validation_papers
+                                   (folder, title, description, client_id, status, round, submitted_by_key,
+                                    submitted_by_name, submitted_by_emp_id, created_at, updated_at)
+                                 VALUES (?,?,?,?, 'PENDING', 1, ?,?,?,?,?)""",
+                              (folder, title, description, client_id, caller["key"], caller["name"],
+                               caller["emp_id"], now, now))
+            pid = cur.lastrowid
+            con.execute("""INSERT INTO validation_events
+                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
+                              file_data, file_size, created_at)
+                           VALUES (?, 1, 'SUBMITTED', ?,?,?,?,?,?,?,?)""",
+                        (pid, caller["key"], caller["name"], description, fname, ftype, fdata,
+                         len(fdata) * 3 // 4, now))
+            con.commit()
+            return {"ok": True, "paperId": pid}
+
+        if action == "validation_resubmit":
+            caller = validation_caller(con, d)
+            if caller["kind"] == "validator":
+                raise ApiError("Send the updated paper from your normal login, not the Validation login.", 403)
+            paper = validation_load_paper(con, d.get("paperId"), for_update=True)
+            if paper["submitted_by_key"] != caller["key"]:
+                raise ApiError("Only the person who sent this paper can upload the updated version.", 403)
+            if paper["status"] != "REWORK":
+                raise ApiError("This paper isn't waiting for rework any more — refresh to see its latest status.")
+            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
+            fname, ftype, fdata = read_validation_document(d, required=True, label="updated paper")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            new_round = (paper["round"] or 1) + 1
+            con.execute("UPDATE validation_papers SET status='PENDING', round=?, updated_at=? WHERE id=?",
+                        (new_round, now, paper["id"]))
+            con.execute("""INSERT INTO validation_events
+                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
+                              file_data, file_size, created_at)
+                           VALUES (?,?, 'RESUBMITTED', ?,?,?,?,?,?,?,?)""",
+                        (paper["id"], new_round, caller["key"], caller["name"], note, fname, ftype, fdata,
+                         len(fdata) * 3 // 4, now))
+            con.commit()
+            return {"ok": True, "round": new_round}
+
+        if action == "validation_decide":
+            caller = validation_caller(con, d)          # validators only (see ACTION_ROLES)
+            # Row lock: two validators clicking at the same moment can't both decide.
+            paper = validation_load_paper(con, d.get("paperId"), for_update=True)
+            if paper["folder"] not in caller["folders"]:
+                raise ApiError("You don't have access to the %s folder."
+                               % VALIDATION_FOLDERS.get(paper["folder"], paper["folder"]), 403)
+            if paper["status"] != "PENDING":
+                raise ApiError("Someone has already reviewed this paper — refresh to see its latest status.")
+            if paper["submitted_by_emp_id"] and paper["submitted_by_emp_id"] == caller["emp_id"]:
+                raise ApiError("You sent this paper yourself, so another validator needs to review it.", 403)
+            decision = (d.get("decision") or "").strip().upper()
+            if decision not in ("APPROVED", "REWORK"):
+                raise ApiError("Choose Approve or Rework.")
+            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
+            if decision == "REWORK":
+                if not note:
+                    raise ApiError("Explain what needs to be reworked so the sender knows what to fix.")
+                fname, ftype, fdata = read_validation_document(d, required=True, label="rework document")
+            else:
+                # An approval may optionally carry the report too (e.g. the clean AI/plagiarism report).
+                fname, ftype, fdata = read_validation_document(d, required=False, label="report")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            con.execute("""UPDATE validation_papers SET status=?, last_reviewer_name=?, last_reviewer_emp_id=?,
+                                  updated_at=? WHERE id=?""",
+                        (decision, caller["name"], caller["emp_id"], now, paper["id"]))
+            con.execute("""INSERT INTO validation_events
+                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
+                              file_data, file_size, created_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (paper["id"], paper["round"], decision, caller["key"], caller["name"], note,
+                         fname or "", ftype or "", fdata, len(fdata) * 3 // 4 if fdata else 0, now))
+            con.commit()
+            return {"ok": True, "status": decision}
+
+        if action == "validation_get_file":
+            caller = validation_caller(con, d)
+            try:
+                eid = int(d.get("eventId"))
+            except (TypeError, ValueError):
+                raise ApiError("That file couldn't be found.", 404)
+            ev = con.execute("""SELECT e.file_name, e.file_type, e.file_data, p.folder, p.submitted_by_key
+                                FROM validation_events e JOIN validation_papers p ON p.id = e.paper_id
+                                WHERE e.id=?""", (eid,)).fetchone()
+            if not ev or not ev["file_data"]:
+                raise ApiError("That file couldn't be found.", 404)
+            if not validation_can_view_paper(caller, ev):
+                raise ApiError("You don't have access to that file.", 403)
+            return {"fileName": ev["file_name"], "fileType": ev["file_type"], "fileData": ev["file_data"]}
+
         # ----- Admin Panel > Database Management -----------------------------------
         # SECURITY: both actions are super_admin/md_admin only (see ACTION_ROLES).
         # admin_clear_data additionally re-checks the caller's own password here —
@@ -6051,6 +6492,11 @@ def handle_action(action, d, ip=""):
                 export["dm_messages"] = [dict(r) for r in con.execute("SELECT * FROM dm_messages").fetchall()]
                 export["dm_reads"] = [dict(r) for r in con.execute("SELECT * FROM dm_reads").fetchall()]
                 export["emp_calls"] = [dict(r) for r in con.execute("SELECT * FROM emp_calls").fetchall()]
+                # Validation folders (AI Check / Plagiarism Check / Test Paper), incl. files.
+                export["validation_papers"] = [dict(r) for r in con.execute(
+                    "SELECT * FROM validation_papers ORDER BY id").fetchall()]
+                export["validation_events"] = [dict(r) for r in con.execute(
+                    "SELECT * FROM validation_events ORDER BY id").fetchall()]
             return export
 
         # ----- Admin Panel > Database Management > Upload (restore) a backup -------------
@@ -6121,6 +6567,7 @@ def handle_action(action, d, ip=""):
                 con.execute("DELETE FROM dm_messages")
                 con.execute("DELETE FROM dm_reads")
                 con.execute("DELETE FROM emp_calls")
+                con.execute("DELETE FROM validation_papers")   # cascades to validation_events
                 # Deliberately untouched: users, employees, settings, sessions,
                 # login_captchas — so logins keep working right after a clear.
             else:
@@ -6165,6 +6612,8 @@ _IMPORT_TABLES = {
     "dm_messages":         ("p1", "p2", "sender_key", "body", "created_at"),
     "dm_reads":            ("p1", "p2", "viewer_key"),
     "emp_calls":           ("emp_id", "message", "created_at"),
+    "validation_papers":   ("folder", "title", "submitted_by_key", "created_at"),
+    "validation_events":   ("paper_id", "event", "round", "created_at"),
 }
 
 _STAGE_INDEX = {st: i for i, st in enumerate(STAGES)}
@@ -6219,6 +6668,12 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
             return "orphan", None
         data["task_id"] = new_tid
 
+    # A validation paper's client link is optional: keep the paper, drop a dangling link.
+    if table == "validation_papers" and data.get("client_id"):
+        cur.execute("SELECT 1 FROM clients WHERE id=%s", (data["client_id"],))
+        if not cur.fetchone():
+            data["client_id"] = None
+
     # Parent must exist, otherwise the row has nothing to attach to.
     if data.get("client_id"):
         cur.execute("SELECT 1 FROM clients WHERE id=%s", (data["client_id"],))
@@ -6230,6 +6685,19 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
         cur.execute("SELECT 1 FROM employees WHERE id=%s", (data.get("emp_id"),))
         if not cur.fetchone():
             return "orphan", None
+    if table == "validation_events":
+        # Events travel in their own batches, so they can't rely on an in-request id
+        # map. Each one carries its paper's identity (__paper) and is re-pointed at
+        # whichever row that paper landed on in THIS database.
+        ref = row.get("__paper") or {}
+        cur.execute("""SELECT id FROM validation_papers
+                       WHERE folder=%s AND title=%s AND submitted_by_key=%s
+                         AND created_at IS NOT DISTINCT FROM %s LIMIT 1""",
+                    (ref.get("folder"), ref.get("title"), ref.get("submitted_by_key"), ref.get("created_at")))
+        hit = cur.fetchone()
+        if not hit:
+            return "orphan", None
+        data["paper_id"] = hit["id"]
 
     if table == "clients":
         if not orig_id:
@@ -6503,7 +6971,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if action not in PUBLIC_ACTIONS:
             data["role"] = session["kind"] if session["kind"] == "employee" else session["role"]
-            if session["kind"] == "employee":
+            if session["kind"] in ("employee", "validator"):
                 data["empId"] = session["emp_id"]
                 data["empUid"] = session["emp_uid"]
                 data["empName"] = session["emp_name"]

@@ -773,6 +773,62 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .query-card .qtop{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .query-reply{margin-top:10px;padding:10px 12px;border-radius:9px;background:#E7F5EC;border:1px solid rgba(21,128,61,.25);font-size:13px}
 .query-reply b{color:var(--ok);display:block;margin-bottom:3px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+/* ================= VALIDATION FOLDERS (AI Check / Plagiarism Check / Test Paper) =================
+   Uses only the app's existing tokens, so light + dark themes both work. A paper card's
+   left edge carries its state: teal = waiting, gold = rework, green = approved. */
+.val-intro{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px}
+.val-folder-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow-sm);cursor:pointer;text-align:left;transition:border-color .14s var(--ease), transform .14s var(--ease)}
+.val-folder-card:hover{border-color:var(--purple);transform:translateY(-1px)}
+.val-folder-card.sel{border-color:var(--purple);box-shadow:0 0 0 2px rgba(14,116,144,.18)}
+.val-folder-card .vf-ic{font-size:20px}
+.val-folder-card b{display:block;font-size:14px;margin:6px 0 2px;color:var(--text)}
+.val-folder-card small{color:var(--muted);font-size:12px;line-height:1.4;display:block}
+.val-folder-card .vf-count{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--purple);float:right;line-height:1}
+.val-filter{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.val-chip{background:var(--card);border:1px solid var(--line-strong);color:var(--muted);border-radius:999px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+.val-chip.act{background:var(--purple);border-color:var(--purple);color:#fff}
+.val-chip .n{font-family:var(--mono);margin-left:6px;opacity:.85}
+.val-group-title{font-size:14px;font-weight:700;color:var(--text);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
+.val-card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--purple);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow-sm)}
+.val-card.st-REWORK{border-left-color:var(--gold)}
+.val-card.st-APPROVED{border-left-color:var(--ok)}
+.val-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.val-title{font-weight:700;font-size:15px;color:var(--text);overflow-wrap:anywhere}
+.val-meta{color:var(--muted);font-size:12.5px;margin-top:3px;line-height:1.5}
+.val-desc{font-size:13px;color:var(--text);margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.val-callout{margin-top:10px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--card2);border:1px solid var(--line);font-size:13px}
+.val-callout.rework{background:#FAF0DA;border-color:rgba(184,134,11,.32);color:#5b4210}
+:root[data-theme="dark"] .val-callout.rework{background:rgba(184,134,11,.14);color:var(--text)}
+.val-callout p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.val-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;background:var(--card2);border:1px solid var(--line-strong);border-radius:8px;padding:6px 10px;font-size:12.5px;font-weight:600;color:var(--purple);cursor:pointer;margin-top:8px}
+.val-file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.val-file:hover{border-color:var(--purple)}
+.val-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.val-hist{margin-top:10px;font-size:12.5px}
+.val-hist summary{cursor:pointer;color:var(--muted);font-weight:600}
+.val-step{position:relative;padding:8px 0 8px 18px;border-left:2px solid var(--line-strong);margin-left:5px}
+.val-step::before{content:"";position:absolute;left:-6px;top:12px;width:10px;height:10px;border-radius:50%;background:var(--purple)}
+.val-step.ev-REWORK::before{background:var(--gold)}
+.val-step.ev-APPROVED::before{background:var(--ok)}
+.val-step p{margin:3px 0 0;white-space:pre-wrap;color:var(--text);overflow-wrap:anywhere}
+.val-access-table td,.val-access-table th{text-align:left}
+.val-access-table td.c,.val-access-table th.c{text-align:center}
+.val-access-table input[type=checkbox]{width:18px;height:18px;accent-color:var(--purple);cursor:pointer}
+.val-access-table input[type=checkbox]:disabled{cursor:not-allowed;opacity:.6}
+.val-folder-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.val-folder-pick label{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line-strong);border-radius:var(--radius-sm);padding:10px;cursor:pointer;font-size:13px;background:var(--card)}
+.val-folder-pick label:has(input:checked){border-color:var(--purple);background:#EAF7F8}
+:root[data-theme="dark"] .val-folder-pick label:has(input:checked){background:rgba(14,116,144,.18)}
+.val-folder-pick input{width:auto;margin-top:2px;accent-color:var(--purple)}
+.val-decision{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.val-decision label{border:1px solid var(--line-strong);border-radius:var(--radius-sm);padding:12px;cursor:pointer;font-weight:700;font-size:13.5px;display:flex;gap:8px;align-items:center;background:var(--card)}
+.val-decision label:has(input:checked){border-color:var(--purple);background:#EAF7F8}
+.val-decision label.rw:has(input:checked){border-color:var(--gold);background:#FAF0DA}
+:root[data-theme="dark"] .val-decision label:has(input:checked){background:rgba(14,116,144,.18)}
+:root[data-theme="dark"] .val-decision label.rw:has(input:checked){background:rgba(184,134,11,.16)}
+.val-decision input{width:auto;accent-color:var(--purple)}
+.val-hint{font-size:12px;color:var(--muted);margin-top:5px}
+@media (max-width:600px){ .val-decision{grid-template-columns:1fr} .val-actions .btn{flex:1} }
 </style>
 <script>
   // Applies the person's saved theme (light/dark) before the page paints, so there's
@@ -894,12 +950,13 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
           </div>
 
           <div class="dept-item" data-dept="technical">
-            <button class="dept-btn" type="button">&#128736;&#65039;&nbsp; Technical Team <span class="dcount">Manager &middot; TL &middot; Programmers &middot; Writers</span><span class="chev">&#9660;</span></button>
+            <button class="dept-btn" type="button">&#128736;&#65039;&nbsp; Technical Team <span class="dcount">Manager &middot; TL &middot; Programmers &middot; Writers &middot; Validation</span><span class="chev">&#9660;</span></button>
             <div class="dept-panel">
               <div class="role-grid">
                 <button class="role-card" data-role="technical_manager"><span class="ric">&#128736;&#65039;</span><b>Technical Manager</b><span>Team &amp; paper-writing assignment</span></button>
                 <button class="role-card" data-role="technical_tl"><span class="ric">&#129513;</span><b>Technical TL</b><span>Assign implementation work</span></button>
                 <button class="role-card" data-role="employee"><span class="ric">&#128100;</span><b>Employee Login</b><span>Programmers &amp; Paper Writers — sign in with your ID</span></button>
+                <button class="role-card" data-role="validator"><span class="ric">&#128737;&#65039;</span><b>Validation Login</b><span>AI Check &middot; Plagiarism Check &middot; Test Paper — access given by your Technical Manager</span></button>
               </div>
             </div>
           </div>
@@ -1546,7 +1603,7 @@ const ROLE_DISPLAY = {
   super_admin:"Super Admin", md_admin:"MD / Admin", telecaller:"Telecaller",
   marketing_tl:"Marketing TL", marketing_manager:"Marketing Manager", account_team:"Accounts Team",
   technical_manager:"Technical Manager", technical_tl:"Technical TL", client:"Client Status Portal",
-  employee:"Employee Login"
+  employee:"Employee Login", validator:"Validation Login"
 };
 function bindDeptAccordion(){
   document.querySelectorAll(".dept-btn").forEach(btn=>{
@@ -1568,13 +1625,13 @@ function bindRoleCards(){
       selectedEmpId = b.dataset.emp ? parseInt(b.dataset.emp) : null;
       $("clientIdField").style.display = selectedRole==="client" ? "block" : "none";
       $("clientPortalLinks").style.display = selectedRole==="client" ? "block" : "none";
-      $("empUidField").style.display = selectedRole==="employee" ? "block" : "none";
+      $("empUidField").style.display = (selectedRole==="employee" || selectedRole==="validator") ? "block" : "none";
       $("loginErr").textContent = "";
       const note = $("selRoleNote");
       const label = b.dataset.emp ? b.querySelector("b").textContent : (ROLE_DISPLAY[selectedRole] || selectedRole);
       note.textContent = "Selected: " + label;
       note.classList.remove("empty");
-      if(selectedRole==="employee") $("empUid").focus(); else $("pwd").focus();
+      if(selectedRole==="employee" || selectedRole==="validator") $("empUid").focus(); else $("pwd").focus();
     };
   });
 }
@@ -1719,7 +1776,7 @@ async function doLogin(){
   if(loginBusy) return;
   const err = $("loginErr");
   if(!selectedRole){ err.textContent = "Please select a role above."; return; }
-  if(selectedRole==="employee" && !$("empUid").value.trim()){ err.textContent = "Enter your employee ID."; return; }
+  if((selectedRole==="employee" || selectedRole==="validator") && !$("empUid").value.trim()){ err.textContent = "Enter your employee ID."; return; }
   const captchaAnswer = $("captchaAnswer").value.trim();
   if(!captchaId){ err.textContent = "The captcha is still loading \u2014 please wait a moment."; if(!$("captchaImg").getAttribute("src")) loadCaptcha(); return; }
   if(!captchaAnswer){ err.textContent = "Please type the captcha code shown in the picture."; $("captchaAnswer").focus(); return; }
@@ -1735,7 +1792,7 @@ async function doLogin(){
       captchaId:usedCaptchaId, captchaAnswer});
     csrfToken = out.csrfToken || "";
     if(selectedRole === "client") clientSelf = out.clientId;
-    if(selectedRole === "employee"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
+    if(selectedRole === "employee" || selectedRole === "validator"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
   }catch(e){
     loginBusy = false;
     err.textContent = e.message;
@@ -1790,7 +1847,7 @@ async function restoreSession(){
   }
   if(!out || !out.authenticated) return false;
   csrfToken = out.csrfToken || "";
-  role = (out.kind === "employee") ? "employee" : out.role;
+  role = (out.kind === "employee") ? "employee" : (out.kind === "validator" ? "validator" : out.role);
   clientSelf = out.clientId || null;
   empId = out.empId || null; empName = out.empName || null;
   empRole = out.empRole || null; empTeamType = out.empTeamType || "";
@@ -1808,6 +1865,7 @@ function logout(){
   csrfToken = "";
   role = null; clientSelf = null; selectedRole = null; selectedEmpId = null; empName = empRole = empId = empTeamType = null; tmTab='work'; clientView='overview';
   dashActiveSection = {};
+  valData = null; valFolder = ""; valStatus = "PENDING";
   clearSession();
   const tcNavEl = $("tcNav"); if(tcNavEl) tcNavEl.innerHTML = "";
   document.querySelectorAll(".role-card").forEach(x=>x.classList.remove("sel"));
@@ -1841,6 +1899,7 @@ const EMP_ROLE_LABEL = {
   FORMAT_COORDINATOR:'Formatting Coordinator', FORMATTER:'Formatter', SUBMISSION:'Submission Team'
 };
 function roleTitle(){
+  if(role==="validator") return empName + " (Validation)";
   if(role==="employee"){
     const label = empRole==='JOURNAL_EMPLOYEE' ? (EMP_ROLE_LABEL[empTeamType]||'Journal Team') : (EMP_ROLE_LABEL[empRole]||empRole);
     return empName + " (" + label + ")";
@@ -1856,10 +1915,13 @@ function employeeRenderFn(){
   return renderProgrammer;
 }
 async function refresh(){
+  if(role==="validator"){ await refreshValidator(); return; }
   await loadData();
+  if(needsValidationData()) await loadValidationData();
   $("rolePill").textContent = roleTitle();
   $("whoAmI").textContent = "Signed in as " + roleTitle();
   $("navSettings").style.display = "flex";
+  $("navHelp").style.display = "flex";   // the Validation login hides it; restore for every other login
   $("navDash").style.display = (isTelecaller() || isModernRole() || role==="client") ? "none" : "flex";
   $("navInbox").style.display = (role==="client") ? "none" : "flex";
   document.getElementById("appView").classList.toggle("tc-theme", isTelecaller());
@@ -2150,7 +2212,8 @@ function renderTcSideNav(){
     // Technical TL gets the same modern dashboard as Technical Manager (dashboard,
     // clients, projects, journals, tasks incl. assigning work) but without the Team
     // page - only the Technical Manager manages the programmer/paper-writer roster.
-    const navItems = role==="technical_tl" ? ADMIN_NAV_ITEMS.filter(it=>it.key!=="team") : ADMIN_NAV_ITEMS;
+    const navItems = (role==="technical_tl" ? ADMIN_NAV_ITEMS.filter(it=>it.key!=="team") : ADMIN_NAV_ITEMS)
+      .concat([{key:"validation", icon:"&#128737;&#65039;", label:"Validation"}]);
     nav.innerHTML = navItems.map(it=>
       `<button class="navbtn ${tmPage===it.key?'act':''}" onclick="setTmPage(${jsq(it.key)})">${it.icon}&nbsp; ${it.label}</button>`
     ).join("");
@@ -2173,7 +2236,7 @@ function setTcView(key){ tcView = key; refresh(); }
 // nodes that belong to it) in a hideable <div>, shows only the active one, and (re)builds
 // the sidebar list of section names to click between them.
 function applyDashSections(){
-  if(isTelecaller() || role==="client" || isModernRole()) return;
+  if(isTelecaller() || role==="client" || isModernRole() || role==="validator") return;
   const nav = $("tcNav");
   const content = $("content");
   const nodes = Array.from(content.children);
@@ -3109,6 +3172,7 @@ function renderTechnicalManagerModern(){
   if(tmPage==="projectDetail"){ setHead("Project","",""); renderAdminProjectDetail(); return; }
   if(tmPage==="journals"){ setHead("Journals","Journal submissions and publication status",""); renderAdminJournals(); return; }
   if(tmPage==="tasks"){ setHead("Tasks","Assign work, add a task, and validate submitted work",""); renderTMTasks(); return; }
+  if(tmPage==="validation"){ renderTMValidation(); return; }
   if(tmPage==="taskDetail"){ setHead("Task","",""); renderMktTaskDetail(); return; }
   if(tmPage==="team"){
     // Only the Technical Manager manages the team roster - if a Technical TL somehow
@@ -4506,7 +4570,9 @@ function renderProgrammer(){
   const tabbar = `<div class="tabbar">
     <button class="tab ${progTab==='dashboard'?'active':''}" onclick="progTab='dashboard';refresh()">Dashboard</button>
     <button class="tab ${progTab==='work'?'active':''}" onclick="progTab='work';refresh()">My work</button>
+    <button class="tab ${progTab==='validation'?'active':''}" onclick="progTab='validation';refresh()">Validation${valReworkBadge()}</button>
   </div>`;
+  if(progTab==='validation'){ $("statsRow").innerHTML=""; $("content").innerHTML = tabbar + valSenderPageHtml(); return; }
   if(progTab==='dashboard'){ $("statsRow").innerHTML=""; $("content").innerHTML = tabbar + techDashboardPanel('PROGRAMMER'); return; }
   const toVerify = clients.filter(c=>c.stage==='PROPOSAL_SUBMITTED');
   const myTeamPick = clients.filter(c=>c.stage==='IMPLEMENTATION_ASSIGNED' && c.implAwaitingTeamPick && c.implCoordinator===empName);
@@ -4656,7 +4722,9 @@ function renderWriter(){
   const tabbar = `<div class="tabbar">
     <button class="tab ${writerTab==='dashboard'?'active':''}" onclick="writerTab='dashboard';refresh()">Dashboard</button>
     <button class="tab ${writerTab==='work'?'active':''}" onclick="writerTab='work';refresh()">My work</button>
+    <button class="tab ${writerTab==='validation'?'active':''}" onclick="writerTab='validation';refresh()">Validation${valReworkBadge()}</button>
   </div>`;
+  if(writerTab==='validation'){ $("statsRow").innerHTML=""; $("content").innerHTML = tabbar + valSenderPageHtml(); return; }
   if(writerTab==='dashboard'){ $("statsRow").innerHTML=""; $("content").innerHTML = tabbar + techDashboardPanel('PAPER_WRITER'); return; }
   const proposalTeamPick = clients.filter(c=>c.stage==='PROPOSAL_ASSIGNED' && c.proposalAwaitingTeamPick && c.proposalCoordinator===empName);
   const proposalMine = clients.filter(c=>c.stage==='PROPOSAL_ASSIGNED' && !c.proposalAwaitingTeamPick && c.proposalWriter===empName);
@@ -10898,13 +10966,15 @@ async function downloadDataBackup(){
    every record back on the same team's dashboard. */
 const CD_IMPORT_ORDER = ["clients","calls","payments","history","work_updates","service_items",
   "client_installments","journal_targets","messages","thread_reads","client_queries","tasks",
-  "client_documents","client_notes_v2","client_referrals","calendar_events","dm_messages","dm_reads","emp_calls"];
+  "client_documents","client_notes_v2","client_referrals","calendar_events","dm_messages","dm_reads","emp_calls",
+  "validation_papers","validation_events"];
 const CD_IMPORT_LABEL = {clients:"Clients", calls:"Call logs", payments:"Payments", history:"Stage history",
   work_updates:"Work updates", service_items:"Service split-ups", client_installments:"Installments",
   journal_targets:"Journal targets", messages:"Client messages", thread_reads:"Message read markers",
   client_queries:"Client queries", tasks:"Tasks", client_documents:"Documents & links", client_notes_v2:"Notes",
   client_referrals:"Referrals", calendar_events:"Calendar events", dm_messages:"Team messages",
-  dm_reads:"Team message read markers", emp_calls:"Call-to-cabin alerts"};
+  dm_reads:"Team message read markers", emp_calls:"Call-to-cabin alerts",
+  validation_papers:"Validation papers", validation_events:"Validation history & files"};
 const CD_BATCH_BYTES = 3 * 1024 * 1024;   // well under the server's request-size cap
 const CD_BATCH_ROWS = 400;
 function cdBatches(rows){
@@ -10938,13 +11008,18 @@ async function uploadDataBackup(){
   (backup.task_stages||[]).forEach(r=>{ (stagesBy[r.task_id] = stagesBy[r.task_id] || []).push(r); });
   (backup.task_comments||[]).forEach(r=>{ (commentsBy[r.task_id] = commentsBy[r.task_id] || []).push(r); });
   const tasks = (backup.tasks||[]).map(t=>Object.assign({}, t, {__stages: stagesBy[t.id]||[], __comments: commentsBy[t.id]||[]}));
+  // Validation history rows travel in their own batches, so each carries its paper's
+  // identity (__paper) and the server re-links it to wherever that paper was restored.
+  const valPaperById = {};
+  (backup.validation_papers||[]).forEach(p=>{ valPaperById[p.id] = {folder:p.folder, title:p.title, submitted_by_key:p.submitted_by_key, created_at:p.created_at}; });
+  const valEvents = (backup.validation_events||[]).map(e=>Object.assign({}, e, {__paper: valPaperById[e.paper_id] || {}}));
 
   if(btn){ btn.disabled = true; btn.textContent = "Restoring…"; }
   const totals = {};
   let problems = 0;
   try{
     for(const table of CD_IMPORT_ORDER){
-      const rows = table==="tasks" ? tasks : (backup[table]||[]);
+      const rows = table==="tasks" ? tasks : (table==="validation_events" ? valEvents : (backup[table]||[]));
       if(!Array.isArray(rows) || !rows.length) continue;
       const t = totals[table] = {added:0, skipped:0, orphan:0, failed:0};
       const batches = cdBatches(rows);
@@ -11159,6 +11234,382 @@ function pingBeep(){
 // again, check straight away so nothing that arrived meanwhile is missed.
 document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") pollPings(); });
 window.addEventListener("focus", pollPings);
+
+/* ================= VALIDATION FOLDERS =================
+   AI Check / Plagiarism Check / Test Paper.
+   - Validators (the "Validation Login") review papers in the folders their Technical
+     Manager gave them: Approve, or send back for Rework with a Word/PDF attached.
+   - Senders (Programmers, Paper Writers, Technical Manager/TL) send papers in, download
+     the rework document, and upload an updated version.
+   - The Technical Manager grants folder access per employee (Validation page > Access).
+   All data comes from validation_list; file bytes are only fetched when downloading. */
+let valData = null, valFolder = "", valStatus = "PENDING", valTmTab = "all", valLoadError = "";
+const VAL_FOLDER_INFO = {
+  AI_CHECK:         {icon:"&#129302;", desc:"Checks the paper for AI-generated writing."},
+  PLAGIARISM_CHECK: {icon:"&#128269;", desc:"Checks the paper for copied / unoriginal content."},
+  TEST_PAPER:       {icon:"&#128221;", desc:"A test / sample paper to be checked before it goes further."},
+};
+const VAL_EVENT_TEXT = {SUBMITTED:"sent the paper", RESUBMITTED:"sent an updated version",
+  APPROVED:"approved it", REWORK:"sent it back for rework"};
+const VAL_ACCEPT = ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function needsValidationData(){
+  return (role==="employee" && (empRole==="PROGRAMMER" || empRole==="PAPER_WRITER"))
+      || (isTechManagerModern() && tmPage==="validation");
+}
+async function loadValidationData(){
+  try{ valData = await api("validation_list", {}); valLoadError = ""; }
+  catch(e){ valLoadError = e.message || "Couldn't load validation folders."; }
+}
+function valFolderLabel(k){
+  const f = ((valData && valData.folders) || []).find(x=>x.key===k);
+  return f ? f.label : ({AI_CHECK:"AI Check", PLAGIARISM_CHECK:"Plagiarism Check", TEST_PAPER:"Test Paper"}[k] || k);
+}
+function valAllFolderKeys(){ return ((valData && valData.folders) || []).map(f=>f.key); }
+function valPapers(){ return (valData && valData.papers) || []; }
+function valReworkBadge(){
+  const n = valPapers().filter(p=>p.isMine && p.status==="REWORK").length;
+  return n ? ` <span class="badge b-bad" style="margin-left:4px">${n}</span>` : "";
+}
+function valStatusBadge(p, perspective){
+  if(p.status==="APPROVED") return `<span class="badge b-paid">&#10003; Approved</span>`;
+  if(p.status==="REWORK") return perspective==="sender"
+    ? `<span class="badge b-bad">Rework needed</span>` : `<span class="badge b-gold">Sent back for rework</span>`;
+  return `<span class="badge b-purp">Waiting for validation</span>`;
+}
+function valFileBtn(ev, label){
+  if(!ev || !ev.hasFile) return "";
+  const icon = /\.pdf$/i.test(ev.fileName) ? "&#128196;" : "&#128462;";
+  return `<button type="button" class="val-file" title="Download ${esc(ev.fileName)}" onclick="event.stopPropagation();valDownload(${ev.id})">${icon} <span>${label?esc(label)+": ":""}${esc(ev.fileName)}</span></button>`;
+}
+function valLatest(p, types){ return (p.events||[]).slice().reverse().find(e=>types.includes(e.event)); }
+async function valDownload(eventId){
+  try{
+    const out = await api("validation_get_file", {eventId});
+    const byteChars = atob(out.fileData);
+    const bytes = new Uint8Array(byteChars.length);
+    for(let i=0;i<byteChars.length;i++) bytes[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([bytes], {type: out.fileType || "application/octet-stream"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = out.fileName || "document"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  }catch(e){ toast(e.message || "Could not download that file"); }
+}
+// Reads a chosen Word/PDF file; returns {fileName, fileData} or null (with a toast) if unusable.
+async function valReadDoc(inputId, required, what){
+  const input = $(inputId);
+  const file = input && input.files && input.files[0];
+  if(!file){ if(required) toast(`Attach the ${what} as a Word (.doc/.docx) or PDF file`); return required ? null : {}; }
+  if(!/\.(pdf|docx?)$/i.test(file.name)){ toast("Only Word (.doc / .docx) or PDF files can be attached"); return null; }
+  const maxMb = (valData && valData.maxFileMb) || 8;
+  if(file.size > maxMb*1024*1024){ toast(`That file is too large (max ${maxMb} MB)`); return null; }
+  if(!file.size){ toast("That file is empty — choose it again"); return null; }
+  const fileData = await new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=>resolve(String(r.result).split(",")[1] || "");
+    r.onerror = ()=>reject(new Error("Couldn't read that file — try choosing it again"));
+    r.readAsDataURL(file);
+  });
+  return {fileName: file.name, fileData};
+}
+function valBusy(btnId, busy, label){
+  const b = $(btnId); if(!b) return;
+  b.disabled = busy; if(label) b.textContent = label;
+}
+function valFileField(id, label, hint){
+  const maxMb = (valData && valData.maxFileMb) || 8;
+  return `<div class="field"><label for="${id}">${label}</label>
+    <input id="${id}" type="file" accept="${VAL_ACCEPT}">
+    <div class="val-hint">${hint ? hint + " &bull; " : ""}Word (.doc / .docx) or PDF, up to ${maxMb} MB.</div></div>`;
+}
+
+/* ---------- one paper card, used by every view ---------- */
+function valPaperCard(p, mode){
+  // mode: "validator" | "sender" | "overview"
+  const perspective = mode==="sender" ? "sender" : "reviewer";
+  const lastPaper = valLatest(p, ["SUBMITTED","RESUBMITTED"]);
+  const lastDecision = valLatest(p, ["APPROVED","REWORK"]);
+  const client = p.clientName ? ` &bull; ${esc(p.clientName)}${p.clientDisplayId?` (${esc(p.clientDisplayId)})`:""}` : "";
+  let body = "";
+  if(p.description) body += `<div class="val-desc">${esc(p.description)}</div>`;
+  if(lastPaper && lastPaper.event==="RESUBMITTED" && lastPaper.note && p.status==="PENDING")
+    body += `<div class="val-callout"><b>What changed in round ${p.round}:</b><p>${esc(lastPaper.note)}</p></div>`;
+  body += valFileBtn(lastPaper, p.round>1 ? `Paper (round ${p.round})` : "Paper");
+  if(p.status==="REWORK" && lastDecision){
+    body += `<div class="val-callout rework"><b>${esc(lastDecision.actorName)} sent this back for rework</b>
+      <span style="color:var(--muted)"> &bull; ${fmtDateTime(lastDecision.at)}</span>
+      ${lastDecision.note?`<p>${esc(lastDecision.note)}</p>`:""}
+      ${valFileBtn(lastDecision, "Rework document")}</div>`;
+  }
+  if(p.status==="APPROVED" && lastDecision){
+    body += `<div class="val-callout"><b style="color:var(--ok)">&#10003; Approved by ${esc(lastDecision.actorName)}</b>
+      <span style="color:var(--muted)"> &bull; ${fmtDateTime(lastDecision.at)}</span>
+      ${lastDecision.note?`<p>${esc(lastDecision.note)}</p>`:""}${valFileBtn(lastDecision, "Report")}</div>`;
+  }
+  let actions = "";
+  if(mode==="validator" && p.status==="PENDING"){
+    actions = p.isMine
+      ? `<div class="val-hint">You sent this paper yourself, so another validator needs to review it.</div>`
+      : `<button class="btn small" onclick="openValDecision(${p.id},'APPROVED')">&#10003; Approve</button>
+         <button class="btn gold small" onclick="openValDecision(${p.id},'REWORK')">&#8634; Rework</button>`;
+  }
+  if(mode==="sender" && p.isMine && p.status==="REWORK"){
+    actions = `<button class="btn gold small" onclick="openValResubmit(${p.id})">&#11014; Upload updated version</button>`;
+  }
+  const events = p.events || [];
+  const hist = events.length > 1 ? `<details class="val-hist"><summary>History (${events.length} steps)</summary>
+    ${events.map(e=>`<div class="val-step ev-${e.event}">
+      <b>${esc(e.actorName)}</b> ${VAL_EVENT_TEXT[e.event]||esc(e.event)} <span style="color:var(--muted)">&bull; Round ${e.round} &bull; ${fmtDateTime(e.at)}</span>
+      ${e.note?`<p>${esc(e.note)}</p>`:""}${valFileBtn(e, "")}</div>`).join("")}</details>` : "";
+  return `<div class="val-card st-${p.status}">
+    <div class="val-top">
+      <div style="min-width:0;flex:1">
+        <div class="val-title">${esc(p.title)}</div>
+        <div class="val-meta">${esc(p.folderLabel)} &bull; Round ${p.round} &bull; ${mode==="sender"&&p.isMine?"Sent by you":"Sent by "+esc(p.submittedByName)} &bull; ${fmtDateTime(p.createdAt)}${client}</div>
+      </div>
+      ${valStatusBadge(p, perspective)}
+    </div>
+    ${body}
+    ${actions?`<div class="val-actions">${actions}</div>`:""}
+    ${hist}
+  </div>`;
+}
+function valEmpty(msg){ return `<div class="adm-panel"><div class="adm-panel-body"><div class="adm-empty">${msg}</div></div></div>`; }
+function valLoadingOrError(){
+  if(valLoadError) return `<div class="adm-panel"><div class="adm-panel-body"><div class="adm-empty">${esc(valLoadError)}<br><br>
+    <button class="btn ghost small" onclick="refresh()">Try again</button></div></div></div>`;
+  return valEmpty("Loading validation folders…");
+}
+// Folder + status filters shared by the validator and the Technical Manager overview.
+function valFilterBar(folderKeys, list, pendingIsWaitingForMe){
+  const inFolder = valFolder ? list.filter(p=>p.folder===valFolder) : list;
+  const count = st => inFolder.filter(p=>st==="ALL" || p.status===st).length;
+  const cards = folderKeys.map(k=>{
+    const info = VAL_FOLDER_INFO[k] || {icon:"&#128193;", desc:""};
+    const waiting = list.filter(p=>p.folder===k && p.status==="PENDING").length;
+    return `<button type="button" class="val-folder-card ${valFolder===k?'sel':''}" onclick="valFolder=${valFolder===k?"''":jsq(k)};rerenderCurrent()">
+      <span class="vf-count" title="Waiting for validation">${waiting}</span><span class="vf-ic">${info.icon}</span>
+      <b>${esc(valFolderLabel(k))}</b><small>${info.desc}</small></button>`;
+  }).join("");
+  const chips = [["PENDING", pendingIsWaitingForMe?"Waiting for review":"Waiting"], ["REWORK","Sent back for rework"], ["APPROVED","Approved"], ["ALL","All"]]
+    .map(([k,l])=>`<button type="button" class="val-chip ${valStatus===k?'act':''}" onclick="valStatus=${jsq(k)};rerenderCurrent()">${l}<span class="n">${count(k)}</span></button>`).join("");
+  const shown = inFolder.filter(p=>valStatus==="ALL" || p.status===valStatus);
+  return {html:`<div class="val-intro">${cards}</div>
+    <div class="val-filter">${chips}${valFolder?`<button type="button" class="val-chip" onclick="valFolder='';rerenderCurrent()">&#10005; ${esc(valFolderLabel(valFolder))} only</button>`:""}</div>`, shown};
+}
+
+/* ---------- 1) The Validation login's own dashboard ---------- */
+async function refreshValidator(){
+  $("rolePill").textContent = roleTitle();
+  $("whoAmI").textContent = "Signed in as " + roleTitle();
+  ["navInbox","navDash","navSettings","navHelp"].forEach(id=>{ const el=$(id); if(el) el.style.display="none"; });
+  document.getElementById("appView").classList.remove("tc-theme");
+  document.getElementById("appView").classList.add("admin-theme");
+  await loadValidationData();
+  currentViewFn = renderValidator;
+  try{ renderValidator(); }catch(err){ console.error(err); toast("Something went wrong loading this page: " + (err && err.message || err)); }
+}
+function renderValidatorNav(){
+  const mine = (valData && valData.myFolders) || [];
+  const list = valPapers();
+  $("tcNav").innerHTML = `<button class="navbtn ${!valFolder?'act':''}" onclick="valFolder='';rerenderCurrent()">&#128193;&nbsp; All my folders</button>` +
+    mine.map(k=>{
+      const n = list.filter(p=>p.folder===k && p.status==="PENDING" && !p.isMine).length;
+      return `<button class="navbtn ${valFolder===k?'act':''}" onclick="valFolder=${jsq(k)};rerenderCurrent()" style="display:flex;justify-content:space-between;align-items:center">
+        <span>${(VAL_FOLDER_INFO[k]||{}).icon||""}&nbsp; ${esc(valFolderLabel(k))}</span>${n?`<span class="badge b-bad">${n}</span>`:""}</button>`;
+    }).join("");
+}
+function renderValidator(){
+  const mine = (valData && valData.myFolders) || [];
+  setHead("Validation", mine.length ? "Your folders: " + mine.map(valFolderLabel).join(", ") + " — approve papers or send them back for rework" : "", "");
+  $("statsRow").innerHTML = "";
+  if(!valData){ $("tcNav").innerHTML = ""; $("content").innerHTML = valLoadingOrError(); return; }
+  if(valFolder && !mine.includes(valFolder)) valFolder = "";
+  renderValidatorNav();
+  const list = valPapers();
+  const waiting = list.filter(p=>p.status==="PENDING" && !p.isMine).length;
+  $("statsRow").innerHTML = statsHtml([[waiting, "Waiting for your review", "goldline"],
+    [list.filter(p=>p.status==="REWORK").length, "Sent back for rework"],
+    [list.filter(p=>p.status==="APPROVED").length, "Approved"]]);
+  const {html, shown} = valFilterBar(mine, list, true);
+  const empty = {PENDING:"Nothing is waiting for review in this folder right now. New papers show up here automatically.",
+    REWORK:"No papers are waiting on the sender's rework.", APPROVED:"No approved papers yet.", ALL:"No papers have been sent to this folder yet."}[valStatus];
+  $("content").innerHTML = html + (shown.length ? shown.map(p=>valPaperCard(p,"validator")).join("") : valEmpty(empty)) +
+    `<p class="val-hint" style="margin-top:16px">To change your password, sign in with the normal Employee Login and open Settings — both logins use the same password.</p>`;
+}
+function openValDecision(paperId, decision){
+  const p = valPapers().find(x=>x.id===paperId); if(!p) return;
+  openModal(`<h3>Review paper</h3>
+    <p class="msub">${esc(p.title)} &bull; ${esc(p.folderLabel)} &bull; round ${p.round} &bull; from ${esc(p.submittedByName)}</p>
+    <div class="val-decision">
+      <label><input type="radio" name="valDec" value="APPROVED" ${decision==="APPROVED"?"checked":""} onchange="valDecisionToggle()"> &#10003; Approve</label>
+      <label class="rw"><input type="radio" name="valDec" value="REWORK" ${decision==="REWORK"?"checked":""} onchange="valDecisionToggle()"> &#8634; Rework</label>
+    </div>
+    <div class="field"><label for="valDecNote" id="valDecNoteLbl"></label>
+      <textarea id="valDecNote" rows="4" maxlength="4000"></textarea></div>
+    <div id="valDecFileWrap"></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="valDecBtn" onclick="submitValDecision(${p.id})"></button></div>`);
+  valDecisionToggle();
+}
+function valDecisionToggle(){
+  const d = (document.querySelector('input[name="valDec"]:checked')||{}).value;
+  const rw = d==="REWORK";
+  $("valDecNoteLbl").textContent = rw ? "What needs to be reworked? (required)" : "Comment for the sender (optional)";
+  $("valDecNote").placeholder = rw ? "e.g. AI score is 38% in sections 2–3 — please rewrite those in your own words." : "e.g. Clear — AI score under 5%.";
+  const keep = $("valDecFile") && $("valDecFile").files && $("valDecFile").files[0];
+  if(!keep) $("valDecFileWrap").innerHTML = valFileField("valDecFile",
+    rw ? "Attach the rework document (required)" : "Attach the report (optional)",
+    rw ? "The AI / plagiarism report or your marked-up copy — this goes back to the sender" : "");
+  else $("valDecFileWrap").querySelector("label").textContent = rw ? "Attach the rework document (required)" : "Attach the report (optional)";
+  $("valDecBtn").textContent = rw ? "Send back for rework" : "Approve paper";
+  $("valDecBtn").className = rw ? "btn gold" : "btn";
+}
+async function submitValDecision(paperId){
+  const decision = (document.querySelector('input[name="valDec"]:checked')||{}).value;
+  const note = $("valDecNote").value.trim();
+  if(decision==="REWORK" && !note){ toast("Explain what needs to be reworked"); $("valDecNote").focus(); return; }
+  let doc;
+  try{ doc = await valReadDoc("valDecFile", decision==="REWORK", "rework document"); }catch(e){ toast(e.message); return; }
+  if(!doc) return;
+  valBusy("valDecBtn", true, "Saving…");
+  try{ await api("validation_decide", Object.assign({paperId, decision, note}, doc)); }
+  catch(e){ toast(e.message); valBusy("valDecBtn", false, decision==="REWORK"?"Send back for rework":"Approve paper"); return; }
+  closeModal();
+  toast(decision==="REWORK" ? "Sent back to the sender with your document" : "Paper approved");
+  await refresh();
+}
+
+/* ---------- 2) Senders: the Programmer / Paper Writer "Validation" tab ---------- */
+function valSenderPageHtml(){
+  if(!valData) return valLoadingOrError();
+  const mine = valPapers().filter(p=>p.isMine);
+  const rework = mine.filter(p=>p.status==="REWORK");
+  const pending = mine.filter(p=>p.status==="PENDING");
+  const approved = mine.filter(p=>p.status==="APPROVED");
+  let html = `<div class="adm-panel"><div class="adm-panel-head"><h3>Send a paper for validation</h3>
+      <button class="btn gold small" onclick="openValSendModal()">+ Send a paper</button></div>
+    <div class="adm-panel-body"><div class="val-intro" style="margin-bottom:0">${valAllFolderKeys().map(k=>`
+      <button type="button" class="val-folder-card" onclick="openValSendModal(${jsq(k)})"><span class="vf-ic">${(VAL_FOLDER_INFO[k]||{}).icon||""}</span>
+      <b>${esc(valFolderLabel(k))}</b><small>${(VAL_FOLDER_INFO[k]||{}).desc||""}</small></button>`).join("")}</div></div></div>`;
+  if(!mine.length) return html + valEmpty("You haven't sent any papers for validation yet. Pick a folder above to send your first one.");
+  if(rework.length){
+    html += `<div class="val-group-title">&#8634; Needs your rework <span class="badge b-bad">${rework.length}</span></div>
+      <p class="val-hint" style="margin:-4px 0 10px">Download the rework document, fix the paper, then upload the updated version — it goes straight back to the same folder.</p>`;
+    html += rework.map(p=>valPaperCard(p,"sender")).join("");
+  }
+  if(pending.length){ html += `<div class="val-group-title">Waiting for validation <span class="badge b-purp">${pending.length}</span></div>`; html += pending.map(p=>valPaperCard(p,"sender")).join(""); }
+  if(approved.length){ html += `<div class="val-group-title">Approved <span class="badge b-paid">${approved.length}</span></div>`; html += approved.map(p=>valPaperCard(p,"sender")).join(""); }
+  return html;
+}
+function openValSendModal(preFolder){
+  const keys = valAllFolderKeys();
+  const folder = preFolder || keys[0] || "AI_CHECK";
+  const cl = (clients||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  openModal(`<h3>Send a paper for validation</h3>
+    <p class="msub">A validator with access to the folder will approve it or send it back for rework.</p>
+    <div class="field"><label>Folder</label><div class="val-folder-pick">${keys.map(k=>`
+      <label><input type="radio" name="valSendFolder" value="${esc(k)}" ${k===folder?"checked":""}>
+        <span><b>${(VAL_FOLDER_INFO[k]||{}).icon||""} ${esc(valFolderLabel(k))}</b><br><small style="color:var(--muted)">${(VAL_FOLDER_INFO[k]||{}).desc||""}</small></span></label>`).join("")}</div></div>
+    <div class="field"><label for="valSendTitle">Paper title</label><input id="valSendTitle" maxlength="200" placeholder="e.g. IoT-based crop monitoring — full paper"></div>
+    ${cl.length?`<div class="field"><label for="valSendClient">Client (optional)</label><select id="valSendClient"><option value="">Not linked to a client</option>
+      ${cl.map(c=>`<option value="${esc(c.id)}">${esc(typeof clientOptionLabel==="function"?clientOptionLabel(c):c.name)}</option>`).join("")}</select></div>`:""}
+    <div class="field"><label for="valSendDesc">Note for the validator (optional)</label><textarea id="valSendDesc" rows="3" maxlength="4000" placeholder="Anything they should know — e.g. check sections 3 and 4 only."></textarea></div>
+    ${valFileField("valSendFile","Paper file")}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="valSendBtn" onclick="submitValSend()">Send for validation</button></div>`);
+  setTimeout(()=>{ const t=$("valSendTitle"); if(t) t.focus(); }, 50);
+}
+async function submitValSend(){
+  const folder = (document.querySelector('input[name="valSendFolder"]:checked')||{}).value;
+  const title = $("valSendTitle").value.trim();
+  if(!folder){ toast("Choose a folder"); return; }
+  if(!title){ toast("Give the paper a title"); $("valSendTitle").focus(); return; }
+  let doc;
+  try{ doc = await valReadDoc("valSendFile", true, "paper"); }catch(e){ toast(e.message); return; }
+  if(!doc) return;
+  valBusy("valSendBtn", true, "Sending…");
+  try{ await api("validation_submit", Object.assign({folder, title, description:$("valSendDesc").value.trim(),
+    clientId: $("valSendClient") ? $("valSendClient").value : ""}, doc)); }
+  catch(e){ toast(e.message); valBusy("valSendBtn", false, "Send for validation"); return; }
+  closeModal();
+  toast("Sent to " + valFolderLabel(folder));
+  await refresh();
+}
+function openValResubmit(paperId){
+  const p = valPapers().find(x=>x.id===paperId); if(!p) return;
+  const rw = valLatest(p, ["REWORK"]);
+  openModal(`<h3>Upload updated version</h3>
+    <p class="msub">${esc(p.title)} &bull; ${esc(p.folderLabel)} &bull; this will be round ${p.round+1}</p>
+    ${rw?`<div class="val-callout rework" style="margin-bottom:14px"><b>${esc(rw.actorName)} asked for:</b>${rw.note?`<p>${esc(rw.note)}</p>`:""}${valFileBtn(rw,"Rework document")}</div>`:""}
+    <div class="field"><label for="valResNote">What did you change? (optional)</label><textarea id="valResNote" rows="3" maxlength="4000" placeholder="e.g. Rewrote sections 2 and 3; added citations."></textarea></div>
+    ${valFileField("valResFile","Updated paper")}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn gold" id="valResBtn" onclick="submitValResubmit(${p.id})">Send updated version</button></div>`);
+}
+async function submitValResubmit(paperId){
+  let doc;
+  try{ doc = await valReadDoc("valResFile", true, "updated paper"); }catch(e){ toast(e.message); return; }
+  if(!doc) return;
+  valBusy("valResBtn", true, "Sending…");
+  try{ await api("validation_resubmit", Object.assign({paperId, note:$("valResNote").value.trim()}, doc)); }
+  catch(e){ toast(e.message); valBusy("valResBtn", false, "Send updated version"); return; }
+  closeModal();
+  toast("Updated version sent back for validation");
+  await refresh();
+}
+
+/* ---------- 3) Technical Manager / TL: Validation page ---------- */
+function renderTMValidation(){
+  const canManage = !!(valData && valData.canManageAccess);
+  setHead("Validation", "AI Check, Plagiarism Check & Test Paper — every paper sent, and who can validate",
+    `<button class="btn gold" onclick="openValSendModal()">+ Send a paper</button>`);
+  if(!valData){ $("content").innerHTML = valLoadingOrError(); return; }
+  const mineRework = valPapers().filter(p=>p.isMine && p.status==="REWORK").length;
+  const tabs = `<div class="adm-tabbar">
+    <button class="adm-tab ${valTmTab==='all'?'active':''}" onclick="valTmTab='all';rerenderCurrent()">All papers</button>
+    <button class="adm-tab ${valTmTab==='mine'?'active':''}" onclick="valTmTab='mine';rerenderCurrent()">Sent by me${mineRework?` (${mineRework} rework)`:""}</button>
+    <button class="adm-tab ${valTmTab==='access'?'active':''}" onclick="valTmTab='access';rerenderCurrent()">Validation access</button>
+  </div>`;
+  if(valTmTab==="mine"){ $("content").innerHTML = tabs + valSenderPageHtml(); return; }
+  if(valTmTab==="access"){ $("content").innerHTML = tabs + valAccessHtml(canManage); return; }
+  const {html, shown} = valFilterBar(valAllFolderKeys(), valPapers(), false);
+  $("content").innerHTML = tabs + html + (shown.length ? shown.map(p=>valPaperCard(p, p.isMine?"sender":"overview")).join("")
+    : valEmpty("No papers match this filter."));
+}
+function valAccessHtml(canManage){
+  const team = valData.team || [];
+  const keys = valAllFolderKeys();
+  const withAccess = team.filter(e=>e.access.length).length;
+  const rows = team.map(e=>`<tr>
+      <td><b>${esc(e.name)}</b><div class="val-hint" style="margin-top:2px">${esc(e.empUid)}</div></td>
+      <td>${esc(EMP_ROLE_LABEL[e.role]||e.role)}</td>
+      ${keys.map(k=>`<td class="c"><input type="checkbox" data-valemp="${e.id}" value="${esc(k)}" ${e.access.includes(k)?"checked":""}
+        ${canManage?`onchange="saveValAccess(${e.id})"`:"disabled"} aria-label="${esc(valFolderLabel(k))} access for ${esc(e.name)}"></td>`).join("")}
+      <td>${e.access.length?`<span class="badge b-paid">Can use Validation Login</span>`:`<span class="badge b-dim">No access</span>`}</td>
+    </tr>`).join("");
+  return `<div class="adm-panel">
+    <div class="adm-panel-head"><h3>Who can validate</h3><span class="badge b-purp">${withAccess} of ${team.length}</span></div>
+    <div class="adm-panel-body" style="padding-bottom:4px">
+      <p style="font-size:13px;color:var(--muted);margin:0 0 6px;line-height:1.55">Tick the folders each person may review. Anyone with at least one folder can sign in with the
+        <b>Validation Login</b> (Technical Team on the login page) using their normal Employee ID and password, and they'll only see the folders ticked here.
+        Un-ticking everything signs them out of the Validation Login straight away.</p>
+      ${canManage?"":`<p style="font-size:13px;color:var(--warn);margin:6px 0">Only the Technical Manager can change validation access.</p>`}
+    </div>
+    <div class="adm-table-wrap"><table class="adm-table val-access-table"><thead><tr>
+      <th>Employee</th><th>Role</th>${keys.map(k=>`<th class="c">${esc(valFolderLabel(k))}</th>`).join("")}<th>Status</th>
+    </tr></thead><tbody>${team.length?rows:`<tr><td colspan="${keys.length+3}"><div class="adm-empty">No Programmers or Paper Writers yet — add them from the Team page first.</div></td></tr>`}</tbody></table></div>
+  </div>`;
+}
+async function saveValAccess(empId){
+  const boxes = Array.from(document.querySelectorAll(`input[data-valemp="${empId}"]`));
+  const folders = boxes.filter(b=>b.checked).map(b=>b.value);
+  boxes.forEach(b=>b.disabled = true);
+  try{
+    await api("validation_set_access", {targetEmpId: empId, folders});
+    const e = (valData.team||[]).find(x=>x.id===empId);
+    toast(folders.length ? `${e?e.name:"Employee"} can now validate: ${folders.map(valFolderLabel).join(", ")}` : `Removed ${e?e.name:"this employee"}'s validation access`);
+  }catch(err){ toast(err.message); }
+  await refresh();
+}
 
 /* ================= BOOT + LIVE SYNC ================= */
 (async function(){ setTheme(currentTheme()); await loadLoginOptions(); if(await restoreSession()){ await refresh(); startPingListener(); } else { $("loginView").style.display = "flex"; loadCaptcha(); checkInviteLinkOnLoad(); clearLoginFields(); } const bl=$("bootLoading"); if(bl) bl.remove(); })();
