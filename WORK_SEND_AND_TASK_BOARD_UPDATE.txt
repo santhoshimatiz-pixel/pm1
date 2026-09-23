@@ -1,0 +1,104 @@
+============================================================
+ SEND COMPLETED WORK + TASK BOARD SEND HISTORY
+============================================================
+
+WHAT THIS ADDS
+------------------------------------------------------------
+When the Technical Manager assigns work to an employee and the
+employee finishes it, the employee now chooses WHERE it goes:
+
+    Coordinator        - a team coordinator reviews it first
+    Validation         - and what it's for:
+                           AI Check / Plagiarism Check / Test Paper
+    Technical TL       - straight to the TL
+    Technical Manager  - straight to the Manager
+
+Every send is recorded, and the project's Task Board shows how
+many times the work was sent to each place, with date & time,
+who sent it, and who reviewed it.
+
+
+HOW IT WORKS - STEP BY STEP
+------------------------------------------------------------
+1. EMPLOYEE FINISHES THE WORK
+   Programmer / Paper Writer -> "My work" -> "My assigned tasks".
+   The finish button now reads e.g.
+       "Paper writing completed - send to..."
+   It opens a window to pick the destination:
+     - Coordinator: choose which coordinator (their own
+       coordinator is pre-selected).
+     - Validation: pick AI Check, Plagiarism Check or Test Paper
+       and attach the paper (Word / PDF). It goes into that
+       validation folder for the validators to check.
+     - Technical TL / Technical Manager: goes to them for
+       approval, the same as "Mark as done" before.
+   A note is optional. After sending, the task shows a line like:
+       "Sent 3x: Coordinator x1 . AI Check x2 -
+        last to AI Check, 23 Sept 10:24"
+   and a "Send to someone else..." button, so the same work can
+   go to more than one place (e.g. coordinator first, then
+   AI Check, then Plagiarism Check).
+
+2. COORDINATOR REVIEWS IT
+   The coordinator's "My work" tab gets a new section,
+   "Work sent to me to review". For each item they can:
+     - Reviewed - forward to...  (Validation / TL / Manager /
+                                  another coordinator), or
+     - Send back for correction  (a note is required; the task
+                                  goes back to the employee as
+                                  "needs correction").
+
+3. VALIDATION
+   Works exactly like the validation folders from the last
+   update: the validator approves it or sends it back for
+   rework with a document, and the sender uploads the updated
+   version. Each new version counts as another send.
+
+4. PROJECT TASK BOARD  (Projects -> open a project -> Task Board)
+   A new "Work sent for review" panel at the top shows:
+     - Count cards: Sent for validation (split into AI Check /
+       Plagiarism Check / Test Paper), Sent to coordinator,
+       Sent to Technical TL, Sent to Technical Manager.
+       Tap a card to show only those sends.
+     - A list of every send: date & time, task, who sent it,
+       where it went (and which round for validation), the
+       note, and the result - who reviewed it, when, and what
+       they said (Approved / Rework / Reviewed / Sent back /
+       Waiting). While a validation is still waiting, it shows
+       who is able to check it.
+   On phones the list turns into easy-to-read cards.
+
+
+RULES (checked by the server, not just the screen)
+------------------------------------------------------------
+- Only the person the task is assigned to - or the coordinator
+  it was sent to - can send it on.
+- Nobody can send work to themselves as coordinator, and a
+  validator is never listed as able to check their own paper.
+- Once the Technical Manager / TL approves a task as complete,
+  it can't be sent again.
+- Employees only see the send history for projects they work
+  on (plus anything sent by or to them). Clients never see it.
+
+
+ALSO FIXED
+------------------------------------------------------------
+- A task the Technical Manager assigned from the Tasks page
+  didn't always appear on the employee's own dashboard (the
+  server compared the wrong field). It now always shows.
+
+
+GOOD TO KNOW
+------------------------------------------------------------
+- The database changes are added automatically on the first
+  start of the updated server. Existing data isn't touched.
+- Admin backups now include the send history, and restoring a
+  backup brings it back with each task.
+
+
+FILES CHANGED
+------------------------------------------------------------
+server.py   - send / forward / send-back actions, send history,
+              new task_handoffs table, backup support.
+index.html  - send window, coordinator inbox, Task Board
+              "Work sent for review" panel.

@@ -821,6 +821,9 @@ ACTION_ROLES = {
     "validation_list": ("employee", "validator") + _R_TECH,
     "validation_get_file": ("employee", "validator") + _R_TECH,
     "validation_submit": ("employee",) + _R_TECH,
+    # "Send completed work to ..." (Coordinator / Validation / Technical TL / Manager)
+    "task_send_work": ("employee",) + _R_TECH,
+    "task_handoff_return": ("employee",),
     "validation_resubmit": ("employee",) + _R_TECH,
     "validation_decide": ("validator",),
     "validation_set_access": _R_TECH_MGR,
@@ -1399,7 +1402,7 @@ _SERIAL_ID_TABLES = {
     "client_installments", "journal_targets", "messages", "thread_reads",
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
-    "task_stages", "validation_papers", "validation_events",
+    "task_stages", "validation_papers", "validation_events", "task_handoffs",
 }
 
 
@@ -1865,7 +1868,30 @@ def init_db():
         created_at TEXT DEFAULT ({_NOW_SQL})
     );
     CREATE INDEX IF NOT EXISTS idx_validation_events_paper ON validation_events (paper_id, id);
+    -- "Send completed work to ..." — one row every time finished task work is handed to a
+    -- Coordinator, the Technical TL or the Technical Manager. (Sends to a validation folder
+    -- are recorded as validation_papers/validation_events instead, linked by task_id.)
+    CREATE TABLE IF NOT EXISTS task_handoffs (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        client_id TEXT REFERENCES clients(id) ON DELETE CASCADE,
+        target TEXT NOT NULL,
+        target_emp_id INTEGER,
+        target_name TEXT NOT NULL DEFAULT '',
+        note TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'SENT',
+        sent_by_key TEXT NOT NULL DEFAULT '',
+        sent_by_name TEXT NOT NULL DEFAULT '',
+        sent_by_emp_id INTEGER,
+        resolved_by TEXT DEFAULT '',
+        resolved_note TEXT DEFAULT '',
+        resolved_at TEXT DEFAULT '',
+        created_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_handoffs_task ON task_handoffs (task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_handoffs_target ON task_handoffs (target_emp_id, status);
     """)
+    con.execute("ALTER TABLE validation_papers ADD COLUMN IF NOT EXISTS task_id INTEGER")
     con.commit()
 
     if con.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] == 0:
@@ -2488,6 +2514,14 @@ def scrub_employee(e):
     return {k: v for k, v in e.items() if k in keep}
 
 
+def task_assigned_to(t, name):
+    """True if the task (a DB row / dict) is assigned to this person by name."""
+    if not name:
+        return False
+    raw = t.get("assigned_to") if t.get("assigned_to") is not None else t.get("assignedTo")
+    return name in [x.strip() for x in (raw or "").split(",") if x.strip()]
+
+
 def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
     """Clients an individually-added employee is actually attached to:
     assigned as programmer/writer/formatter/proofreader/coordinator, or
@@ -2508,7 +2542,10 @@ def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
                  like, like, like, like, like, like)):
             visible.add(r["id"])
     for t in tasks or []:
-        if (t.get("assignedTo") or "").strip() == name or t.get("assignedEmpId") == emp_id:
+        # BUGFIX: task rows carry "assigned_to" (a comma-separated list of names), not
+        # "assignedTo" — so a task the Technical Manager assigned from the Tasks page never
+        # made its client (or the task itself) visible to the employee it was assigned to.
+        if task_assigned_to(t, name) or t.get("assignedEmpId") == emp_id:
             if t.get("client_id"):
                 visible.add(t["client_id"])
     for q in queries or []:
@@ -2610,6 +2647,89 @@ def validation_papers_out(con, rows, caller):
             "createdAt": iso(r["created_at"]), "updatedAt": iso(r["updated_at"]),
             "events": events_by.get(r["id"], []),
         })
+    return out
+
+
+HANDOFF_TARGETS = {
+    "COORDINATOR": "Coordinator",
+    "VALIDATION": "Validation",
+    "TECH_TL": "Technical TL",
+    "TECH_MANAGER": "Technical Manager",
+}
+
+
+def work_sends(con):
+    """Every time finished work was sent somewhere, newest first — for the project Task
+    Board counts/timeline and the coordinator's "sent to me" queue.
+
+    Two sources, merged into one shape:
+      * task_handoffs      — sends to a Coordinator / Technical TL / Technical Manager
+      * validation_events  — every SUBMITTED / RESUBMITTED round of a validation paper
+                             that is linked to a client or a task, paired with the
+                             validator's decision on that same round (if made yet)
+    No file bytes, no note-free PII beyond names already shown elsewhere in the app.
+    """
+    out = []
+    for r in con.execute(
+            """SELECT h.*, t.title AS task_title, t.status AS task_status, t.assigned_to AS task_assigned
+               FROM task_handoffs h JOIN tasks t ON t.id = h.task_id
+               ORDER BY h.created_at DESC, h.id DESC"""):
+        out.append({
+            "kind": "HANDOFF", "id": "h%d" % r["id"], "handoffId": r["id"],
+            "clientId": r["client_id"] or "", "taskId": r["task_id"], "taskTitle": r["task_title"],
+            "taskStatus": r["task_status"], "taskAssignedTo": r["task_assigned"] or "",
+            "target": r["target"], "targetLabel": HANDOFF_TARGETS.get(r["target"], r["target"]),
+            "purpose": "", "purposeLabel": "",
+            "targetEmpId": r["target_emp_id"], "targetName": r["target_name"] or "",
+            "sentBy": r["sent_by_name"], "sentByEmpId": r["sent_by_emp_id"], "note": r["note"] or "",
+            "at": iso(r["created_at"]), "round": None, "status": r["status"],
+            "resolvedBy": r["resolved_by"] or "", "resolvedNote": r["resolved_note"] or "",
+            "resolvedAt": iso(r["resolved_at"]) if r["resolved_at"] else None,
+        })
+    papers = {p["id"]: p for p in con.execute(
+        """SELECT p.*, t.title AS task_title FROM validation_papers p
+           LEFT JOIN tasks t ON t.id = p.task_id
+           WHERE p.client_id IS NOT NULL OR p.task_id IS NOT NULL""")}
+    if papers:
+        ph = ",".join(["?"] * len(papers))
+        decisions = {}
+        sends = []
+        for e in con.execute(f"""SELECT id, paper_id, round, event, actor_name, note, created_at
+                                 FROM validation_events WHERE paper_id IN ({ph}) ORDER BY id""",
+                             tuple(papers.keys())):
+            if e["event"] in ("SUBMITTED", "RESUBMITTED"):
+                sends.append(e)
+            else:
+                decisions[(e["paper_id"], e["round"])] = e
+        # Who can currently review each folder — shown while a round is still waiting.
+        validators = {k: [] for k in VALIDATION_FOLDERS}
+        ph2 = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
+        for v in con.execute(f"""SELECT name, validation_access FROM employees
+                                 WHERE active=1 AND deleted_at IS NULL AND role IN ({ph2})
+                                 ORDER BY name""", VALIDATION_ELIGIBLE_ROLES):
+            for f in parse_validation_access(v["validation_access"]):
+                validators[f].append(v["name"])
+        for e in sends:
+            p = papers[e["paper_id"]]
+            dec = decisions.get((e["paper_id"], e["round"]))
+            out.append({
+                "kind": "VALIDATION", "id": "v%d" % e["id"], "paperId": p["id"],
+                "clientId": p["client_id"] or "", "taskId": p["task_id"],
+                "taskTitle": p["task_title"] or p["title"], "paperTitle": p["title"],
+                "target": "VALIDATION", "targetLabel": "Validation",
+                "purpose": p["folder"], "purposeLabel": VALIDATION_FOLDERS.get(p["folder"], p["folder"]),
+                "targetEmpId": None,
+                "targetName": dec["actor_name"] if dec else "",
+                # A validator can't check their own paper, so the sender is never listed here.
+                "possibleValidators": [] if dec else [n for n in validators.get(p["folder"], [])
+                                                     if n != p["submitted_by_name"]],
+                "sentBy": p["submitted_by_name"], "sentByEmpId": p["submitted_by_emp_id"],
+                "note": e["note"] or "", "at": iso(e["created_at"]), "round": e["round"],
+                "status": dec["event"] if dec else "PENDING",
+                "resolvedBy": dec["actor_name"] if dec else "", "resolvedNote": (dec["note"] or "") if dec else "",
+                "resolvedAt": iso(dec["created_at"]) if dec else None,
+            })
+    out.sort(key=lambda x: x["at"] or "", reverse=True)
     return out
 
 
@@ -3561,6 +3681,7 @@ def handle_action(action, d, ip=""):
                 """SELECT id, client_id, designation, name, email, mobile, created_at
                    FROM client_referrals ORDER BY created_at DESC""")]
             clients_out = all_clients(con)
+            sends_out = work_sends(con)
 
             # SECURITY (IDOR fix): a logged-in "client" session must only ever receive data
             # about itself (and any other service under the same CL-ID "family" — the app's
@@ -3587,6 +3708,7 @@ def handle_action(action, d, ip=""):
                 # setup token, hold/rejection reasons and internal history.
                 clients_out = [scrub_client_for_client(c) for c in clients_out]
                 client_notes = []          # internal staff notes are not portal content
+                sends_out = []             # internal review routing is not portal content
 
             # SECURITY: individually-added employees (programmers, writers, ...) used to
             # receive the entire client table here — every phone number, e-mail address,
@@ -3600,11 +3722,17 @@ def handle_action(action, d, ip=""):
                 clients_out = [scrub_client_for_employee(c) for c in clients_out
                                if c["id"] in visible]
                 queries = [q for q in queries if q["client_id"] in visible]
-                tasks = [t for t in tasks if t.get("client_id") in visible]
+                # An employee's own tasks always show, including ones with no client.
+                tasks = [t for t in tasks if t.get("client_id") in visible or task_assigned_to(t, emp_name)]
                 client_docs = [x for x in client_docs if x["client_id"] in visible]
                 client_notes = [x for x in client_notes if x["client_id"] in visible]
                 client_refs = []
                 events = [e for e in events if (e.get("visibility") or "everyone") != "private"]
+                # Sends on clients they work on, plus anything sent BY or TO them (a coordinator
+                # must see work routed to them even on a client they aren't otherwise attached to).
+                sends_out = [x for x in sends_out
+                             if x["clientId"] in visible or x.get("sentByEmpId") == emp_id
+                             or x.get("targetEmpId") == emp_id]
 
             employees_out = all_employees(con)
             if (d.get("role") or "") in ("client", "employee"):
@@ -3613,7 +3741,7 @@ def handle_action(action, d, ip=""):
             return {"clients": clients_out, "employees": employees_out,
                     "settings": get_settings(con), "calendarEvents": events, "clientQueries": queries,
                     "tasks": tasks, "clientDocuments": client_docs, "clientNotes": client_notes,
-                    "clientReferrals": client_refs,
+                    "clientReferrals": client_refs, "workSends": sends_out,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
                                       "amounts": v["amounts"]} for k, v in SERVICES.items()}}
@@ -6261,6 +6389,130 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
+        # ----- "Send completed work to ..." ---------------------------------------------
+        # A Programmer / Paper Writer finishing an assigned task picks where it goes:
+        #   COORDINATOR  (a named coordinator reviews it first)
+        #   VALIDATION   (AI Check / Plagiarism Check / Test Paper — creates a validation
+        #                 paper linked to the task + client; needs the Word/PDF file)
+        #   TECH_TL / TECH_MANAGER
+        # The same task can be sent again (e.g. coordinator first, then validation); every
+        # send is kept so the project Task Board can show counts, dates and reviewers.
+        # A coordinator who received the work can forward it on the same way.
+        if action == "task_send_work":
+            role_ = (d.get("role") or "").strip()
+            try:
+                task_id = int(d.get("taskId"))
+            except (TypeError, ValueError):
+                raise ApiError("That task no longer exists.")
+            task = con.execute("SELECT * FROM tasks WHERE id=? FOR UPDATE", (task_id,)).fetchone()
+            if not task:
+                raise ApiError("That task no longer exists.")
+            if task["status"] == "COMPLETED":
+                raise ApiError("This task has already been approved as complete.")
+            me_key = d.get("_principal_key") or ""
+            me_name = d.get("_principal_label") or role_
+            me_emp = None
+            forwarding = None
+            is_assignee = False
+            if role_ == "employee":
+                if (d.get("empRole") or "") not in VALIDATION_ELIGIBLE_ROLES:
+                    raise ApiError("Only Programmers and Paper Writers can send work this way.", 403)
+                me_emp = d.get("empId")
+                me_name = (d.get("empName") or "").strip() or me_name
+                assignees = [x.strip() for x in (task["assigned_to"] or "").split(",") if x.strip()]
+                is_assignee = me_name in assignees
+                forwarding = con.execute(
+                    """SELECT * FROM task_handoffs WHERE task_id=? AND target='COORDINATOR'
+                       AND target_emp_id=? AND status='SENT' ORDER BY id DESC LIMIT 1""",
+                    (task["id"], me_emp)).fetchone()
+                if not is_assignee and not forwarding:
+                    raise ApiError("Only the person assigned to this task (or the coordinator it "
+                                   "was sent to) can send it on.", 403)
+            target = (d.get("target") or "").strip().upper()
+            if target not in HANDOFF_TARGETS:
+                raise ApiError("Choose where to send it: Coordinator, Validation, Technical TL or Technical Manager.")
+            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if target == "VALIDATION":
+                folder = (d.get("folder") or "").strip().upper()
+                if folder not in VALIDATION_FOLDERS:
+                    raise ApiError("Choose what it's for: AI Check, Plagiarism Check or Test Paper.")
+                fname, ftype, fdata = read_validation_document(d, required=True, label="paper")
+                cur = con.execute("""INSERT INTO validation_papers
+                                       (folder, title, description, client_id, task_id, status, round,
+                                        submitted_by_key, submitted_by_name, submitted_by_emp_id,
+                                        created_at, updated_at)
+                                     VALUES (?,?,?,?,?, 'PENDING', 1, ?,?,?,?,?)""",
+                                  (folder, task["title"][:VALIDATION_MAX_TITLE], note, task["client_id"],
+                                   task["id"], me_key, me_name, me_emp, now, now))
+                pid = cur.lastrowid
+                con.execute("""INSERT INTO validation_events
+                                 (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
+                                  file_data, file_size, created_at)
+                               VALUES (?, 1, 'SUBMITTED', ?,?,?,?,?,?,?,?)""",
+                            (pid, me_key, me_name, note, fname, ftype, fdata, len(fdata) * 3 // 4, now))
+                sent_to = "Validation — %s" % VALIDATION_FOLDERS[folder]
+            else:
+                target_emp_id, target_name = None, HANDOFF_TARGETS[target]
+                if target == "COORDINATOR":
+                    try:
+                        coord_id = int(d.get("coordinatorId"))
+                    except (TypeError, ValueError):
+                        raise ApiError("Choose a coordinator to send it to.")
+                    co = con.execute("""SELECT id, name, role FROM employees WHERE id=? AND is_coordinator=1
+                                        AND active=1 AND deleted_at IS NULL""",
+                                     (coord_id,)).fetchone()
+                    if not co or co["role"] not in VALIDATION_ELIGIBLE_ROLES:
+                        raise ApiError("Choose a coordinator to send it to.")
+                    if me_emp and co["id"] == me_emp:
+                        raise ApiError("You can't send work to yourself — pick another coordinator, "
+                                       "or send it to Validation / Technical TL / Technical Manager.")
+                    target_emp_id, target_name = co["id"], co["name"]
+                con.execute("""INSERT INTO task_handoffs
+                                 (task_id, client_id, target, target_emp_id, target_name, note, status,
+                                  sent_by_key, sent_by_name, sent_by_emp_id, created_at)
+                               VALUES (?,?,?,?,?,?, 'SENT', ?,?,?,?)""",
+                            (task["id"], task["client_id"], target, target_emp_id, target_name, note,
+                             me_key, me_name, me_emp, now))
+                sent_to = target_name if target != "COORDINATOR" else "Coordinator %s" % target_name
+            if forwarding:
+                con.execute("""UPDATE task_handoffs SET status='FORWARDED', resolved_by=?, resolved_note=?,
+                                      resolved_at=? WHERE id=?""",
+                            (me_name, "Forwarded to " + sent_to, now, forwarding["id"]))
+            # Finished work now waits on review (same status "Mark as done" always used).
+            if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
+                con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
+            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                        (task["id"], me_name, "%s sent this to %s.%s" % (me_name, sent_to,
+                                                                         (" Note: " + note) if note else "")))
+            con.commit()
+            return {"ok": True, "sentTo": sent_to}
+
+        if action == "task_handoff_return":
+            # The coordinator the work was sent to hands it back for correction.
+            try:
+                handoff_id = int(d.get("handoffId"))
+            except (TypeError, ValueError):
+                raise ApiError("That work wasn't sent to you.", 403)
+            h = con.execute("SELECT * FROM task_handoffs WHERE id=? FOR UPDATE", (handoff_id,)).fetchone()
+            if not h or h["target"] != "COORDINATOR" or h["target_emp_id"] != d.get("empId"):
+                raise ApiError("That work wasn't sent to you.", 403)
+            if h["status"] != "SENT":
+                raise ApiError("You've already dealt with this — refresh to see its latest status.")
+            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
+            if not note:
+                raise ApiError("Explain what needs correcting.")
+            me_name = (d.get("empName") or "").strip()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?, resolved_at=?
+                           WHERE id=?""", (me_name, note, now, h["id"]))
+            con.execute("UPDATE tasks SET status='NEEDS_CORRECTION' WHERE id=? AND status<>'COMPLETED'", (h["task_id"],))
+            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                        (h["task_id"], me_name, "%s (coordinator) sent this back for correction. Note: %s"
+                         % (me_name, note)))
+            con.commit()
+            return {"ok": True}
+
         # ----- Validation folders: AI Check / Plagiarism Check / Test Paper --------------
         if action == "validation_list":
             caller = validation_caller(con, d)
@@ -6475,15 +6727,19 @@ def handle_action(action, d, ip=""):
             if mode == "all":
                 export["task_stages"] = [dict(r) for r in con.execute("SELECT * FROM task_stages").fetchall()]
                 export["task_comments"] = [dict(r) for r in con.execute("SELECT * FROM task_comments").fetchall()]
+                export["task_handoffs"] = [dict(r) for r in con.execute("SELECT * FROM task_handoffs").fetchall()]
             elif task_ids:
                 ph = ",".join(["?"] * len(task_ids))
                 export["task_stages"] = [dict(r) for r in con.execute(
                     f"SELECT * FROM task_stages WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
                 export["task_comments"] = [dict(r) for r in con.execute(
                     f"SELECT * FROM task_comments WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
+                export["task_handoffs"] = [dict(r) for r in con.execute(
+                    f"SELECT * FROM task_handoffs WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
             else:
                 export["task_stages"] = []
                 export["task_comments"] = []
+                export["task_handoffs"] = []
             export["backupFormat"] = 2
             # These aren't tied to any client, so there's no meaningful client-date
             # range to scope them by — only included (and only cleared) in "all" mode.
@@ -6614,6 +6870,7 @@ _IMPORT_TABLES = {
     "emp_calls":           ("emp_id", "message", "created_at"),
     "validation_papers":   ("folder", "title", "submitted_by_key", "created_at"),
     "validation_events":   ("paper_id", "event", "round", "created_at"),
+    "task_handoffs":       ("task_id", "target", "sent_by_key", "created_at"),
 }
 
 _STAGE_INDEX = {st: i for i, st in enumerate(STAGES)}
@@ -6662,7 +6919,7 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
     data = _clean_import_row(row, cols)
 
     # Re-point task children at the task's id in THIS database.
-    if table in ("task_stages", "task_comments"):
+    if table in ("task_stages", "task_comments", "task_handoffs"):
         new_tid = (id_map_parent or {}).get(str(data.get("task_id")))
         if new_tid is None:
             return "orphan", None
@@ -6673,6 +6930,15 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
         cur.execute("SELECT 1 FROM clients WHERE id=%s", (data["client_id"],))
         if not cur.fetchone():
             data["client_id"] = None
+    # Same for its (optional) task link. Tasks restore before validation papers; a task
+    # that kept its original id is matched, otherwise the link is dropped, not guessed.
+    if table == "validation_papers" and data.get("task_id") is not None:
+        ref = row.get("__task") or {}
+        cur.execute("""SELECT id FROM tasks WHERE title=%s AND created_at IS NOT DISTINCT FROM %s
+                       ORDER BY (id=%s) DESC LIMIT 1""",
+                    (ref.get("title"), ref.get("created_at"), data["task_id"]))
+        hit = cur.fetchone()
+        data["task_id"] = hit["id"] if hit else None
 
     # Parent must exist, otherwise the row has nothing to attach to.
     if data.get("client_id"):
@@ -6764,13 +7030,16 @@ def _import_backup_rows(con, table, rows):
         # re-linked to the task's id in this database even if it had to change.
         if table == "tasks" and new_id is not None:
             id_map = {str(r.get("id")): new_id}
-            for key, child in (("__stages", "task_stages"), ("__comments", "task_comments")):
+            for key, child in (("__stages", "task_stages"), ("__comments", "task_comments"),
+                               ("__handoffs", "task_handoffs")):
                 kids = r.get(key) or []
                 if not kids:
                     continue
                 if child == "task_stages":
                     stage_cols = stage_cols or _table_columns(cur, child)
                     ccols = stage_cols
+                elif child == "task_handoffs":
+                    ccols = _table_columns(cur, child)
                 else:
                     comment_cols = comment_cols or _table_columns(cur, child)
                     ccols = comment_cols
@@ -6780,7 +7049,7 @@ def _import_backup_rows(con, table, rows):
                         child_stats[st] += 1
 
     # Move SERIAL counters past the restored ids, or the next "Add ..." would collide.
-    touched = [table] + (["task_stages", "task_comments"] if table == "tasks" else [])
+    touched = [table] + (["task_stages", "task_comments", "task_handoffs"] if table == "tasks" else [])
     for t in touched:
         if t == "clients":
             continue

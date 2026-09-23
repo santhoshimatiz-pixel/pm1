@@ -828,7 +828,24 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 :root[data-theme="dark"] .val-decision label.rw:has(input:checked){background:rgba(184,134,11,.16)}
 .val-decision input{width:auto;accent-color:var(--purple)}
 .val-hint{font-size:12px;color:var(--muted);margin-top:5px}
+/* Option cards sit inside .field, whose <label> style is a small uppercase caption —
+   reset it so the cards read as normal sentence-case choices. */
+.val-folder-pick label,.val-decision label{text-transform:none;letter-spacing:normal;font-size:13px;line-height:1.35;color:var(--text);margin:0}
+.val-folder-pick label b,.val-decision label{font-weight:700}
+.val-folder-pick label small{font-weight:400;font-size:12px;line-height:1.4;text-transform:none;letter-spacing:normal}
+.val-folder-pick.two{grid-template-columns:1fr 1fr}
+@media (max-width:520px){ .val-folder-pick.two{grid-template-columns:1fr} }
 @media (max-width:600px){ .val-decision{grid-template-columns:1fr} .val-actions .btn{flex:1} }
+/* Task Board "Work sent for review" log: on phones each send becomes a small labelled card,
+   instead of a wide table whose sticky last column hides where the work was sent. */
+@media (max-width:700px){
+  table.adm-table.sends-table{min-width:0}
+  table.adm-table.sends-table thead{display:none}
+  table.adm-table.sends-table,table.adm-table.sends-table tbody,table.adm-table.sends-table tr,table.adm-table.sends-table td{display:block;width:100%}
+  table.adm-table.sends-table tr{padding:12px 14px;border-bottom:1px solid var(--line)}
+  table.adm-table.sends-table td{padding:3px 0;border:none;position:static;box-shadow:none;background:transparent!important;white-space:normal!important}
+  table.adm-table.sends-table td::before{content:attr(data-label);display:block;font-size:11px;font-weight:700;color:var(--muted);margin-top:4px}
+}
 </style>
 <script>
   // Applies the person's saved theme (light/dark) before the page paints, so there's
@@ -1173,6 +1190,7 @@ let calendarEvents = [];
 let clientQueries = [];
 let tasks = [];
 let clientDocuments = [], clientNotesV2 = [], clientReferrals = [];
+let workSends = [];   // every "send completed work to ..." (coordinator / validation / TL / TM)
 const ADM_SEARCH_STORES = {};
 let settings = {fromEmail:"", toEmail:""};
 let role = null, empId = null, empName = null, empRole = null, empTeamType = null, clientSelf = null;
@@ -1253,6 +1271,7 @@ async function loadData(){
       clientDocuments = out.clientDocuments || [];
       clientNotesV2 = out.clientNotes || [];
       clientReferrals = out.clientReferrals || [];
+      workSends = out.workSends || [];
       $("memWarn").style.display = "none";
       lastLoadOk = true;
       return;
@@ -3767,6 +3786,7 @@ function jmWorkUpdatesHtml(){
               ${t.task_type?`<span class="badge b-purp" style="margin:0 6px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}
               <small style="color:#8DA39A">${esc(t.assigned_to||"—")}${c?(" &bull; "+esc(c.name)):""}</small></div>
           </div>
+          ${sendsSummaryLine(t.id)?`<div class="val-hint" style="margin-top:4px">${sendsSummaryLine(t.id)}</div>`:""}
           <textarea id="wu-note-${t.id}" placeholder="Correction note (only needed if sending back)" rows="2" style="margin-top:8px;margin-bottom:8px"></textarea>
           <div style="display:flex;gap:8px">
             <button class="btn gold small" onclick="tmApproveTaskNow(${t.id})">Approve &mdash; mark complete &#8594;</button>
@@ -3789,6 +3809,7 @@ function tmWorkUpdatesHtml(){
               ${t.task_type?`<span class="badge b-purp" style="margin:0 6px">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}
               <small style="color:#8DA39A">${esc(t.assigned_to||"—")}${c?(" &bull; "+esc(c.name)):""}</small></div>
           </div>
+          ${sendsSummaryLine(t.id)?`<div class="val-hint" style="margin-top:4px">${sendsSummaryLine(t.id)}</div>`:""}
           <textarea id="wu-note-${t.id}" placeholder="Correction note (only needed if sending back)" rows="2" style="margin-top:8px;margin-bottom:8px"></textarea>
           <div style="display:flex;gap:8px">
             <button class="btn gold small" onclick="tmApproveTaskNow(${t.id})">Approve &mdash; mark complete &#8594;</button>
@@ -4579,7 +4600,7 @@ function renderProgrammer(){
   const mine = clients.filter(c=>c.stage==='IMPLEMENTATION_ASSIGNED' && !c.implAwaitingTeamPick && c.assignedProgrammers.includes(empName));
   const doneByMe = clients.filter(c=>stageIdx(c.stage)>=stageIdx('IMPLEMENTATION_COMPLETE') && c.assignedProgrammers.includes(empName));
   $("statsRow").innerHTML = "";
-  let html = myAssignedTasksHtml(empName);
+  let html = coordinatorInboxHtml() + myAssignedTasksHtml(empName);
   html += myClientQueriesHtml(empName);
   html += sectionHead("New proposals to review", toVerify.length);
   if(!toVerify.length) html += emptyBox("No proposal is waiting on verification right now.");
@@ -4679,11 +4700,13 @@ function myAssignedTasksHtml(name){
         ${t.task_type?`<span class="badge" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)">${esc(TASK_TYPE_LABEL[t.task_type]||t.task_type)}</span>`:""}
         <span class="adm-status" style="background:#111;color:#fff;border:1px solid #111">${TASK_STATUS_LABEL[t.status]||t.status}</span></div>
       <div class="pay-meta">${c?esc(c.name)+' &bull; ':''}${t.finish_date?('Due '+fmtDate(t.finish_date)):'No deadline'} &bull; Priority: ${esc(t.priority)}</div>
-      ${t.status==='SUBMITTED' ? `<div class="pc-meta" style="margin-top:6px">Marked done — waiting on Technical Manager / TL approval.</div>` : ""}
-      ${(t.status!=='COMPLETED' && t.status!=='SUBMITTED') ? `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:8px">
+      ${t.status==='SUBMITTED' ? `<div class="pc-meta" style="margin-top:6px">${canSendWork() ? sendsSummaryLine(t.id) || "Marked done — waiting on review." : "Marked done — waiting on Technical Manager / TL approval."}</div>` : ""}
+      ${(t.status!=='COMPLETED' && t.status!=='SUBMITTED') ? `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         ${t.status!=='IN_PROGRESS'?`<button class="btn ghost small" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)" onclick="admUpdateTaskStatus(${t.id},'IN_PROGRESS')">Start</button>`:""}
-        <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="myMarkTaskDone(${t.id})">${taskDoneButtonLabel(t)}</button>
+        <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="${canSendWork()?`openSendWorkModal(${t.id})`:`myMarkTaskDone(${t.id})`}">${taskDoneButtonLabel(t)}${canSendWork()?" &mdash; send to&hellip;":""}</button>
       </div>` : ""}
+      ${(t.status==='SUBMITTED' && canSendWork()) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send to someone else&hellip;</button></div>` : ""}
+      ${(t.status!=='SUBMITTED' && canSendWork() && sendsSummaryLine(t.id)) ? `<div class="pc-meta" style="margin-top:6px">${sendsSummaryLine(t.id)}</div>` : ""}
     </div>`;
   });
   return html;
@@ -4738,7 +4761,7 @@ function renderWriter(){
   const doneByMe = clients.filter(c=> c.assignedWriters.includes(empName) && !shownIds.has(c.id));
   $("statsRow").innerHTML = "";
 
-  let html = myAssignedTasksHtml(empName);
+  let html = coordinatorInboxHtml() + myAssignedTasksHtml(empName);
   html += myClientQueriesHtml(empName);
   if(coordReview.length || proposalTeamPick.length || writingTeamPick.length){
     html += sectionHead("Drafts awaiting your review (your team)", coordReview.length);
@@ -6296,7 +6319,7 @@ function admProjTaskBoardTab(c){
     const i = stageIdx(s);
     return `<div class="adm-tb-item ${i<curIdx?'done':i===curIdx?'current':''}"><div class="adm-tb-dot"></div><div class="adm-tb-label">${esc(STAGE_LABEL[s]||s)}</div></div>`;
   }).join("");
-  return `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3></div>
+  return projectSendsPanelHtml(c) + `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3></div>
     <div class="adm-panel-body"><div class="adm-tb-rail">${items}</div></div>
   </div>`;
 }
@@ -11007,7 +11030,12 @@ async function uploadDataBackup(){
   const stagesBy = {}, commentsBy = {};
   (backup.task_stages||[]).forEach(r=>{ (stagesBy[r.task_id] = stagesBy[r.task_id] || []).push(r); });
   (backup.task_comments||[]).forEach(r=>{ (commentsBy[r.task_id] = commentsBy[r.task_id] || []).push(r); });
-  const tasks = (backup.tasks||[]).map(t=>Object.assign({}, t, {__stages: stagesBy[t.id]||[], __comments: commentsBy[t.id]||[]}));
+  const handoffsBy = {};
+  (backup.task_handoffs||[]).forEach(r=>{ (handoffsBy[r.task_id] = handoffsBy[r.task_id] || []).push(r); });
+  const tasks = (backup.tasks||[]).map(t=>Object.assign({}, t, {__stages: stagesBy[t.id]||[], __comments: commentsBy[t.id]||[], __handoffs: handoffsBy[t.id]||[]}));
+  const taskRefById = {};
+  (backup.tasks||[]).forEach(t=>{ taskRefById[t.id] = {title:t.title, created_at:t.created_at}; });
+  const valPapersRows = (backup.validation_papers||[]).map(p=>Object.assign({}, p, p.task_id!=null ? {__task: taskRefById[p.task_id]||{}} : {}));
   // Validation history rows travel in their own batches, so each carries its paper's
   // identity (__paper) and the server re-links it to wherever that paper was restored.
   const valPaperById = {};
@@ -11019,7 +11047,8 @@ async function uploadDataBackup(){
   let problems = 0;
   try{
     for(const table of CD_IMPORT_ORDER){
-      const rows = table==="tasks" ? tasks : (table==="validation_events" ? valEvents : (backup[table]||[]));
+      const rows = table==="tasks" ? tasks : (table==="validation_events" ? valEvents
+        : (table==="validation_papers" ? valPapersRows : (backup[table]||[])));
       if(!Array.isArray(rows) || !rows.length) continue;
       const t = totals[table] = {added:0, skipped:0, orphan:0, failed:0};
       const batches = cdBatches(rows);
@@ -11265,7 +11294,10 @@ function valFolderLabel(k){
   const f = ((valData && valData.folders) || []).find(x=>x.key===k);
   return f ? f.label : ({AI_CHECK:"AI Check", PLAGIARISM_CHECK:"Plagiarism Check", TEST_PAPER:"Test Paper"}[k] || k);
 }
-function valAllFolderKeys(){ return ((valData && valData.folders) || []).map(f=>f.key); }
+function valAllFolderKeys(){
+  const k = ((valData && valData.folders) || []).map(f=>f.key);
+  return k.length ? k : ["AI_CHECK","PLAGIARISM_CHECK","TEST_PAPER"];   // views that never loaded validation data
+}
 function valPapers(){ return (valData && valData.papers) || []; }
 function valReworkBadge(){
   const n = valPapers().filter(p=>p.isMine && p.status==="REWORK").length;
@@ -11609,6 +11641,174 @@ async function saveValAccess(empId){
     toast(folders.length ? `${e?e.name:"Employee"} can now validate: ${folders.map(valFolderLabel).join(", ")}` : `Removed ${e?e.name:"this employee"}'s validation access`);
   }catch(err){ toast(err.message); }
   await refresh();
+}
+
+/* ================= SEND COMPLETED WORK → Coordinator / Validation / Technical TL / Manager =================
+   When a Programmer / Paper Writer finishes an assigned task they choose where it goes.
+   Every send is recorded (server: task_handoffs + validation rounds) and shown on the
+   project's Task Board with counts, date & time, who it went to and who reviewed it. */
+const SEND_TARGETS = [
+  {key:"COORDINATOR",  icon:"&#128101;", label:"Coordinator",       desc:"A team coordinator reviews it first"},
+  {key:"VALIDATION",   icon:"&#128737;&#65039;", label:"Validation", desc:"AI Check, Plagiarism Check or Test Paper"},
+  {key:"TECH_TL",      icon:"&#129513;", label:"Technical TL",      desc:"Straight to the Technical TL"},
+  {key:"TECH_MANAGER", icon:"&#128736;&#65039;", label:"Technical Manager", desc:"Straight to the Technical Manager"},
+];
+const SEND_TARGET_LABEL = {COORDINATOR:"Coordinator", VALIDATION:"Validation", TECH_TL:"Technical TL", TECH_MANAGER:"Technical Manager"};
+function canSendWork(){ return role==="employee" && (empRole==="PROGRAMMER" || empRole==="PAPER_WRITER"); }
+function sendsForTask(taskId){ return workSends.filter(x=>x.taskId===taskId); }
+function sendDestLabel(x){ return x.target==="VALIDATION" ? x.purposeLabel : (x.target==="COORDINATOR" ? "Coordinator " + x.targetName : x.targetLabel); }
+// "Sent 4×: AI Check ×2 · Coordinator ×1 · Technical Manager ×1 — last: AI Check, 23 Sept 10:24"
+function sendsSummaryLine(taskId){
+  const list = sendsForTask(taskId);
+  if(!list.length) return "";
+  const counts = {};
+  list.forEach(x=>{ const k = x.target==="VALIDATION" ? x.purposeLabel : x.targetLabel; counts[k] = (counts[k]||0)+1; });
+  const last = list[0];
+  return `&#8599; Sent ${list.length}&times;: ${Object.entries(counts).map(([k,n])=>`${esc(k)} &times;${n}`).join(" &middot; ")}
+    &mdash; last to <b>${esc(sendDestLabel(last))}</b>, ${fmtDateTime(last.at)}`;
+}
+function coordinatorOptions(){
+  return employees.filter(e=>e.isCoordinator && (e.role==="PROGRAMMER" || e.role==="PAPER_WRITER") && e.id!==empId)
+    .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+}
+function openSendWorkModal(taskId, forwarding){
+  const t = tasks.find(x=>x.id===taskId) || {};
+  const ref = workSends.find(x=>x.taskId===taskId) || {};
+  const title = t.title || ref.taskTitle || "this task";
+  const c = t.client_id ? findClient(t.client_id) : (ref.clientId ? findClient(ref.clientId) : null);
+  const coords = coordinatorOptions();
+  const me = employees.find(e=>e.id===empId) || {};
+  const myCoord = coords.find(e=>e.id===me.coordinatorId);
+  const firstTarget = forwarding ? "VALIDATION" : (coords.length ? "COORDINATOR" : "VALIDATION");
+  const history = sendsForTask(taskId);
+  openModal(`<h3>${forwarding?"Forward this work":"Send completed work"}</h3>
+    <p class="msub">${esc(title)}${c?` &bull; ${esc(c.name)}`:""}${history.length?` &bull; already sent ${history.length}&times;`:""}</p>
+    <div class="field"><label>Send it to</label>
+      <div class="val-folder-pick two" id="swTargets">${SEND_TARGETS.map(x=>{
+        const off = x.key==="COORDINATOR" && !coords.length;
+        return `<label style="${off?"opacity:.5;cursor:not-allowed":""}"><input type="radio" name="swTarget" value="${x.key}" ${x.key===firstTarget?"checked":""} ${off?"disabled":""} onchange="sendWorkToggle()">
+          <span><b>${x.icon} ${x.label}</b><br><small style="color:var(--muted)">${off?"No coordinators set up yet":x.desc}</small></span></label>`;}).join("")}</div></div>
+    <div id="swCoordWrap" class="field"><label for="swCoord">Which coordinator?</label>
+      <select id="swCoord">${coords.map(e=>`<option value="${e.id}" ${myCoord&&myCoord.id===e.id?"selected":""}>${esc(e.name)}${myCoord&&myCoord.id===e.id?" (your coordinator)":""} &mdash; ${esc(EMP_ROLE_LABEL[e.role]||e.role)}</option>`).join("")}</select></div>
+    <div id="swValWrap">
+      <div class="field"><label>What should be checked?</label><div class="val-folder-pick">${valAllFolderKeys().map((k,i)=>`
+        <label><input type="radio" name="swFolder" value="${esc(k)}" ${i===0?"checked":""}>
+        <span><b>${(VAL_FOLDER_INFO[k]||{}).icon||""} ${esc(valFolderLabel(k))}</b><br><small style="color:var(--muted)">${(VAL_FOLDER_INFO[k]||{}).desc||""}</small></span></label>`).join("")}</div></div>
+      ${valFileField("swFile","Attach the paper")}
+    </div>
+    <div class="field"><label for="swNote">Note (optional)</label><textarea id="swNote" rows="3" maxlength="4000" placeholder="Anything the reviewer should know."></textarea></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn gold" id="swBtn" onclick="submitSendWork(${taskId})">Send</button></div>`);
+  sendWorkToggle();
+}
+function sendWorkToggle(){
+  const tgt = (document.querySelector('input[name="swTarget"]:checked')||{}).value;
+  $("swCoordWrap").style.display = tgt==="COORDINATOR" ? "block" : "none";
+  $("swValWrap").style.display = tgt==="VALIDATION" ? "block" : "none";
+  $("swBtn").textContent = "Send to " + (SEND_TARGET_LABEL[tgt] || "…");
+}
+async function submitSendWork(taskId){
+  const target = (document.querySelector('input[name="swTarget"]:checked')||{}).value;
+  if(!target){ toast("Choose where to send it"); return; }
+  const payload = {taskId, target, note:$("swNote").value.trim()};
+  if(target==="COORDINATOR") payload.coordinatorId = parseInt($("swCoord").value);
+  if(target==="VALIDATION"){
+    payload.folder = (document.querySelector('input[name="swFolder"]:checked')||{}).value;
+    let doc; try{ doc = await valReadDoc("swFile", true, "paper"); }catch(e){ toast(e.message); return; }
+    if(!doc) return;
+    Object.assign(payload, doc);
+  }
+  valBusy("swBtn", true, "Sending…");
+  let out;
+  try{ out = await api("task_send_work", payload); }
+  catch(e){ toast(e.message); valBusy("swBtn", false); sendWorkToggle(); return; }
+  closeModal();
+  toast("Sent to " + (out.sentTo || SEND_TARGET_LABEL[target]));
+  await refresh();
+}
+// Coordinator side: work other people sent to me, waiting on my review.
+function coordinatorInboxHtml(){
+  const items = workSends.filter(x=>x.kind==="HANDOFF" && x.target==="COORDINATOR" && x.targetEmpId===empId && x.status==="SENT");
+  if(!items.length) return "";
+  let html = sectionHead("Work sent to me to review", items.length);
+  items.forEach(x=>{
+    const c = x.clientId ? findClient(x.clientId) : null;
+    const earlier = sendsForTask(x.taskId).length - 1;
+    html += `<div class="pay-row">
+      <div class="pay-top"><b>${esc(x.taskTitle)}</b><span class="badge b-gold">Waiting on you</span></div>
+      <div class="pay-meta">From <b>${esc(x.sentBy)}</b> &bull; ${fmtDateTime(x.at)}${c?` &bull; ${esc(c.name)}`:""}${earlier>0?` &bull; sent ${earlier}&times; before`:""}</div>
+      ${x.note?`<div class="pc-meta" style="margin-top:6px;white-space:pre-wrap">&ldquo;${esc(x.note)}&rdquo;</div>`:""}
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn gold small" onclick="openSendWorkModal(${x.taskId}, true)">&#8599; Reviewed &mdash; forward to&hellip;</button>
+        <button class="btn ghost small" onclick="openCoordReturn(${x.handoffId})">&#8634; Send back for correction</button>
+      </div></div>`;
+  });
+  return html;
+}
+function openCoordReturn(handoffId){
+  const x = workSends.find(s=>s.handoffId===handoffId); if(!x) return;
+  openModal(`<h3>Send back for correction</h3><p class="msub">${esc(x.taskTitle)} &bull; from ${esc(x.sentBy)}</p>
+    <div class="field"><label for="crNote">What needs correcting?</label><textarea id="crNote" rows="4" maxlength="4000"></textarea></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn gold" id="crBtn" onclick="submitCoordReturn(${handoffId})">Send back</button></div>`);
+}
+async function submitCoordReturn(handoffId){
+  const note = $("crNote").value.trim();
+  if(!note){ toast("Explain what needs correcting"); return; }
+  valBusy("crBtn", true, "Sending…");
+  try{ await api("task_handoff_return", {handoffId, note}); }catch(e){ toast(e.message); valBusy("crBtn", false, "Send back"); return; }
+  closeModal(); toast("Sent back for correction"); await refresh();
+}
+
+/* ---------- Project Task Board: how many times work was sent, where, when, and who reviewed it ---------- */
+let tbSendFilter = "ALL";
+function sendResultHtml(x){
+  const when = x.resolvedAt ? ` <small style="color:var(--muted)">&bull; ${fmtDateTime(x.resolvedAt)}</small>` : "";
+  const note = x.resolvedNote ? `<div class="val-hint" style="white-space:pre-wrap">${esc(x.resolvedNote)}</div>` : "";
+  if(x.target==="VALIDATION"){
+    if(x.status==="APPROVED") return `<span class="badge b-paid">&#10003; Approved</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
+    if(x.status==="REWORK") return `<span class="badge b-gold">Rework</span> asked by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
+    const v = x.possibleValidators || [];
+    const vt = v.length > 3 ? v.slice(0,3).join(", ") + ` +${v.length-3} more` : v.join(", ");
+    return `<span class="badge b-purp">Waiting</span> <small style="color:var(--muted)" title="${esc(v.join(", "))}">${v.length?"Can be checked by: "+esc(vt):"No one has access to this folder yet"}</small>`;
+  }
+  if(x.target==="COORDINATOR"){
+    if(x.status==="FORWARDED") return `<span class="badge b-paid">Reviewed</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
+    if(x.status==="RETURNED") return `<span class="badge b-gold">Sent back</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
+    return `<span class="badge b-purp">Waiting on ${esc(x.targetName)}</span>`;
+  }
+  if(x.taskStatus==="COMPLETED") return `<span class="badge b-paid">&#10003; Task approved</span>`;
+  if(x.taskStatus==="NEEDS_CORRECTION") return `<span class="badge b-gold">Sent back for correction</span>`;
+  return `<span class="badge b-purp">Waiting on ${esc(x.targetLabel)}</span>`;
+}
+function projectSendsPanelHtml(c){
+  const all = workSends.filter(x=>x.clientId===c.id);
+  const byT = k => all.filter(x=>x.target===k).length;
+  const val = all.filter(x=>x.target==="VALIDATION");
+  const byF = k => val.filter(x=>x.purpose===k).length;
+  const tile = (key, icon, label, n, sub) => `<button type="button" class="val-folder-card ${tbSendFilter===key?'sel':''}" onclick="tbSendFilter=${tbSendFilter===key?"'ALL'":jsq(key)};rerenderCurrent()">
+      <span class="vf-count">${n}</span><span class="vf-ic">${icon}</span><b>${label}</b><small>${sub}</small></button>`;
+  const tiles = tile("VALIDATION","&#128737;&#65039;","Sent for validation", val.length,
+        valAllFolderKeys().map(k=>`${esc(valFolderLabel(k))} ${byF(k)}`).join(" &middot; ") || "AI Check &middot; Plagiarism &middot; Test Paper")
+    + tile("COORDINATOR","&#128101;","Sent to coordinator", byT("COORDINATOR"), "Reviewed before going further")
+    + tile("TECH_TL","&#129513;","Sent to Technical TL", byT("TECH_TL"), "Straight to the TL")
+    + tile("TECH_MANAGER","&#128736;&#65039;","Sent to Technical Manager", byT("TECH_MANAGER"), "Straight to the Manager");
+  const shown = tbSendFilter==="ALL" ? all : all.filter(x=>x.target===tbSendFilter);
+  const rows = shown.map(x=>`<tr>
+      <td data-label="Date &amp; time" style="white-space:nowrap">${fmtDateTime(x.at)}</td>
+      <td data-label="Task" style="min-width:150px"><b>${esc(x.taskTitle||"—")}</b></td>
+      <td data-label="Sent by">${esc(x.sentBy)}</td>
+      <td data-label="Sent to / for">${x.target==="VALIDATION" ? `Validation &mdash; <b>${esc(x.purposeLabel)}</b>${x.round>1?` <span class="badge b-dim">Round ${x.round}</span>`:""}` : (x.target==="COORDINATOR" ? `Coordinator &mdash; <b>${esc(x.targetName)}</b>` : `<b>${esc(x.targetLabel)}</b>`)}
+        ${x.note?`<div class="val-hint" style="white-space:pre-wrap">&ldquo;${esc(x.note)}&rdquo;</div>`:""}</td>
+      <td data-label="Reviewed by &amp; result">${sendResultHtml(x)}</td></tr>`).join("");
+  return `<div class="adm-panel"><div class="adm-panel-head"><h3>Work sent for review</h3><span class="badge b-purp">${all.length} time${all.length===1?"":"s"}</span></div>
+    <div class="adm-panel-body">
+      <div class="val-intro">${tiles}</div>
+      ${tbSendFilter!=="ALL"?`<div class="val-filter"><button type="button" class="val-chip" onclick="tbSendFilter='ALL';rerenderCurrent()">&#10005; Showing ${esc(SEND_TARGET_LABEL[tbSendFilter]||"")} only &mdash; show all</button></div>`:""}
+    </div>
+    <div class="adm-table-wrap">${shown.length ? `<table class="adm-table sends-table"><thead><tr>
+      <th>Date &amp; time</th><th>Task</th><th>Sent by</th><th>Sent to / for</th><th>Reviewed by &amp; result</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<div class="adm-empty">${all.length?"Nothing sent here yet.":"No work has been sent for review on this project yet. When an employee finishes an assigned task and sends it to a coordinator, validation, the Technical TL or the Technical Manager, it shows up here with the date, time and reviewer."}</div>`}</div>
+  </div>`;
 }
 
 /* ================= BOOT + LIVE SYNC ================= */
