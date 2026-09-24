@@ -5142,9 +5142,10 @@ function myAssignedTasksHtml(name){
       ${(t.status==='COMPLETED' && isSingleApproval(t)) ? `<div class="pc-meta" style="margin-top:6px;color:var(--good,#1a7f4b)">&#10003; ${t.task_type==='PROPOSAL'?'Proposal':'Code implementation'} approved${proposalApprovedSend(t.id)&&proposalApprovedSend(t.id).resolvedBy?` by ${esc(proposalApprovedSend(t.id).resolvedBy)}`:""} &mdash; completed. Nothing more to send.</div>` : ""}
       ${(t.status!=='COMPLETED' && t.status!=='SUBMITTED') ? `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         ${t.status!=='IN_PROGRESS'?`<button class="btn ghost small" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)" onclick="admUpdateTaskStatus(${t.id},'IN_PROGRESS')">Start</button>`:""}
-        <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="${canSendWork()?`openSendWorkModal(${t.id})`:`myMarkTaskDone(${t.id})`}">${taskDoneButtonLabel(t)}${canSendWork()?(isSingleApproval(t)?" &mdash; submit to TL / Manager&hellip;":" &mdash; send to&hellip;"):""}</button>
+        <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="${canSendWork()?`openSendWorkModal(${t.id})`:`myMarkTaskDone(${t.id})`}">${(canSendWork() && !isSingleApproval(t) && sendsForTask(t.id).length) ? "&#8599; Send to next reviewer / check again&hellip;" : taskDoneButtonLabel(t)+(canSendWork()?(isSingleApproval(t)?" &mdash; submit to TL / Manager&hellip;":" &mdash; send to&hellip;"):"")}</button>
       </div>` : ""}
       ${(t.status==='SUBMITTED' && canSendWork() && !isSingleApproval(t)) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send to someone else&hellip;</button></div>` : ""}
+      ${(t.status==='COMPLETED' && canSendWork() && !isSingleApproval(t)) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send for AI / Plagiarism check again&hellip;</button></div>` : ""}
       ${(t.status!=='SUBMITTED' && canSendWork() && sendsSummaryLine(t.id)) ? `<div class="pc-meta" style="margin-top:6px">${sendsSummaryLine(t.id)}</div>` : ""}
       ${t.status!=='COMPLETED' ? taskCoordBoxHtml(t) : ""}
       ${canSendWork() ? tlAttachmentBtn(t.id) : ""}
@@ -12211,9 +12212,9 @@ function taskCoordBoxHtml(t){
   let inner;
   if(st.approved){
     const a = st.approved;
-    inner = `<span class="badge b-paid">&#10003; Completed</span> Approved by coordinator <b>${esc(a.resolvedBy||a.targetName)}</b>${a.resolvedAt?` &bull; ${fmtDateTime(a.resolvedAt)}`:""}
+    inner = `<span class="badge b-paid">&#10003; Coordinator approved</span> Approved by coordinator <b>${esc(a.resolvedBy||a.targetName)}</b>${a.resolvedAt?` &bull; ${fmtDateTime(a.resolvedAt)}`:""}
       ${a.resolvedNote?`<div class="val-hint" style="white-space:pre-wrap">${esc(a.resolvedNote)}</div>`:""}
-      <div class="val-hint">Coordinator review is done &mdash; it can't be sent to a coordinator again. Send it on to Validation / Technical TL / Technical Manager.</div>`;
+      <div class="val-hint">Coordinator review is done &mdash; it can't be sent to a coordinator again. Send it on to Validation (AI Check / Plagiarism Check, as many times as needed) and then to the Technical TL / Technical Manager.</div>`;
   } else if(st.pending){
     const p = st.pending;
     inner = `<span class="badge b-purp">Pending</span> Waiting on coordinator <b>${esc(p.targetName)}</b> &bull; sent ${fmtDateTime(p.at)}`;
@@ -12241,7 +12242,9 @@ function openSendWorkModal(taskId){
   const myCoord = coords.find(e=>e.id===me.coordinatorId);
   const st = coordStateForTask(taskId);
   const targets = taskSendTargets(t);
+  const doneAlready = t.status==="COMPLETED" && !isSingleApproval(t);
   const offReason = k => {
+    if(doneAlready && k!=="VALIDATION") return "Already approved &mdash; only AI / Plagiarism checks now";
     if(k!=="COORDINATOR") return "";
     if(st.approved) return `&#10003; Already approved by ${esc(st.approved.resolvedBy||st.approved.targetName)}`;
     if(st.pending) return `Waiting on ${esc(st.pending.targetName)}`;
@@ -12272,6 +12275,7 @@ function openSendWorkModal(taskId){
         <label><input type="radio" name="swFolder" value="${esc(k)}" ${i===0?"checked":""}>
         <span><b>${(VAL_FOLDER_INFO[k]||{}).icon||""} ${esc(valFolderLabel(k))}</b><br><small style="color:var(--muted)">${(VAL_FOLDER_INFO[k]||{}).desc||""}</small></span></label>`).join("")}</div></div>
       ${valFileField("swFile","Attach the paper")}
+      <div class="val-hint" style="margin-top:6px">You can send it for AI Check / Plagiarism Check as many times as you need &mdash; before or after the coordinator approves it.</div>
     </div>
     <div class="field"><label for="swNote">Note (optional)</label><textarea id="swNote" rows="3" maxlength="4000" placeholder="Anything the reviewer should know."></textarea></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>

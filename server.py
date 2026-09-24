@@ -6671,8 +6671,15 @@ def handle_action(action, d, ip=""):
             task = con.execute("SELECT * FROM tasks WHERE id=? FOR UPDATE", (task_id,)).fetchone()
             if not task:
                 raise ApiError("That task no longer exists.")
-            if task["status"] == "COMPLETED":
-                raise ApiError("This task has already been approved as complete.")
+            _target_peek = (d.get("target") or "").strip().upper()
+            _type_peek = (task["task_type"] or "").upper()
+            if task["status"] == "COMPLETED" and not (
+                    _type_peek not in SINGLE_APPROVAL_TASK_TYPES and _target_peek == "VALIDATION"):
+                # Paper work can still go for AI Check / Plagiarism Check after approval —
+                # as many times as needed. Everything else is locked once approved.
+                raise ApiError("This task has already been approved as complete."
+                               + ("" if _type_peek in SINGLE_APPROVAL_TASK_TYPES else
+                                  " You can still send it to Validation (AI Check / Plagiarism Check)."))
             me_key = d.get("_principal_key") or ""
             me_name = d.get("_principal_label") or role_
             me_emp = None
@@ -6767,9 +6774,15 @@ def handle_action(action, d, ip=""):
                             (task["id"], task["client_id"], target, target_emp_id, target_name, note,
                              me_key, me_name, me_emp, now, fname, ftype, fdata))
                 sent_to = target_name if target != "COORDINATOR" else "Coordinator %s" % target_name
-            # Finished work now waits on review (same status "Mark as done" always used).
-            if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
-                con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
+            # Only sending it to the Technical TL / Manager puts it up for their final approval
+            # (SUBMITTED -> shows in Work Updates). Coordinator review and AI / plagiarism checks
+            # are steps along the way, so the task stays "in progress" and the writer can keep
+            # sending it on — to the next reviewer or to Validation again, any number of times.
+            if target in ("TECH_TL", "TECH_MANAGER") or task_type in SINGLE_APPROVAL_TASK_TYPES:
+                if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
+                    con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
+            elif task["status"] in ("OPEN", "NEEDS_CORRECTION"):
+                con.execute("UPDATE tasks SET status='IN_PROGRESS' WHERE id=?", (task["id"],))
             # A proposal sent to the TL / Manager IS the proposal submission — record it in the
             # real pipeline too, so approving it (Work Updates or Work Validation) moves it on.
             if task_type == "PROPOSAL" and task["client_id"]:
