@@ -858,6 +858,45 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
   .adm-tb-item .adm-tb-label{flex:1 1 100%}
   .adm-tb-time{flex-basis:100%;text-align:left;white-space:normal;margin-left:0;padding-left:0}
 }
+
+/* ---- Assign Work: compact client rows + search ---- */
+.aw-searchbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;margin-bottom:14px}
+.aw-searchbar .adm-search input{flex:1;width:100%;outline:none;box-shadow:none;border:none}
+.aw-searchbar .adm-search:focus-within{border-color:var(--accent,#1f7a8c)}
+.aw-clear{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0 2px;line-height:1}
+.aw-clear:hover{color:var(--text)}
+.aw-search-info{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.aw-row{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--card2);overflow:visible}
+.aw-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:11px 14px;cursor:pointer;border-radius:10px}
+.aw-head:hover{background:rgba(127,127,127,.06)}
+.aw-head-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;flex:1 1 260px}
+.aw-name{font-size:13.5px;color:var(--text);overflow-wrap:anywhere}
+.aw-note{color:#8DA39A;font-size:12px}
+.aw-head-side{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.aw-meta{font-size:12px;color:var(--muted)}
+.aw-toggle{font-size:12.5px;font-weight:600;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 10px;white-space:nowrap}
+.aw-chev{display:inline-block;transition:transform .15s}
+.aw-toggle-txt-open{display:none}
+.aw-row.aw-open .aw-toggle-txt-open{display:inline}
+.aw-row.aw-open .aw-toggle-txt-closed{display:none}
+.aw-row.aw-open .aw-chev{transform:rotate(180deg)}
+.aw-body{display:none;padding:4px 14px 14px;border-top:1px solid var(--line)}
+.aw-row.aw-open .aw-body{display:block}
+.aw-grid{display:grid;grid-template-columns:minmax(200px,2fr) minmax(150px,1fr) minmax(150px,1fr);gap:12px;margin-top:12px}
+.aw-field{display:flex;flex-direction:column;gap:5px;margin:0}
+.aw-field-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.aw-field .mini-date,.aw-field select{width:100%;margin:0}
+.aw-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.aw-ip{border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin-bottom:8px;cursor:pointer;background:var(--card2)}
+.aw-ip:hover{background:rgba(127,127,127,.06)}
+.aw-ip-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.aw-ip-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;font-size:13px;color:var(--text)}
+.aw-ip-grid > div{display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere}
+@media (max-width:720px){
+  .aw-grid{grid-template-columns:1fr}
+  .aw-ip-grid{grid-template-columns:1fr 1fr}
+  .aw-searchbar .adm-search{min-width:0}
+}
 </style>
 <script>
   // Applies the person's saved theme (light/dark) before the page paints, so there's
@@ -3616,27 +3655,29 @@ function tmDeliveryHtml(){
   const rows = tmDeliveryQueue();
   const awaiting = tmAwaitingClientQueue();
   const cards = rows.map(({c,type,task,note})=>`
-    <div class="adm-bar-row" style="display:block;cursor:default">
+    <div class="adm-bar-row" style="display:block;cursor:default" data-aw-search="${esc(tmAwSearchHay(c, task))}">
       <div class="lbl" style="cursor:pointer;margin-bottom:8px" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')"><b>${esc(c.name)}</b> <span class="badge b-purp" style="margin:0 6px">${esc(task)}</span><small style="color:#8DA39A">${note}</small></div>
       <div onclick="event.stopPropagation()"><button class="btn gold small" onclick="tmDeliverNow(${jsq(c.id)},${jsq(type)})">Deliver to client &#8594;</button></div>
     </div>`).join("");
   const awaitingHtml = awaiting.length ? `
-    <div class="adm-panel" style="margin-top:16px">
-      <div class="adm-panel-head"><h3>Delivered — awaiting client approval</h3></div>
+    <div class="adm-panel" style="margin-top:16px" data-aw-section>
+      <div class="adm-panel-head"><h3>Delivered — awaiting client approval</h3><span class="badge b-purp" data-aw-count>${awaiting.length}</span></div>
       <div class="adm-panel-body">
         <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">These aren't stuck — the next step (implementation, paper writing, or Journal Team) starts automatically the moment the client approves from their portal. If the client isn't responding, you can move it forward yourself.</p>
         ${awaiting.map(({c,task,note})=>`
-          <div class="adm-bar-row" style="display:block;cursor:default">
+          <div class="adm-bar-row" style="display:block;cursor:default" data-aw-search="${esc(tmAwSearchHay(c, task))}">
             <div class="lbl" style="cursor:pointer;margin-bottom:8px" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">${esc(c.name)} <span class="badge b-purp" style="margin:0 6px">${esc(task)}</span><small style="color:#8DA39A">${note}</small></div>
             <div onclick="event.stopPropagation()"><button class="btn ghost small" onclick="openStaffOverrideModal(${jsq(c.id)})">Continue without client approval &#8594;</button></div>
           </div>`).join("")}
+        <div class="adm-empty aw-nomatch" style="display:none">No client awaiting approval matches your search.</div>
       </div>
     </div>` : "";
-  return `<div class="adm-panel">
-    <div class="adm-panel-head"><h3>Delivery</h3><span class="badge ${rows.length?'b-bad':'b-purp'}">${rows.length}</span></div>
+  return `<div class="adm-panel" data-aw-section>
+    <div class="adm-panel-head"><h3>Delivery</h3><span class="badge ${rows.length?'b-bad':'b-purp'}" data-aw-count>${rows.length}</span></div>
     <div class="adm-panel-body">
       <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Proposal, Code Implementation, and Paper Writing all land here once you (Technical TL/Manager) approve them internally. Deliver each to the client — the next stage (implementation, paper writing, or Journal Team) only opens up once the client approves it from their portal.</p>
       ${rows.length ? cards : `<div class="adm-empty">Nothing waiting to be delivered right now.</div>`}
+      <div class="adm-empty aw-nomatch" style="display:none">No client ready for delivery matches your search.</div>
     </div>
   </div>${awaitingHtml}`;
 }
@@ -3709,67 +3750,201 @@ function tmInProgressAwaitingNextStep(){
   ];
   return map.map(([stage,label])=>({stage,label,rows:clients.filter(c=>c.stage===stage)})).filter(x=>x.rows.length);
 }
+// ---------------------------------------------------------------------------
+// Assign Work — compact client list + search
+// ---------------------------------------------------------------------------
+// Each client in "New work needing assignment" is shown as ONE compact row (client
+// name, what's needed, why). Clicking the row opens the assignment form underneath
+// it: Assign to / Start date / Deadline. Clients in "Already assigned — in progress"
+// show who it's assigned to, the start date, the deadline and how many days are left.
+// The search box filters every section on this tab (new work, in progress, delivery,
+// awaiting client) by client name / phone / client ID / project ID / assignee —
+// WITHOUT re-rendering, so anything you've already picked in an open form is kept.
+let tmAwOpen = new Set();      // ids of clients whose assignment form is expanded
+let tmAwSearch = "";           // current search text on the Assign Work tab
+function tmAwToggle(id){
+  const key = String(id);
+  const row = document.querySelector(`[data-aw-row="${CSS.escape(key)}"]`);
+  if(tmAwOpen.has(key)) tmAwOpen.delete(key); else tmAwOpen.add(key);
+  if(row) row.classList.toggle("aw-open", tmAwOpen.has(key));
+}
+function tmAwSearchHay(c, extra){
+  return [c.name, c.phone, c.id, c.displayId, c.projectId, c.email, c.institution, c.topic, extra]
+    .filter(Boolean).join(" ").toLowerCase();
+}
+function tmAwApplySearch(val){
+  if(val !== undefined) tmAwSearch = val;
+  const q = (tmAwSearch||"").trim().toLowerCase();
+  const root = $("content"); if(!root) return;
+  let total = 0, shown = 0;
+  root.querySelectorAll("[data-aw-search]").forEach(el=>{
+    total++;
+    const hit = !q || el.getAttribute("data-aw-search").includes(q);
+    el.style.display = hit ? "" : "none";
+    if(hit) shown++;
+  });
+  // Per-section "no match" message + live count badges
+  root.querySelectorAll("[data-aw-section]").forEach(sec=>{
+    const items = [...sec.querySelectorAll("[data-aw-search]")];
+    const vis = items.filter(x=>x.style.display!=="none").length;
+    const empty = sec.querySelector(".aw-nomatch");
+    if(empty) empty.style.display = (q && items.length && !vis) ? "" : "none";
+    const cnt = sec.querySelector("[data-aw-count]");
+    if(cnt && items.length) cnt.textContent = q ? `${vis} / ${items.length}` : String(items.length);
+  });
+  const info = $("aw-search-info");
+  if(info) info.textContent = q ? `Showing ${shown} of ${total}` : "";
+  const clr = $("aw-search-clear");
+  if(clr) clr.style.display = q ? "" : "none";
+}
+function tmAwClearSearch(){
+  const el = $("aw-search-input"); if(el){ el.value = ""; el.focus(); }
+  tmAwApplySearch("");
+}
+function tmAwDaysInfo(deadline){
+  if(!deadline) return "";
+  const d = new Date(String(deadline).slice(0,10)+"T00:00:00");
+  const t = new Date(todayISO()+"T00:00:00");
+  if(isNaN(d)) return "";
+  const n = Math.round((d - t)/86400000);
+  if(n < 0) return `<span class="badge b-bad">${-n} day${n===-1?"":"s"} overdue</span>`;
+  if(n === 0) return `<span class="badge b-wait">Due today</span>`;
+  if(n <= 2) return `<span class="badge b-wait">${n} day${n===1?"":"s"} left</span>`;
+  return `<span class="badge b-paid">${n} days left</span>`;
+}
+// Who / start / deadline for a client that's already assigned, based on its stage.
+function tmAwAssignmentInfo(c){
+  const safe = (fn, n)=>{ try{ return fn(n); }catch(e){ return n; } };
+  if(c.stage==="PROPOSAL_ASSIGNED" || c.stage==="PROPOSAL_SUBMITTED"){
+    return {work:"Proposal", who: c.proposalWriter ? [safe(writerLabel, c.proposalWriter)] : [],
+            raw: c.proposalWriter||"", start: c.proposalStartDate, deadline: c.proposalDeadline};
+  }
+  if(c.stage==="IMPLEMENTATION_ASSIGNED"){
+    const p = c.assignedProgrammers||[];
+    return {work:"Code Implementation", who: p.map(n=>safe(programmerLabel,n)), raw: p.join(" "),
+            start: c.implementationStartDate, deadline: c.implementationDeadline};
+  }
+  if(c.stage==="PAPERWRITER_ASSIGNED"){
+    const w = c.assignedWriters||[];
+    return {work:"Paper Writing", who: w.map(n=>safe(writerLabel,n)), raw: w.join(" "),
+            start: c.writingStartDate, deadline: c.writingDeadline};
+  }
+  return {work:"", who:[], raw:"", start:"", deadline:""};
+}
+function tmAwField(label, inner){
+  return `<div class="aw-field"><span class="aw-field-lbl">${label}</span>${inner}</div>`;
+}
 function tmAssignWorkHtml(){
   const rows = tmNewWorkQueue();
   const cards = rows.map(({c,type,task,note})=>{
-    let body = "";
+    let who = "", sdId = "", dlId = "", btn = "", extra = "";
     if(type==="PROPOSAL"){
       const opts = writerNames().map(n=>`<option value="${esc(n)}">${esc(writerLabel(n))}</option>`).join("") || `<option value="">No writers yet</option>`;
-      body = `<div onclick="event.stopPropagation()"><select id="aw-pw-${c.id}">${opts}</select>
-        <input type="date" class="mini-date" id="aw-pwsd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-pwdl-${c.id}" placeholder="Proposal deadline" title="Proposal deadline">
-        <button class="btn small" style="margin-top:8px" onclick="tmAssignProposalNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>
-        ${preAssignExtraHtml(c.id,'aw')}</div>`;
+      who = `<select id="aw-pw-${c.id}">${opts}</select>`;
+      sdId = `aw-pwsd-${c.id}`; dlId = `aw-pwdl-${c.id}`;
+      btn = `<button class="btn small" onclick="tmAssignProposalNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>`;
+      extra = preAssignExtraHtml(c.id,'aw');
     } else if(type==="IMPLEMENTATION"){
       const boxes = programmerNames().map(n=>`<label class="ms-select-opt"><input type="radio" name="aw-prog-${c.id}" data-aw-prog="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this);msCloseAllPops()"> ${esc(programmerLabel(n))}</label>`).join("");
-      const picker = programmerNames().length ? `<div class="ms-select">
+      who = programmerNames().length ? `<div class="ms-select">
           <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
             <span class="ms-select-display" data-placeholder="Select programmer…">Select programmer…</span>
             <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
         </div>` : '<span style="color:var(--muted);font-size:13px">No programmers yet — add one in the Team tab.</span>';
-      body = `<div onclick="event.stopPropagation()">${picker}
-        <input type="date" class="mini-date" id="aw-sd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-dl-${c.id}" placeholder="Implementation deadline" title="Implementation deadline">
-        <button class="btn small" style="margin-top:8px" onclick="tmAssignImplementationNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button></div>`;
+      sdId = `aw-sd-${c.id}`; dlId = `aw-dl-${c.id}`;
+      btn = `<button class="btn small" onclick="tmAssignImplementationNow(${jsq(c.id)})">Assign &amp; set deadline &#8594;</button>`;
     } else {
       const boxes = writerNames().map(n=>`<label class="ms-select-opt"><input type="radio" name="aw-writer-${c.id}" data-aw-writer="${c.id}" value="${esc(n)}" onchange="msUpdateDisplay(this);msCloseAllPops()"> ${esc(writerLabel(n))}</label>`).join("");
-      const picker = writerNames().length ? `<div class="ms-select">
+      who = writerNames().length ? `<div class="ms-select">
           <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
             <span class="ms-select-display" data-placeholder="Select paper writer…">Select paper writer…</span>
             <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
         </div>` : '<span style="color:var(--muted);font-size:13px">No paper writers yet — add one in the Team tab.</span>';
-      body = `<div onclick="event.stopPropagation()">${picker}
-        <input type="date" class="mini-date" id="aw-wsd-${c.id}" value="${todayISO()}" placeholder="Start date" title="Start date">
-        <input type="date" class="mini-date" min="${todayISO()}" id="aw-wdl-${c.id}" placeholder="Writing deadline" title="Writing deadline">
-        <button class="btn gold small" style="margin-top:8px" onclick="tmAssignWritersNow(${jsq(c.id)})">Assign to Paper Writing &#8594;</button></div>`;
+      sdId = `aw-wsd-${c.id}`; dlId = `aw-wdl-${c.id}`;
+      btn = `<button class="btn gold small" onclick="tmAssignWritersNow(${jsq(c.id)})">Assign to Paper Writing &#8594;</button>`;
     }
-    return `<div class="adm-bar-row" style="display:block;cursor:default">
-      <div class="lbl" style="cursor:pointer;margin-bottom:8px" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')"><b>${esc(c.name)}</b> <span class="badge b-purp" style="margin:0 6px">${esc(task)}</span><small style="color:#8DA39A">${note}</small></div>
-      ${body}
+    const open = tmAwOpen.has(String(c.id));
+    const clientDl = c.deadlineDate ? `<span class="aw-meta">Client deadline: <b>${fmtDate(c.deadlineDate)}</b></span>` : "";
+    return `<div class="aw-row ${open?'aw-open':''}" data-aw-row="${esc(String(c.id))}" data-aw-search="${esc(tmAwSearchHay(c, task))}">
+      <div class="aw-head" onclick="tmAwToggle(${jsq(c.id)})">
+        <div class="aw-head-main">
+          <b class="aw-name">${esc(c.name)}</b>
+          <span class="badge b-purp">${esc(task)}</span>
+          <small class="aw-note">${note}</small>
+        </div>
+        <div class="aw-head-side">
+          ${clientDl}
+          <span class="aw-toggle"><span class="aw-toggle-txt-closed">Assign</span><span class="aw-toggle-txt-open">Close</span> <span class="aw-chev">&#9662;</span></span>
+        </div>
+      </div>
+      <div class="aw-body" onclick="event.stopPropagation()">
+        <div class="aw-grid">
+          ${tmAwField("Assign to", who)}
+          ${tmAwField("Start date", `<input type="date" class="mini-date" id="${sdId}" value="${todayISO()}" title="Start date">`)}
+          ${tmAwField("Deadline", `<input type="date" class="mini-date" min="${todayISO()}" id="${dlId}" title="Deadline">`)}
+        </div>
+        <div class="aw-actions">
+          ${btn}
+          <button class="btn ghost small" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">Open project</button>
+        </div>
+        ${extra}
+      </div>
     </div>`;
   }).join("");
+
   const inProgress = tmInProgressAwaitingNextStep();
+  const ipCount = inProgress.reduce((s,g)=>s+g.rows.length,0);
+  const inProgressRows = inProgress.map(g=>g.rows.map(c=>{
+    const a = tmAwAssignmentInfo(c);
+    const who = a.who.length ? a.who.map(esc).join(", ") : `<span style="color:var(--faint)">Not recorded</span>`;
+    return `<div class="aw-ip" data-aw-search="${esc(tmAwSearchHay(c, a.work+" "+a.raw))}" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">
+        <div class="aw-ip-top">
+          <b class="aw-name">${esc(c.name)}</b>
+          ${a.work?`<span class="badge b-purp">${esc(a.work)}</span>`:""}
+          <small class="aw-note">${g.label}</small>
+        </div>
+        <div class="aw-ip-grid">
+          <div><span class="aw-field-lbl">Assigned to</span><div>${who}</div></div>
+          <div><span class="aw-field-lbl">Start date</span><div>${a.start?fmtDate(a.start):"—"}</div></div>
+          <div><span class="aw-field-lbl">Deadline</span><div>${a.deadline?fmtDate(a.deadline):"—"}</div></div>
+          <div><span class="aw-field-lbl">Status</span><div>${tmAwDaysInfo(a.deadline)||"—"}</div></div>
+        </div>
+      </div>`;
+  }).join("")).join("");
   const inProgressHtml = inProgress.length ? `
-    <div class="adm-panel" style="margin-top:16px">
-      <div class="adm-panel-head"><h3>Already assigned — in progress</h3></div>
+    <div class="adm-panel" style="margin-top:16px" data-aw-section>
+      <div class="adm-panel-head"><h3>Already assigned — in progress</h3><span class="badge b-purp" data-aw-count>${ipCount}</span></div>
       <div class="adm-panel-body">
         <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">These aren't stuck — they just aren't ready for a new assignment yet. This is where a client sits between "assigned" and the next thing showing up above.</p>
-        ${inProgress.map(g=>g.rows.map(c=>`
-          <div class="adm-bar-row" style="cursor:pointer" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">
-            <div class="lbl">${esc(c.name)} <small style="color:#8DA39A">${g.label}</small></div>
-          </div>`).join("")).join("")}
+        ${inProgressRows}
+        <div class="adm-empty aw-nomatch" style="display:none">No in-progress client matches your search.</div>
       </div>
     </div>` : "";
-  return `<div class="adm-panel">
-    <div class="adm-panel-head"><h3>New work needing assignment</h3><span class="badge ${rows.length?'b-bad':'b-purp'}">${rows.length}</span></div>
+
+  const searchBar = `<div class="adm-panel aw-searchbar">
+      <div class="adm-search" style="flex:1">
+        <span>&#128269;</span>
+        <input id="aw-search-input" placeholder="Search client name, phone, client ID, project ID or assignee…" value="${esc(tmAwSearch)}" oninput="tmAwApplySearch(this.value)" autocomplete="off">
+        <button id="aw-search-clear" class="aw-clear" style="display:none" onclick="tmAwClearSearch()" title="Clear search">&#10005;</button>
+      </div>
+      <span id="aw-search-info" class="aw-search-info"></span>
+    </div>`;
+
+  // Apply the current search once the HTML is in the page (after refreshes too).
+  setTimeout(()=>tmAwApplySearch(), 0);
+
+  return `${searchBar}
+  <div class="adm-panel" data-aw-section>
+    <div class="adm-panel-head"><h3>New work needing assignment</h3><span class="badge ${rows.length?'b-bad':'b-purp'}" data-aw-count>${rows.length}</span></div>
     <div class="adm-panel-body">
-      <p style="font-size:12.5px;color:var(--muted);margin-bottom:6px">These clients just moved into the technical pipeline (from Accounts, or after the client approved the previous delivery) and need work assigned. Pick people and a deadline, then Assign — this moves the client forward in the real pipeline immediately, so it disappears from this list the moment it's actually assigned (it doesn't just create a to-do note).</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:6px">These clients just moved into the technical pipeline (from Accounts, or after the client approved the previous delivery) and need work assigned. <b>Click a client</b> to choose who to assign it to, the start date and the deadline, then Assign — this moves the client forward in the real pipeline immediately, so it disappears from this list the moment it's actually assigned.</p>
       <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Note on Code Implementation: it only shows up here after the proposal has been written, approved by you/your TL, delivered to the client, and approved by the client. See "Already assigned — in progress" below to track where it currently is.</p>
       ${rows.length ? cards : `<div class="adm-empty">Nothing waiting to be assigned right now — everything from Accounts has a proposal, implementation, or paper writer assigned.</div>`}
+      <div class="adm-empty aw-nomatch" style="display:none">No client waiting for assignment matches your search.</div>
     </div>
   </div>${inProgressHtml}
   <div style="margin-top:16px">${tmDeliveryHtml()}</div>`;
@@ -3822,6 +3997,7 @@ function tmWorkUpdatesHtml(){
               <small style="color:#8DA39A">${esc(t.assigned_to||"—")}${c?(" &bull; "+esc(c.name)):""}</small></div>
           </div>
           ${sendsSummaryLine(t.id)?`<div class="val-hint" style="margin-top:4px">${sendsSummaryLine(t.id)}</div>`:""}
+          ${tlAttachmentBtn(t.id)}
           <textarea id="wu-note-${t.id}" placeholder="Correction note (only needed if sending back)" rows="2" style="margin-top:8px;margin-bottom:8px"></textarea>
           <div style="display:flex;gap:8px">
             <button class="btn gold small" onclick="tmApproveTaskNow(${t.id})">Approve &mdash; mark complete &#8594;</button>
@@ -4720,6 +4896,7 @@ function myAssignedTasksHtml(name){
       ${(t.status==='SUBMITTED' && canSendWork()) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send to someone else&hellip;</button></div>` : ""}
       ${(t.status!=='SUBMITTED' && canSendWork() && sendsSummaryLine(t.id)) ? `<div class="pc-meta" style="margin-top:6px">${sendsSummaryLine(t.id)}</div>` : ""}
       ${t.status!=='COMPLETED' ? taskCoordBoxHtml(t) : ""}
+      ${canSendWork() ? tlAttachmentBtn(t.id) : ""}
     </div>`;
   });
   return html;
@@ -11749,6 +11926,11 @@ function handoffFileBtn(x, which, label){
   const icon = /\.pdf$/i.test(name) ? "&#128196;" : "&#128462;";
   return `<button type="button" class="val-file" title="Download ${esc(name)}" onclick="event.stopPropagation();handoffDownload(${x.handoffId},'${which}')">${icon} <span>${label?esc(label)+": ":""}${esc(name)}</span></button>`;
 }
+// The newest document the employee attached when sending this task to the Technical TL / Manager.
+function tlAttachmentBtn(taskId){
+  const x = sendsForTask(taskId).find(s=>s.kind==="HANDOFF" && (s.target==="TECH_TL" || s.target==="TECH_MANAGER") && s.hasFile);
+  return x ? `<div style="margin-top:6px" onclick="event.stopPropagation()">${handoffFileBtn(x,"send", x.taskType==="PROPOSAL" ? "Proposal" : "Attachment")}</div>` : "";
+}
 // The "Coordinator" box on the employee's own task card.
 function taskCoordBoxHtml(t){
   if(!canSendWork()) return "";
@@ -11806,6 +11988,10 @@ function openSendWorkModal(taskId){
         <select id="swCoord">${coords.map(e=>`<option value="${e.id}" ${myCoord&&myCoord.id===e.id?"selected":""}>${esc(e.name)}${myCoord&&myCoord.id===e.id?" (your coordinator)":""} &mdash; ${esc(EMP_ROLE_LABEL[e.role]||e.role)}</option>`).join("")}</select></div>
       ${valFileField("swCoordFile","Attach the paper (optional)","The coordinator can open it to review")}
     </div>
+    <div id="swTlWrap">
+      ${t.task_type==="PROPOSAL" ? valFileField("swTlFile","Attach the proposal","Required &mdash; the Technical TL / Manager reviews this document")
+        : valFileField("swTlFile","Attach the paper (optional)","The Technical TL / Manager can open it to review")}
+    </div>
     <div id="swValWrap">
       <div class="field"><label>What should be checked?</label><div class="val-folder-pick">${valAllFolderKeys().map((k,i)=>`
         <label><input type="radio" name="swFolder" value="${esc(k)}" ${i===0?"checked":""}>
@@ -11821,6 +12007,7 @@ function sendWorkToggle(){
   const tgt = (document.querySelector('input[name="swTarget"]:checked')||{}).value;
   $("swCoordWrap").style.display = tgt==="COORDINATOR" ? "block" : "none";
   $("swValWrap").style.display = tgt==="VALIDATION" ? "block" : "none";
+  $("swTlWrap").style.display = (tgt==="TECH_TL" || tgt==="TECH_MANAGER") ? "block" : "none";
   $("swBtn").textContent = tgt ? "Send to " + (SEND_TARGET_LABEL[tgt] || "…") : "Send";
   $("swBtn").disabled = !tgt;
 }
@@ -11832,6 +12019,13 @@ async function submitSendWork(taskId){
     payload.coordinatorId = parseInt($("swCoord").value);
     let doc; try{ doc = await valReadDoc("swCoordFile", false, "paper"); }catch(e){ toast(e.message); return; }
     if(doc===null) return;
+    Object.assign(payload, doc);
+  }
+  if(target==="TECH_TL" || target==="TECH_MANAGER"){
+    const t = tasks.find(x=>x.id===taskId) || {};
+    const need = t.task_type==="PROPOSAL";
+    let doc; try{ doc = await valReadDoc("swTlFile", need, need ? "proposal" : "paper"); }catch(e){ toast(e.message); return; }
+    if(!doc) return;
     Object.assign(payload, doc);
   }
   if(target==="VALIDATION"){
@@ -11953,6 +12147,7 @@ function projectSendsPanelHtml(c){
       <td data-label="Task" style="min-width:150px"><b>${esc(x.taskTitle||"—")}</b></td>
       <td data-label="Sent by">${esc(x.sentBy)}</td>
       <td data-label="Sent to / for">${x.target==="VALIDATION" ? `Validation &mdash; <b>${esc(x.purposeLabel)}</b>${x.round>1?` <span class="badge b-dim">Round ${x.round}</span>`:""}` : (x.target==="COORDINATOR" ? `Coordinator &mdash; <b>${esc(x.targetName)}</b>` : `<b>${esc(x.targetLabel)}</b>`)}
+        ${x.kind==="HANDOFF" && x.hasFile ? `<div style="margin-top:4px">${handoffFileBtn(x,"send", x.taskType==="PROPOSAL" ? "Proposal" : "Attachment")}</div>` : ""}
         ${x.note?`<div class="val-hint" style="white-space:pre-wrap">&ldquo;${esc(x.note)}&rdquo;</div>`:""}</td>
       <td data-label="Reviewed by &amp; result">${sendResultHtml(x)}</td></tr>`).join("");
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Work sent for review</h3><span class="badge b-purp">${all.length} time${all.length===1?"":"s"}</span></div>

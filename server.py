@@ -6509,6 +6509,13 @@ def handle_action(action, d, ip=""):
                     # The paper is optional here — attach it if the coordinator should read it.
                     fname, ftype, fdata = read_validation_document(d, required=False, label="paper")
                     fname, ftype, fdata = fname or "", ftype or "", fdata or ""
+                else:
+                    # Straight to the Technical TL / Manager: a proposal must carry the proposal
+                    # document so they can read it before approving; other work may attach one.
+                    is_prop = task_type == "PROPOSAL"
+                    fname, ftype, fdata = read_validation_document(d, required=is_prop,
+                                                                   label="proposal" if is_prop else "paper")
+                    fname, ftype, fdata = fname or "", ftype or "", fdata or ""
                 con.execute("""INSERT INTO task_handoffs
                                  (task_id, client_id, target, target_emp_id, target_name, note, status,
                                   sent_by_key, sent_by_name, sent_by_emp_id, created_at,
