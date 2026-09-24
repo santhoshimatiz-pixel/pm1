@@ -1,0 +1,31 @@
+============================================================
+ AFTER COORDINATOR APPROVAL: KEEP SENDING (AI / PLAGIARISM
+ CHECK ANY NUMBER OF TIMES, THEN TL / MANAGER)
+============================================================
+
+THE PROBLEM
+Sending a paper to the Coordinator (or Validation) marked the task
+"Done - awaiting approval". That put it in the Technical Manager's
+Work Updates straight away; once approved there it became
+"Completed" and the writer could no longer send it anywhere.
+
+NOW (Paper Writing tasks)
+- Sending to the Coordinator or to Validation (AI Check /
+  Plagiarism Check / Test Paper) keeps the task "In progress".
+  It only goes to the Technical Manager / TL for approval when the
+  writer actually sends it to the Technical TL / Manager.
+- After the coordinator approves, the button reads
+  "Send to next reviewer / check again..." - the writer can send
+  to Validation as many times as needed, then to the TL / Manager.
+- AI Check / Plagiarism Check can be sent ANY number of times,
+  before or after the coordinator approves - even after the
+  Technical Manager has approved the task
+  ("Send for AI / Plagiarism check again...").
+- Coordinator still reviews only once (unchanged).
+- The coordinator box now says "Coordinator approved" instead of
+  "Completed", so it isn't confused with the task being finished.
+
+Proposal and Code Implementation are unchanged (straight to
+TL / Manager, one approval).
+
+FILES CHANGED: server.py, index.html. No database changes.

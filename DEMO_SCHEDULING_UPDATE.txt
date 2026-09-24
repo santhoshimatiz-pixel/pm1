@@ -1,0 +1,86 @@
+============================================================
+ NEW FEATURE: DEMO SCHEDULING (Paper demo / Code demo)
+============================================================
+
+WHAT IT DOES
+------------
+Telecaller-facing Marketing TL / Marketing Manager can now schedule an
+upcoming demo for a client ahead of time - separate from "demo given",
+which still records that a demo already happened.
+
+  1. Open a client (drawer, for Marketing TL - or the Project page, for
+     everyone else) and click "+ Schedule demo".
+  2. Pick:
+       - Demo type: Code demo (Programmer) or Paper demo (Paper Writer)
+       - Date + time
+       - Who it's for (auto-picks the client's current assigned
+         Programmer/Paper Writer, or pick manually / leave unassigned)
+       - An optional note
+  3. Save. This is logged to the client's Stage history.
+
+WHO SEES IT
+-----------
+  - Technical Manager and Technical TL: a "Demo schedule" panel on the
+    client's Project page, plus a new "Upcoming demos" panel on their
+    own Dashboard, plus a teal dot on their calendar.
+  - The specific employee it's assigned to (Programmer or Paper
+    Writer): shows on their own pipeline card for that client, on
+    their own calendar (their calendar is already scoped to only
+    their own clients), and on their own dashboard's "Upcoming demos"
+    list.
+  - Marketing TL / Marketing Manager: can reschedule or cancel it any
+    time from the same panel.
+  - Technical TL / Technical Manager can also cancel a scheduled demo
+    (e.g. if plans change) - Marketing is not the only one who can
+    call it off.
+
+COMPLETING A DEMO
+------------------
+  - Code demo: the Programmer's existing "Mark demo given" flow now
+    automatically clears the matching scheduled entry once they log
+    the real demo.
+  - Paper demo: Paper Writers get a new "Mark paper demo given" button
+    (just a date, same as the code-demo one) which also clears the
+    schedule and is recorded on the client.
+
+POSTPONE / MARK COMPLETED (for the assigned Programmer / Paper Writer)
+------------------------------------------------------------------------
+  Once a demo is scheduled, the specific Programmer or Paper Writer it
+  was scheduled for gets two extra buttons wherever that schedule shows
+  up (their own pipeline card, the client drawer, the project page):
+
+    - "Postpone" - pick a new date/time and an optional reason. The
+      schedule stays active, just moved. Logged in Stage history.
+    - "Mark completed" - record the date it actually happened, an
+      optional note, and (for a code demo) whether the client was
+      satisfied. This feeds into the same demo-given tracking the
+      rest of the app already uses (so Technical TL/Manager approval
+      still works for code demos), then clears the schedule.
+
+  These two actions are restricted to the employee the demo is
+  actually scheduled for (their login name must match who it was
+  assigned to) - Admin logins can also do it on their behalf.
+
+WHERE THIS LIVES IN THE CODE
+-----------------------------
+  server.py
+    - New client columns: demo_scheduled_type/date/time/note/emp/by,
+      demo_schedule_status, writing_demo_given_date (auto-migrated,
+      no manual DB step needed - same pattern as every other field
+      added in past updates).
+    - New actions: schedule_demo, cancel_demo_schedule,
+      mark_writing_demo_given.
+    - mark_demo_given now clears a matching scheduled code demo.
+
+  index.html
+    - New helpers: DEMO_TYPE_LABEL, demoScheduleChipHtml(),
+      demoScheduleSectionHtml(), openScheduleDemoModal(),
+      cancelDemoSchedule(), openMarkWritingDemoModal(),
+      upcomingDemoSchedules(), upcomingDemosPanelHtml().
+    - Wired into: the classic client drawer, the modern Project page
+      (admProjDashboardTab - shared by Admin/Marketing Manager/
+      Technical Manager/TL/Employees), the Programmer and Paper
+      Writer's own pipeline cards, the shared calendar
+      (adminCalendarHtml - new "Demo scheduled" dot/legend row and
+      day-detail entry), the Marketing and Technical dashboards, and
+      the employee's own landing page.

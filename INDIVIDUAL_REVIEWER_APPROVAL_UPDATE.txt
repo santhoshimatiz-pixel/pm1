@@ -1,0 +1,36 @@
+============================================================
+ PAPER WRITING: EACH REVIEWER APPROVES INDIVIDUALLY
+ -> ALL APPROVED -> JOURNAL TEAM
+============================================================
+
+REVIEWERS: Coordinator, Technical TL, Technical Manager
+(Coordinator is required only if an active coordinator exists
+ other than the writer.)
+
+WRITER (My assigned tasks)
+- Can send to EACH reviewer any number of times until THAT
+  reviewer approves (after a rework they send it again).
+- Once a reviewer approves, that reviewer is locked
+  ("Already approved by ...") - the others stay open.
+- While waiting on a reviewer, can't send to that same reviewer
+  again (can still send to the others / Validation).
+- AI Check / Plagiarism Check: any number of times, always.
+- A checklist on the task and in the Send window shows:
+    Coordinator / Technical TL / Technical Manager
+    = approved / waiting / sent back / not sent.
+
+TECHNICAL TL and TECHNICAL MANAGER (Tasks > Work Updates)
+- New panel "Paper Writing - waiting on YOUR approval".
+  The TL sees only what was sent to the TL; the Manager only what
+  was sent to the Manager. Each gives their OWN decision:
+    Approve (my approval) | Rework - send back | Reassign
+- One person approving does NOT complete the paper.
+
+WHEN ALL REQUIRED REVIEWERS HAVE APPROVED
+- Task -> Completed, client -> Delivery (ready for the client).
+- After client approval (or "Continue without client approval"),
+  the client appears in Tasks > Assign Work > "Ready for the
+  Journal Team": enter the target journal -> "Send to Journal Team".
+- The writer can then only send AI / Plagiarism checks.
+
+FILES CHANGED: server.py, index.html. No database changes.

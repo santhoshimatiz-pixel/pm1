@@ -1,0 +1,77 @@
+============================================================
+ FIXES IN THIS UPDATE
+============================================================
+
+1. ASSIGNED TASKS WERE UNREADABLE (grey/dark box, invisible text)
+   ------------------------------------------------------------
+   Cause: the app force-switches to the light theme on every load
+   (see the small script right before <body>), but three card
+   styles - the ones used for "My assigned tasks", the calendar
+   list, and query cards - still had an old dark purple background
+   hardcoded from before that switch. Dark text (from the light
+   theme) on that dark background is what looked like grey text
+   you couldn't read.
+   Fixed: those three styles (.pay-row, .cal-card, .query-card)
+   now use the same white card background + dark text as the rest
+   of the app, so this can't go dark-on-dark again even if the
+   theme changes later.
+   (index.html - .pay-row / .cal-card / .query-card)
+
+2. GENERIC "MARK AS DONE" BUTTON
+   ------------------------------------------------------------
+   A Programmer's or Paper Writer's assigned-task button just
+   said "Mark as done" no matter what the task actually was.
+   Fixed: it now names the actual kind of work being finished -
+   "Implementation completed", "Paper writing completed",
+   "Proposal completed", "Proofreading completed", "Formatting
+   completed", "Submission completed" - based on the task's own
+   type. Still shows "Resubmit" for a task sent back for
+   correction, same as before.
+   (index.html - TASK_DONE_LABEL, taskDoneButtonLabel,
+    myAssignedTasksHtml)
+
+3. EMPLOYEE DASHBOARD STAT CARDS DID NOTHING WHEN CLICKED
+   ------------------------------------------------------------
+   The Programmer/Paper Writer dashboard already showed four
+   stat cards - Work Validation Request, Implementation Holds
+   (or Journal Revisions for writers), Pending Client Queries,
+   and Most Prior Task - but they were just numbers with no way
+   to act on them. On top of that, "Pending Client Queries" had
+   NOTHING backing it anywhere on the page - there was no list of
+   the client's actual questions for the employee to answer, only
+   a count.
+   Fixed:
+     - All four cards are now clickable and jump straight to the
+       matching section on the employee's own "My work" tab.
+     - Added a brand-new "My client queries" section to the
+       Programmer's and Paper Writer's "My work" tab, listing
+       every client question assigned to them with its status -
+       tapping one opens the same reply/resolve box already used
+       elsewhere in the app, so they can actually answer it.
+   (index.html - myClientQueriesHtml, empGoToWorkSection,
+    techDashboardPanel)
+
+4. REFRESHING THE PAGE COULD LOG YOU OUT
+   ------------------------------------------------------------
+   Cause: right after a page refresh, the browser re-asks the
+   server for all the data from scratch. If that very first
+   request was even slightly slow or hit a brief hiccup, the
+   Client portal's code saw "no client data yet" and read that as
+   "this client doesn't exist" - logging the person out instantly,
+   even though the session itself was completely fine.
+   Fixed:
+     - Reloading data now quietly retries a couple of times before
+       giving up, so an ordinary brief delay resolves itself.
+     - If a data load still doesn't succeed in time, the Client
+       portal now shows a short "Reconnecting..." message and
+       keeps trying automatically in the background, instead of
+       logging out. It only logs out for a client ID that's
+       genuinely missing after data has loaded successfully.
+   (index.html - loadData, lastLoadOk, renderClient)
+
+------------------------------------------------------------
+All four fixes were verified by running server.py, loading the
+seeded demo data, confirming the app and API still respond
+correctly, and checking every edited section of index.html for
+valid JavaScript. No database schema changes, no changes to
+server.py - matiz.db and all existing data are unaffected.

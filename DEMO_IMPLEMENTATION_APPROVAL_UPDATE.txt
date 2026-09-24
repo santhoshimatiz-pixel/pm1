@@ -1,0 +1,56 @@
+============================================================
+ DEMO ACCESS + CODE IMPLEMENTATION APPROVAL + REASSIGN
+ AFTER APPROVAL + 3 WORK BOXES IN ASSIGN WORK
+============================================================
+
+1. EMPLOYEES CAN MARK DEMOS (bug fix)
+   "+ Mark demo given", "Mark completed" and "Postpone" on the
+   Programmer / Paper Writer dashboard always failed with "You
+   don't have permission to do that" - the server never let the
+   employee role use them. Fixed for:
+     mark_demo_given, complete_demo_schedule,
+     postpone_demo_schedule, mark_writing_demo_given
+   (still only for the programmer / writer assigned to that client).
+
+2. CODE IMPLEMENTATION = SUBMIT -> APPROVE / REWORK -> COMPLETED
+   Programmer (My work):
+   - "Mark implementation complete" is gone. It's now
+     "Submit to Technical TL / Manager ->" (attach code/zip optional).
+   - No coordinator, no validation for code implementation.
+   - After submitting: "Submitted to the Technical Manager on ...
+     - waiting on approval". Can't send it anywhere else.
+   - If sent back: "Sent back for rework: <note>" + "Resubmit".
+   - Once approved: "Code implementation approved - completed.
+     Nothing more to send."
+   Technical Manager / TL (Tasks > Work Updates):
+   - Approve -> marks it COMPLETED and moves the client to
+     Delivery (approving also approves the recorded demo).
+   - Rework - send back (with a note).
+   - Reassign to someone else.
+   Then Tasks > Assign Work > Delivery > "Deliver to client" -
+   same flow as the proposal.
+   (The server now blocks programmers from self-completing.)
+
+   Proposal rework now also puts the proposal back to "being
+   written" so it leaves Work Validation until it's resubmitted.
+
+3. REASSIGN - ALSO AFTER APPROVAL
+   "Reassign" now also appears on:
+     - Delivery (approved, not yet sent to client)
+     - Delivered - awaiting client approval
+   Reassigning approved work sends it back to "in progress" for
+   the new person (a fresh task is created for them; for code,
+   the old demo is cleared so the new programmer gives a new one).
+
+4. ASSIGN WORK: 3 BOXES
+   Tasks > Assign Work now starts with three boxes:
+       Work 1 Proposal | Work 2 Code Implementation | Work 3 Paper Writing
+   Each shows: To assign, In progress, Waiting approval,
+   To deliver, With client. Click a box to open ONLY that work in
+   every list below (click again / "All work" to show all).
+   Works together with the search box.
+   "In progress" now also lists papers in review (coordinator /
+   TL / Manager) and shows a "Submitted - review ->" button when
+   work is waiting on your approval.
+
+FILES CHANGED: server.py, index.html. No database changes.

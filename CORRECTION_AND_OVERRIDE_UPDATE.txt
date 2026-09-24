@@ -1,0 +1,86 @@
+============================================================
+ NEW: "Need corrections" for the client + "Continue without
+ client approval" for staff — Proposal, Code Implementation,
+ and Paper Writing
+============================================================
+
+BACKGROUND
+  The Delivery -> client-approval flow (Proposal, Code
+  Implementation, Paper Writing) already worked correctly in
+  the file you sent — I ran it end-to-end and confirmed every
+  handoff moves the client forward exactly as documented in
+  DELIVERY_STAGE_UPDATE.txt. What was missing was an escape
+  hatch: once something was delivered, the ONLY option was for
+  the client to click "Approve" — there was no structured way
+  for the client to send it back with a note, and no way for
+  staff to keep things moving if the client never responds.
+  This update adds both.
+
+WHAT'S NEW — CLIENT SIDE
+  On the client's own portal, wherever a delivered Proposal,
+  Code Implementation, or Paper now shows an "Approve" button,
+  there's also a "Need corrections" button next to it. Clicking
+  it opens a note box — the client explains what needs to
+  change, and submitting it:
+    - Proposal:        sent back to the assigned Proposal
+                        Writer's queue (same as a fresh
+                        assignment) with the client's note
+                        attached. Writer resubmits -> gets
+                        re-verified -> gets re-delivered.
+    - Implementation:   sent back to the assigned Programmer(s)'
+                        queue the same way.
+    - Paper:            sent back into the SAME internal review
+                        chain used for normal corrections
+                        (lands at "Technical Manager final
+                        review" after the writer fixes it), so
+                        it gets the same quality check before
+                        going out again.
+  Every correction request is logged in that client's Stage
+  History with the client's note, visible to Technical TL/
+  Manager (and anyone else who can see the client's record).
+
+WHAT'S NEW — STAFF SIDE
+  On the Technical Manager / Technical TL dashboards (Delivery
+  panel, the classic Technical TL dashboard's "Delivered —
+  awaiting client approval" list, and each project's Work
+  Validation tab), every item sitting in "Delivered — awaiting
+  client approval" now has a "Continue without client approval"
+  button. Clicking it asks for a short reason, then moves that
+  client forward exactly as if the client had approved it
+  (implementation gets assigned / paper writing gets assigned /
+  it becomes ready for the Journal Team) — nothing is left
+  stuck waiting forever if a client is unreachable.
+  This is restricted to Technical TL / Technical Manager, and
+  the reason is always logged in Stage History as "Continued
+  without waiting for the client's approval — <reason>", so
+  it's never confused with the client's own approval later.
+
+FILES CHANGED
+  server.py    - six new actions:
+                   client_request_correction_proposal
+                   client_request_correction_implementation
+                   client_request_correction_paper
+                   override_client_approval_proposal
+                   override_client_approval_implementation
+                   override_client_approval_paper
+  index.html   - "Need corrections" button + note modal on the
+                 client portal for all three delivery stages;
+                 "Continue without client approval" button on
+                 the Technical Manager Delivery panel, the
+                 classic Technical TL dashboard, and each
+                 project's Work Validation tab.
+
+VERIFIED
+  Ran the full pipeline end-to-end against the real server for
+  both new paths, for all three work types (Proposal, Code
+  Implementation, Paper Writing):
+    - Correction request (blocked with no note, then accepted
+      with one) -> sends it back to the right team -> resubmit
+      -> re-review -> re-deliver -> works identically to a
+      fresh delivery.
+    - Staff override (blocked with no reason, then accepted
+      with one) -> advances the client exactly like a client
+      approval would, including auto-applying any pre-assigned
+      implementation team / paper writer.
+  Nothing about the existing "client approves normally" path
+  changed — it still works exactly as before.

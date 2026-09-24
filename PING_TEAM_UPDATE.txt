@@ -1,0 +1,46 @@
+PING TEAM UPDATE
+================
+
+WHAT CHANGED
+------------
+The Technical Manager / Technical TL dashboard has a new "Ping team" button
+(top-right, next to the page title). It opens a panel that:
+- lists the programmers and paper writers, with a green dot for anyone who is
+  signed in right now
+- lets you type a short message (default: "Please check the PM tool.")
+- has a "Ping" button per person and a "Ping everyone online" button
+- shows the last 24 hours of pings with a status:
+  Waiting for login -> Delivered -> Seen
+
+EMPLOYEE SIDE
+-------------
+While an employee is signed in, their PM-tool tab checks for pings every
+10 seconds in the background. A new ping shows as:
+- a DESKTOP notification from the browser (visible while they are in Word,
+  another tab or another app; stays on screen until clicked)
+- a banner at the top of the PM tool with a "Got it" button
+- a short beep and a flashing tab title
+If the person is not signed in, the ping is queued and appears when they log in.
+
+Desktop notifications need the person's permission once: employees see a
+"Turn on notifications" bar on their dashboard. Without it they still get the
+in-page banner, beep and flashing title.
+The PM tool must stay open in a browser tab (minimised is fine). In a
+background tab the browser slows timers, so a ping can take up to ~1 minute.
+
+SECURITY
+--------
+Only Technical Manager, Technical TL and admins can send pings, and only to
+their own department's employees (server enforced). Employees can only
+receive/acknowledge their own pings. Messages are limited to 300 characters,
+control characters are stripped, sending is rate-limited to 60 per 5 minutes.
+New actions (ping_team_directory, ping_employee, ping_poll, ping_ack) are in
+the authorization matrix and use the normal session + CSRF checks.
+
+DATABASE
+--------
+New table emp_pings, created automatically on start-up. No manual migration.
+
+FILES CHANGED
+-------------
+server.py, index.html (and this note). No new packages.

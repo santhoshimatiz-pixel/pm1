@@ -1,0 +1,22 @@
+============================================================
+ PAPER WRITER: "MARK WRITING COMPLETED"
+============================================================
+Paper Writer -> Dashboard -> "Assigned to me - not yet submitted"
+
+- The "Submit draft to Coordinator ->" button is REMOVED (from the
+  card and from the client drawer).
+- In its place: "Mark writing completed". It only records that the
+  writing is done (date/time + who) - it doesn't send it anywhere.
+- After marking, the card shows:
+     Writing completed 24 Sept, 12:40 pm
+     [Send it from My assigned tasks ->]  [Undo]
+- "My assigned tasks" is UNCHANGED - the writer still sends it from
+  there to Coordinator / Validation / Technical TL / Manager.
+- When the Technical Manager / TL approves that task in Work
+  Updates, the client now moves to WRITING_COMPLETE (Delivery) even
+  though it never went through the old Coordinator pipeline step.
+- The mark is cleared automatically when writing is (re)assigned.
+
+FILES CHANGED: server.py, index.html.
+Database: two new columns (writing_completed_at, writing_completed_by)
+are added automatically on the next server start - nothing to do.

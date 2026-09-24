@@ -1,0 +1,69 @@
+============================================================
+ COORDINATOR REVIEW: APPROVE / SEND BACK + REVIEW COUNTS,
+ PROPOSALS GO STRAIGHT TO TECHNICAL TL / MANAGER
+============================================================
+
+1. EMPLOYEE SENDS WORK TO A COORDINATOR
+   - When sending to a coordinator there is now an optional
+     "Attach the paper" box (Word / PDF). It is NOT required.
+   - The employee can't send the same work to a coordinator
+     while it is still waiting on one.
+
+2. COORDINATOR DASHBOARD ("My work" tab)
+   - New "Review" box with counts:
+       Total received / Completed / Pending / Sent back
+   - Each waiting item has only two buttons:
+       Approve                    - optional note
+       Send back for correction   - note required, and an
+                                    optional attached document
+   - The old "Reviewed - forward to..." button is removed.
+     Coordinators no longer forward work (blocked on the
+     server too).
+   - If the employee attached the paper, the coordinator can
+     download it from the item.
+
+3. AFTER THE COORDINATOR DECIDES
+   - Sent back: the task goes to "Needs correction". The
+     employee's task card shows the coordinator's note and the
+     correction document to download. They fix it and can send
+     it to the coordinator again.
+   - Approved: the employee's task card shows a
+     "Coordinator review - Completed" box. From now on the
+     Coordinator option is locked for that task (it can never
+     be sent to a coordinator again). The other options stay:
+     Validation, Technical TL, Technical Manager.
+
+4. PROPOSAL vs PAPER WRITING
+   - PROPOSAL tasks: the send window shows ONLY Technical TL
+     and Technical Manager. Coordinator and Validation are not
+     allowed (checked by the server too).
+   - When a PROPOSAL is sent to the Technical TL / Manager the
+     employee MUST attach the proposal document (Word / PDF).
+     The send is refused without it (checked by the server).
+   - The Technical TL / Manager can download it from:
+       Work Updates (waiting on your approval) - "Proposal" button
+       Project Task Board - next to that send
+     The employee also sees the file they attached on their
+     own task card.
+   - Paper Writing and other work sent to the TL / Manager can
+     attach a document too, but it's optional.
+   - PAPER WRITING (and other work): Coordinator (with the
+     rules above), Validation, Technical TL, Technical Manager.
+
+5. PROJECT TASK BOARD
+   - Coordinator sends now show "Approved" or "Sent back"
+     (with the correction document), and the coordinator tile
+     shows approved / pending counts.
+
+DATABASE
+   New columns on task_handoffs are added automatically on the
+   next server start. Existing data is untouched; older
+   "Reviewed/forwarded" records still display and count as
+   completed.
+
+FILES CHANGED
+   server.py   - send rules, new task_handoff_approve and
+                 task_handoff_file actions, attachments on
+                 coordinator send / send back.
+   index.html  - send window, coordinator Review box, approve /
+                 send-back windows, employee coordinator box.

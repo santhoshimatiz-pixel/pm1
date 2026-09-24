@@ -1,0 +1,31 @@
+============================================================
+ ASSIGN WORK: COMPACT CLIENT LIST + UNIVERSAL SEARCH
+============================================================
+Technical Manager / TL -> Tasks -> Assign Work
+
+1. NEW WORK NEEDING ASSIGNMENT - client list first
+   Each client is now ONE compact row: client name, what work is
+   needed (Proposal / Code Implementation / Paper Writing), why,
+   and the client's deadline. Click the row (or "Assign") and it
+   opens the form underneath with clear labels:
+       ASSIGN TO   |   START DATE   |   DEADLINE
+   plus "Assign" and "Open project". Click again ("Close") to fold
+   it. Open rows stay open after the page refreshes.
+
+2. ALREADY ASSIGNED - IN PROGRESS - full details
+   Previously only the client name was shown. Each client now shows:
+       Assigned to | Start date | Deadline | Status
+   Status = days left / due today / X days overdue (colour-coded).
+
+3. UNIVERSAL SEARCH (top of the Assign Work tab)
+   Search by client name, phone, client ID, project ID, email,
+   institution, topic, work type or assignee name. It filters ALL
+   sections on the tab (New work, In progress, Delivery, Awaiting
+   client approval) as you type, shows "Showing X of Y", count
+   badges update (e.g. 1 / 3), and a "no match" message appears
+   per section. "x" clears it. Typing does NOT reset anything you
+   already selected in an open assign form.
+
+FILES CHANGED
+------------------------------------------------------------
+index.html only (no server/database change).

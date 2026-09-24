@@ -1,0 +1,473 @@
+============================================================
+ FIXES APPLIED — iMatiz QA Bug Report (12 bugs, 15 Sept 2026)
+============================================================
+
+BUG-01 — Phone field accepted non-numeric garbage
+------------------------------------------------------------
+Add Client's Phone field now strips non-digits as you type and
+caps at 10 characters. Save is blocked client-side unless the
+phone is exactly 10 digits, and the same check now runs on the
+server (add_client), so the rule can't be skipped by calling the
+API directly.
+(index.html — Add Client form, addClient / server.py — add_client)
+
+BUG-02 — Email field accepted invalid text
+------------------------------------------------------------
+Email now uses a real email input type and is validated against
+a standard pattern before saving, both client-side and
+server-side. Empty email is still allowed (it's optional) — only
+non-empty invalid text is rejected.
+(index.html — addClient / server.py — add_client)
+
+BUG-03 — Client rows not clickable / Action hidden behind scroll
+------------------------------------------------------------
+The row itself already opens the client profile on click in this
+codebase. What was genuinely broken was the Action column (the
+only way to Edit/Delete) sitting off-screen behind ~10 columns of
+horizontal scroll. The Action column is now sticky (pinned to the
+right edge of every admin table), so it's always visible without
+scrolling — this also resolves BUG-12 below.
+(index.html — table.adm-table CSS)
+
+BUG-04 — "Save password" gave no feedback, no confirm, no re-auth
+------------------------------------------------------------
+Settings > Change my password now has three fields: Current
+password, New password, and Confirm new password. The form
+blocks submission with a clear toast if current password is
+blank, new password is blank, or the two new-password entries
+don't match. The server now verifies the current password against
+the stored hash before allowing the change, for both individual
+employee logins and shared department logins.
+(index.html — openSettings / saveMyPassword / server.py — change_password)
+
+BUG-05 — Escape key didn't close modals
+------------------------------------------------------------
+Added a global Escape-key listener that closes the open modal,
+matching standard dialog behavior. Clicking the overlay or a
+Cancel/Close button still works as before.
+(index.html — openModal / closeModal)
+
+BUG-06 — "Branch" free text produced duplicate city spellings
+------------------------------------------------------------
+Add Member / Update Member's Branch field is now a text input
+backed by a dropdown (datalist) of every branch already on file,
+so staff can pick an existing value instead of retyping it. A
+normalizer collapses known variants (banglore/bangalore/bengaluru
+-> "Bengaluru", etc.) and title-cases anything new. This runs
+both client-side and server-side (employee_create, employee_update,
+and the bulk team-import path), so the standardization can't be
+bypassed via import or direct API calls. Note: this does not
+retroactively fix the 5 existing "Banglore" records already in
+the live database — those still need a one-time manual correction
+(edit each and re-save; the normalizer will fix the spelling).
+(index.html — normalizeBranchName / branchDatalistHtml /
+ server.py — normalize_branch_name)
+
+BUG-07 — Dashboard "Target (last month)" stuck at 0
+------------------------------------------------------------
+The widget was artificially flooring last month's collection at a
+minimum of 1 (rounds to "0k" either way) and always phrased the
+caption as "X ahead of last month" even when there was no real
+last-month figure to compare against. Removed the artificial
+floor and fixed the caption: when last month genuinely had no
+recorded collection, it now says so plainly instead of implying a
+comparison that isn't there. If your real last month figure is
+still 0 after this fix, that reflects the actual payment records
+(no `pay_date` fell in that calendar month) rather than a display
+bug — worth spot-checking a few older payment records for a
+missing/blank pay_date if that seems wrong.
+(index.html — renderAdminDashboard)
+
+BUG-08 — Google Fonts request returns HTTP 503 on every load
+------------------------------------------------------------
+The font stylesheet now loads non-render-blocking (media="print"
+swapped to "all" on success) and removes itself on error instead
+of leaving a failed request hanging on every single page load.
+The app already falls back to system fonts cleanly, so this is a
+network-hygiene fix rather than a visual one — it won't stop
+fonts.googleapis.com from occasionally returning 503 (that's on
+Google's / the network's side), but it stops that failure from
+being a repeated blocking request.
+(index.html — <head>)
+
+BUG-09 — No way to delete/archive a client record
+------------------------------------------------------------
+Client deletion already existed but was buried in the Overview
+table's hidden ⋮ menu. Added a visible "Delete client" button
+directly on the Client Profile page itself (Super Admin / MD
+Admin only, same permission check as before), which now also
+navigates back to the Overview list automatically after deleting.
+This also gives you a direct way to remove the CL-1127 test
+record from the audit — open its profile and use the new button.
+(index.html — renderClientProfile / admDeleteClient)
+
+BUG-10 — "Tasks" sidebar vs Dashboard "Tasks" widget confusion
+------------------------------------------------------------
+Renamed the sidebar entry from "Tasks" to "Work Log" everywhere it
+appears (Admin, Marketing, Technical Manager, Journal Manager
+shells), updated its page heading, and added a note on that page
+pointing to the actual project task list (Projects > Tasks / Task
+Board). The Dashboard's "Tasks" KPI card is unchanged — it already
+opens a clear "Tasks due this week" list.
+(index.html — ADMIN_NAV_ITEMS / MKT_NAV_ITEMS / JOURNAL_NAV_ITEMS,
+ renderAdminTasks)
+
+BUG-11 — Registration amount could exceed Total with no warning
+------------------------------------------------------------
+"Remaining to Split" no longer silently clamps a negative value to
+Rs. 0 — it now shows the actual shortfall and a clear warning
+message when Registration is more than Total. Saving the client is
+now blocked (both client-side and server-side) if Registration
+exceeds Total, with a message telling the user to fix one of the
+two amounts first.
+(index.html — renderInstallmentBuilder / addClient /
+ server.py — add_client)
+
+BUG-12 — Horizontal scroll snapped back on the Clients table
+------------------------------------------------------------
+Resolved as a side effect of the BUG-03 fix: since the Action
+column is now pinned to the right edge (sticky) instead of
+requiring a scroll to reach, there's no longer anything to lose
+your scroll position on — the action is always in view regardless
+of scroll state.
+(index.html — table.adm-table CSS)
+
+------------------------------------------------------------
+Verification performed: server.py parses cleanly (ast.parse), all
+four <script> blocks in index.html pass a Node.js syntax check
+(node --check), and every edited section was re-read after editing
+to confirm the change landed correctly. No database schema changes.
+
+============================================================
+ FOLLOW-UP FIXES — round 2 (same day)
+============================================================
+
+1. PHONE FIELD STILL LET LETTERS THROUGH ON SOME FORMS
+   ------------------------------------------------------------
+   The Add Client phone field (and a few others — the quick "Edit
+   client" modal's Phone field, and the Update Team Member modal's
+   Phone field) weren't wired up to the same digit-blocking used
+   elsewhere in the app (blockNonDigitKey / digitsOnlyInput), so
+   letters could still be typed there and only got caught by the
+   validation message at Save time. All phone fields across the
+   app now consistently block non-digit keystrokes as you type
+   (and strip anything that slips through via paste/autofill), so
+   there's nothing to catch at Save time any more. Email fields on
+   these same forms were also missing both the HTML email type and
+   server-side format validation — added both.
+   (index.html — ec_phone/ec_email, up_phone/up_email, up_mem_phone
+    / server.py — update_client)
+
+   NOTE: if you're testing this against the live pm1-1.onrender.com
+   site rather than this zip, you'll still see the old behavior
+   until this fixed zip is actually deployed there — these are
+   local file fixes, not a live change.
+
+2. PAGE REFRESH BRIEFLY FLASHED THE LOGIN SCREEN BEFORE AUTO
+   SIGNING BACK IN
+   ------------------------------------------------------------
+   On refresh, the app asks the server "who am I?" (session check)
+   before deciding whether to show the login screen or the app. If
+   that first check was slow — a slightly slow connection, or (on
+   free-tier hosting) the server waking up from being idle — it
+   could fail within the old retry budget (3 tries, 500ms apart,
+   ~1.5s total) even though the login cookie was still completely
+   valid, showing the real login screen for a few seconds before
+   snapping back once a retry finally succeeded.
+   Fixed: more retries with a longer, growing pause between them
+   (up to ~9s of patience total), and the loading spinner now stays
+   up for the whole retry window (raised its own safety-net timeout
+   to match) instead of being removed early and exposing the login
+   screen mid-retry. A person who is genuinely logged out still
+   sees the login screen normally — this only affects the "actually
+   still logged in, just a slow check" case.
+   (index.html — restoreSession, #bootLoading safety-net timeout)
+
+3. CLICKING AWAY FROM "ADD CLIENT" LOST EVERYTHING TYPED SO FAR
+   ------------------------------------------------------------
+   Clicking the dark overlay outside a modal (or pressing Escape)
+   closed it immediately, silently discarding anything typed into
+   the form — easy to trigger by accident while filling in a new
+   client's details.
+   Fixed: if the open modal has any unsaved information in it,
+   clicking outside or pressing Escape now asks "You have
+   information entered in this form that hasn't been saved. Close
+   anyway?" before closing. An empty/untouched modal still closes
+   immediately with no prompt. This applies modal-wide (not just
+   Add Client), and the Add Client and client-profile "Update"
+   forms' own Cancel buttons now go through the same check. Forms
+   that close themselves automatically after a successful Save are
+   unaffected — you'll never see this prompt after saving
+   successfully.
+   (index.html — modalHasUnsavedInput, closeModalIfConfirmed,
+    overlay click handler, Escape handler)
+
+4. TELECALLER DASHBOARD SEARCH ONLY WORKED ON "ALREADY IN THE
+   PIPELINE", NOT "MY LEADS — READY TO WORK"
+   ------------------------------------------------------------
+   The universal search bar (name/phone/client ID/project ID +
+   stage filter) sat visually between the two panels on the
+   Telecaller dashboard, but it only ever filtered the second list
+   ("Already in the pipeline") — typing a search had no effect on
+   "My leads — ready to work" above it.
+   Fixed: the search bar now applies to both panels and was moved
+   above them so it's clearly a search for the whole page, not just
+   the section below it. Also improved the "nothing here" message
+   to say "No leads/clients match your search" when a search is
+   active, instead of always showing the generic empty-dashboard
+   message even when you've just typed a search with no matches.
+   (index.html — renderTcDashboard)
+
+5. PAYMENT PROOF (IMAGE ONLY) NOW REQUIRED TO MARK A CLIENT AS PAID
+   ------------------------------------------------------------
+   "Mark as paid" (both the main Registration/stage payment and the
+   custom installment plan) now requires attaching a payment proof
+   before it can be saved — a screenshot or photo of the payment
+   confirmation. Only image files are accepted (JPG, PNG, etc.);
+   PDFs and other document types are rejected, both in the browser
+   (accept="image/*" + a MIME-type check) and on the server (which
+   verifies the uploaded file is a real image before allowing the
+   payment to be marked paid — this can't be skipped by calling the
+   API directly).
+   Visibility: the proof is stored as a tagged document ("Payment
+   proof — <stage> — <date>"), so it automatically shows up in the
+   existing Documents & Links tab that Marketing, Admin, Super
+   Admin, Technical Manager and Journal Manager already have. Since
+   Accounts Team works from the client "drawer" panel rather than
+   that tabbed page, a "📷 View payment proof" link was also added
+   directly on the payment row there (and mirrored on the admin
+   Payment Information table for consistency) — clicking it opens
+   the image cleanly in a new tab.
+   Also fixed a related permission bug while touching this code:
+   mark_paid and mark_installment_paid were server-side restricted
+   to Accounts Team + Admin only, even though the "Mark as paid"
+   button has always been shown to Telecaller/Marketing TL/Marketing
+   Manager too — meaning marketing staff got a silent 403 error if
+   they ever actually tried to use it. Widened to match what the UI
+   already offers (the same fix was previously applied to the
+   neighboring add_client_installments/delete_client_installment
+   actions, but was missed here).
+   (index.html — openPayModal/markPaid, openInstallmentPayModal/
+   confirmInstallmentPaid, paymentProofLinkHtml, admViewDocument /
+   server.py — require_payment_proof_image, mark_paid,
+   mark_installment_paid, ACTION_ROLES)
+
+6. TELECALLER DASHBOARD: "MY LEADS" AND "ALREADY IN THE PIPELINE"
+   NOW CLICKABLE TABS INSTEAD OF ONE LONG STACKED PAGE
+   ------------------------------------------------------------
+   Both sections used to render one below the other on the same
+   page, so "Already in the pipeline" was easy to miss and there
+   was no way to look at just one list at a time.
+   Fixed: added a small tab bar at the top of the Telecaller
+   dashboard with "My leads — ready to work" and "Already in the
+   pipeline" as two clickable options (each showing its own count),
+   matching the pattern used elsewhere in the app (e.g. the Client
+   Profile tabs). Clicking one shows only that list; the universal
+   search bar sits above both and filters whichever tab is active.
+   (index.html — tcDashSubTab, renderTcDashboard)
+
+7. ADDED DARK MODE / LIGHT MODE
+   ------------------------------------------------------------
+   The app had leftover dark-mode plumbing (a `data-theme` attribute,
+   a `matiz_theme` storage key) that was actually being forced back
+   to light and wiped on every single page load — so dark mode
+   never really worked, and there was no dark color palette defined
+   for it to switch to anyway.
+   Added a full dark theme (background/card/text/border colors,
+   tuned shadows) alongside the existing light one, and a toggle:
+     - "Dark mode" / "Light mode" button in the sidebar (under your
+       name, above Log out) for every signed-in view.
+     - A small theme button in the top-right corner of the login
+       screen, so the choice is available before signing in too.
+   The choice is remembered (saved to the browser) and re-applied
+   instantly on the next visit before the page paints, so there's
+   no flash of the wrong theme. A number of structural surfaces
+   (panel/card/tab/menu backgrounds) that were hardcoded to white
+   were switched to follow the theme so they don't stay stuck
+   white in dark mode; a few decorative/branding elements (the
+   logo tile, the always-dark sidebar itself, chart colors) are
+   intentionally unaffected by the toggle since they're not meant
+   to change with theme.
+   (index.html — :root[data-theme="dark"], setTheme/toggleTheme/
+   currentTheme, #themeToggleBtn, the inline boot script in <head>)
+
+8. TEXT INVISIBLE IN DARK MODE (Technical Manager dashboard donut
+   chart labels, and other spots across the whole app)
+   ------------------------------------------------------------
+   Several pieces of text throughout the app had their color
+   hardcoded to a near-black value (#16241D, #111) instead of the
+   theme-aware var(--text)/var(--muted). In light mode this looked
+   fine (dark text on a white card), but once dark mode was added,
+   those same cards turned dark while the text color stayed
+   hardcoded dark — making the text blend into the background and
+   disappear. This is exactly what was happening on the Technical
+   Manager dashboard's donut chart: the colored dot and the number
+   were visible, but the label next to each dot (e.g. "To Do") was
+   invisible because of this.
+   Audited every hardcoded text color in the file (checked each one's
+   actual contrast ratio against both themes, not just guessed) and
+   fixed every one that was actually broken or borderline:
+     - color:#16241D (5 places, including the donut/pie chart
+       legend labels, KPI card notes, and the pending-approval
+       banner text) -> var(--text)
+     - color:#111 on two task-type badges/buttons (paired with a
+       hardcoded white background, so not invisible, but jarring
+       and inconsistent in dark mode) -> var(--card)/var(--text)/
+       var(--line-strong), so the whole badge follows the theme
+     - color:#3E4F49 (calendar filter checkbox labels — contrast
+       ratio was 1.88:1, essentially unreadable even before dark
+       mode was a factor) -> var(--muted)
+     - color:#66827A (8 places — secondary/meta text under client
+       names, message previews, etc. — contrast ratio 3.9:1 on
+       dark, under the readability threshold for small text)
+       -> var(--muted)
+   Left untouched on purpose: colors intentionally paired with
+   their own fixed background regardless of theme (white text on
+   the purple/gold buttons and the always-dark sidebar; dark text
+   on gold badges; status colors like red/green pills) — those
+   were never broken and shouldn't change with the toggle.
+   (index.html — admDonutHtml/admPieHtml legend, #pingAlert button,
+   admProfileDashboardTab pending-approval banner, calendar filter
+   checkboxes, and every other spot using these three colors)
+
+9. CALENDAR TOO LARGE ON THE TECHNICAL MANAGER DASHBOARD
+   ------------------------------------------------------------
+   The month calendar's day cells were sized purely by dividing up
+   whatever width the surrounding panel gave them (7 equal columns,
+   each cell a square). On the Technical Manager dashboard the
+   calendar sits in a wide column next to the case-status donut
+   chart, so each day cell stretched into an oversized square and
+   the whole calendar ended up much bigger than it needed to be.
+   Capped the calendar's overall width and each day cell's size, and
+   centered it within its panel, so it now stays a compact, sensible
+   size no matter how wide the column around it is. This applies
+   everywhere the same calendar component is used (Admin, Marketing
+   Manager, Technical Manager/TL, Journal Manager dashboards), so
+   it's fixed consistently rather than just patched for one screen.
+   (index.html — .adm-cal / .adm-cal .cell CSS)
+
+10. HOVERING A ROW MADE TEXT DISAPPEAR IN DARK MODE (every table,
+    every dashboard)
+    ------------------------------------------------------------
+    Table row hover, calendar day-cell hover, the calendar arrow
+    buttons, and the notification bell all had their "highlight on
+    hover" background hardcoded to a light color (#F5FBFC / #E6F5F7)
+    regardless of theme. In light mode this was a subtle tint; in
+    dark mode, the row's text is light-colored to be readable on the
+    dark card — so the moment you hovered a row, it flashed to a
+    near-white background with light text still on top of it,
+    making the whole row unreadable until the cursor moved away.
+    This is exactly what the screenshot showed: hovering "Krishna
+    mohan A V" turned that row white and its text vanished into it.
+    Fixed by switching every one of these hover backgrounds from a
+    fixed light color to a translucent brand-tinted overlay
+    (rgba, not an opaque color), which sits on top of whichever
+    theme's surface is underneath instead of replacing it — so
+    hovering a row now shows a subtle highlight in both light and
+    dark mode without ever fighting the text color. This was a
+    handful of shared CSS rules, so it's fixed at once across every
+    table and dashboard that uses them (Clients, Projects, Team,
+    Tasks, Journals, the calendar grid, etc.) rather than needing a
+    per-screen patch.
+    (index.html — tbody tr:hover, table.adm-table tbody tr:hover
+    [+ its sticky last-column hover], .adm-cal .cell:hover,
+    .adm-cal-arrow:hover, .bell-btn:hover)
+
+11. TECHNICAL MANAGER TASK ASSIGNMENT — three related problems
+    ------------------------------------------------------------
+    a) Assigning via "Assign Work" could silently fail to reach the
+       employee. Assign Work correctly moves the client forward in
+       the pipeline immediately, but the actual task record (the
+       thing that makes it show up in that employee's "My assigned
+       tasks") was created as a separate, "best-effort" step
+       afterwards — and if that step ever failed, the error was
+       swallowed completely silently. The pipeline would say
+       "assigned" but the employee might never see it. Fixed: any
+       failure here now tells the manager directly, so they know to
+       add the task manually instead of assuming it went through.
+       (index.html — tmCreateCompanionTask)
+
+    b) A client could get stuck endlessly reappearing in "New Work
+       To Assign" for the same stage. This happened because there
+       are two different ways to "assign" Proposal/Implementation/
+       Paper Writing work: the dedicated Assign Work queue (which
+       correctly moves the client's pipeline stage forward) and the
+       general-purpose "+ Add Task" screen (which only creates a
+       standalone task and was never wired to move the pipeline
+       stage at all). If a manager used Add Task instead of Assign
+       Work for one of these three task types, the task got created
+       and assigned to an employee just fine, but the client's stage
+       never advanced — so it kept showing up needing "proposal"
+       (or implementation/paper writing) assignment again and again,
+       even though someone had technically already been assigned.
+       Fixed: Add Task now detects this exact situation live as
+       you fill in the client and task type, shows a clear warning
+       banner explaining that creating a task here won't move the
+       client forward and pointing to Assign Work instead, and asks
+       for confirmation before letting you proceed anyway (so it's
+       a warning, not a hard block — there can be legitimate reasons
+       to log a side task). This does not retroactively fix clients
+       already stuck in this state from before — those need one
+       real assignment through Assign Work to move forward.
+       (index.html — tmTaskTypeStillNeedsQueueAssignment, tkRefreshWarning)
+
+    c) No warning when assigning the same stage of work twice. Add
+       Task had no idea whether a client already had a Proposal /
+       Implementation / Paper Writing task in progress or completed,
+       so it was easy to accidentally create a second, competing
+       task for work that was already assigned to (or finished by)
+       someone else. Fixed: Add Task now checks for an existing task
+       of the same type for that client and, if found, shows who it's
+       assigned to and its current status (open / in progress /
+       submitted / needs correction / completed) — both as a live
+       banner while filling the form and as a final confirmation
+       before saving — so the manager makes an informed choice
+       instead of finding out later that two people were assigned
+       the same work.
+       (index.html — existingTaskFor, TASK_STATUS_PLAIN_LABEL,
+       tkRefreshWarning, admSaveTask)
+
+12. UNIVERSAL SEARCH: COULD ONLY TYPE ONE LETTER AT A TIME
+    (every dashboard, every tab that has a search box — including
+    Work Log and Journal, which is where this was reported)
+    ------------------------------------------------------------
+    Every search box in the app re-rendered the entire page section
+    on each keystroke (to filter the list live) — but that re-render
+    replaces the whole content area with fresh HTML, which recreates
+    the search `<input>` itself as a brand-new DOM element. Browsers
+    don't keep focus on an element that's been destroyed and
+    replaced, so the box silently lost focus after every single
+    character — meaning you had to click back into it before typing
+    each next letter. This wasn't specific to Work Log/Journal; it
+    was every one of the 18 search boxes across the app, all built
+    from the same pattern.
+    Fixed centrally: search input now goes through one shared
+    function that, right after the list re-renders, finds the (now
+    recreated) search box again and restores focus with the cursor
+    at the end — so typing flows normally with no re-clicking.
+    (index.html — handleSearchInput, id="universalSearchInput" on
+    every search box)
+
+13. ASSIGN WORK: IMPLEMENTATION / PAPER WRITING EMPLOYEE PICKER
+    DIDN'T MATCH THE CLEAN LOOK OF THE PROPOSAL PICKER
+    ------------------------------------------------------------
+    On the Technical Manager's "Assign Work" queue, picking a
+    Proposal writer is a single tidy dropdown. Picking Implementation
+    programmers or Paper Writers, though, showed every team member
+    as its own large checkbox box laid out in a sprawling wrapping
+    row (see the screenshot) — inconsistent with the Proposal picker
+    right above it, and it gets harder to scan the more team members
+    there are.
+    Fixed: Implementation and Paper Writing now use the same compact
+    "Select employee(s)…" dropdown pattern already used elsewhere in
+    the app (e.g. Add Task's employee picker) — a single clean
+    trigger that opens a small checklist, closing the gap with how
+    Proposal already looked. Still fully multi-select (you can still
+    pick more than one programmer/writer) — only the layout changed,
+    not the functionality.
+    (index.html — tmAssignWorkHtml, msToggleDropdown, msUpdateDisplay)
+
+------------------------------------------------------------
+Verification performed: server.py parses cleanly (ast.parse), all
+script blocks in index.html pass a Node.js syntax check.
+============================================================

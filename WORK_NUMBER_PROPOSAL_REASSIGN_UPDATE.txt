@@ -1,0 +1,52 @@
+============================================================
+ WORK NUMBER + PROPOSAL "ONE APPROVAL" + REASSIGN WORK
+============================================================
+
+1. WHICH WORK IS THIS FOR THE CLIENT?
+   Every Assign Work card, "Already assigned" row, Work Updates
+   row and the employee's "My assigned tasks" now shows e.g.
+       Work 1 of 3  (Proposal)
+       Work 2 of 3  (Code Implementation)
+       Work 3 of 3  (Paper Writing)
+   Writing-only services show "Work 1 of 1". A step bar shows
+   what's done (tick), the current work, and what comes next.
+
+2. PROPOSAL = ONE APPROVAL, THEN COMPLETED
+   - Once the writer sends the proposal to the Technical TL /
+     Manager, the "Send to someone else" button is gone. They see
+     "Sent to the Technical TL on ... - waiting on approval."
+   - The server also blocks sending it again while it's waiting
+     (only allowed again if it's sent back for correction).
+   - Sending it now also records the proposal as SUBMITTED in the
+     real pipeline, so it appears in Work Validation too.
+   - Approving it from EITHER Work Updates OR Work Validation marks
+     the writer's task COMPLETED ("Proposal approved by ... -
+     completed. Nothing more to send.") and the client moves on to
+     Delivery.
+   - Fixed: approving from Work Validation used to leave the
+     writer's task stuck on "awaiting approval" forever.
+
+3. REASSIGN WORK (Technical Manager / TL)
+   A "Reassign" button now appears:
+     - Tasks > Work Updates     (next to Approve / Needs correction)
+     - Tasks > Work Validation  (proposal rows, next to Approve)
+     - Tasks > Assign Work > "Already assigned - in progress"
+   Pick the new person (one writer for a proposal; one or more
+   programmers / writers otherwise), start date, deadline and an
+   optional reason. What happens:
+     - The client's real pipeline assignee + dates are updated.
+     - The task moves to the new person as a fresh (Open) task;
+       the old person no longer sees it.
+     - Any send still waiting on approval is cancelled
+       ("Work reassigned to ...") on the Task Board.
+     - A submitted proposal / paper under review goes back to
+       "in progress" so the new person can do it.
+     - It's recorded in the project history with the reason.
+
+FILES CHANGED
+------------------------------------------------------------
+server.py   - new "reassign_work" action; proposal send/approve
+              fixes; approvals close pending sends.
+index.html  - work number + step bar, Reassign window and buttons,
+              proposal lock on the employee side.
+No database changes needed.
