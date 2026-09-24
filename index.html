@@ -4719,6 +4719,7 @@ function myAssignedTasksHtml(name){
       </div>` : ""}
       ${(t.status==='SUBMITTED' && canSendWork()) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send to someone else&hellip;</button></div>` : ""}
       ${(t.status!=='SUBMITTED' && canSendWork() && sendsSummaryLine(t.id)) ? `<div class="pc-meta" style="margin-top:6px">${sendsSummaryLine(t.id)}</div>` : ""}
+      ${t.status!=='COMPLETED' ? taskCoordBoxHtml(t) : ""}
     </div>`;
   });
   return html;
@@ -11715,7 +11716,65 @@ function coordinatorOptions(){
   return employees.filter(e=>e.isCoordinator && (e.role==="PROGRAMMER" || e.role==="PAPER_WRITER") && e.id!==empId)
     .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
 }
-function openSendWorkModal(taskId, forwarding){
+// Proposals skip the coordinator and validation: they go straight to the team's TL / Manager.
+function taskSendTargets(t){
+  return (t && t.task_type==="PROPOSAL") ? SEND_TARGETS.filter(x=>x.key==="TECH_TL" || x.key==="TECH_MANAGER") : SEND_TARGETS;
+}
+// Where this task stands with its coordinator: approved (locked), waiting, or last sent back.
+function coordStateForTask(taskId){
+  const list = sendsForTask(taskId).filter(x=>x.kind==="HANDOFF" && x.target==="COORDINATOR");
+  return {
+    list,
+    approved: list.find(x=>x.status==="APPROVED" || x.status==="FORWARDED") || null,
+    pending:  list.find(x=>x.status==="SENT") || null,
+    returned: list.find(x=>x.status==="RETURNED") || null,   // newest first
+  };
+}
+async function handoffDownload(handoffId, which){
+  try{
+    const out = await api("task_handoff_file", {handoffId, which});
+    const byteChars = atob(out.fileData);
+    const bytes = new Uint8Array(byteChars.length);
+    for(let i=0;i<byteChars.length;i++) bytes[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([bytes], {type: out.fileType || "application/octet-stream"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = out.fileName || "document"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  }catch(e){ toast(e.message || "Could not download that file"); }
+}
+function handoffFileBtn(x, which, label){
+  const has = which==="return" ? x.hasReturnFile : x.hasFile;
+  if(!has) return "";
+  const name = which==="return" ? x.returnFileName : x.fileName;
+  const icon = /\.pdf$/i.test(name) ? "&#128196;" : "&#128462;";
+  return `<button type="button" class="val-file" title="Download ${esc(name)}" onclick="event.stopPropagation();handoffDownload(${x.handoffId},'${which}')">${icon} <span>${label?esc(label)+": ":""}${esc(name)}</span></button>`;
+}
+// The "Coordinator" box on the employee's own task card.
+function taskCoordBoxHtml(t){
+  if(!canSendWork()) return "";
+  if(t.task_type==="PROPOSAL") return `<div class="val-hint" style="margin-top:6px">Proposal &mdash; send it straight to your team's Technical TL or Technical Manager.</div>`;
+  const st = coordStateForTask(t.id);
+  if(!st.list.length) return "";
+  let inner;
+  if(st.approved){
+    const a = st.approved;
+    inner = `<span class="badge b-paid">&#10003; Completed</span> Approved by coordinator <b>${esc(a.resolvedBy||a.targetName)}</b>${a.resolvedAt?` &bull; ${fmtDateTime(a.resolvedAt)}`:""}
+      ${a.resolvedNote?`<div class="val-hint" style="white-space:pre-wrap">${esc(a.resolvedNote)}</div>`:""}
+      <div class="val-hint">Coordinator review is done &mdash; it can't be sent to a coordinator again. Send it on to Validation / Technical TL / Technical Manager.</div>`;
+  } else if(st.pending){
+    const p = st.pending;
+    inner = `<span class="badge b-purp">Pending</span> Waiting on coordinator <b>${esc(p.targetName)}</b> &bull; sent ${fmtDateTime(p.at)}`;
+  } else {
+    const r = st.returned;
+    inner = `<span class="badge b-gold">Sent back for correction</span> by <b>${esc(r.resolvedBy)}</b>${r.resolvedAt?` &bull; ${fmtDateTime(r.resolvedAt)}`:""}
+      ${r.resolvedNote?`<div class="val-hint" style="white-space:pre-wrap">&ldquo;${esc(r.resolvedNote)}&rdquo;</div>`:""}
+      ${r.hasReturnFile?`<div style="margin-top:6px">${handoffFileBtn(r,"return","Correction document")}</div>`:""}
+      <div class="val-hint">Fix it and send it to the coordinator again.</div>`;
+  }
+  return `<div class="pc-meta" onclick="event.stopPropagation()" style="margin-top:8px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:8px">
+    <b>&#128101; Coordinator review</b> <small style="color:var(--muted)">(sent ${st.list.length}&times;)</small><div style="margin-top:4px">${inner}</div></div>`;
+}
+function openSendWorkModal(taskId){
   const t = tasks.find(x=>x.id===taskId) || {};
   const ref = workSends.find(x=>x.taskId===taskId) || {};
   const title = t.title || ref.taskTitle || "this task";
@@ -11723,17 +11782,30 @@ function openSendWorkModal(taskId, forwarding){
   const coords = coordinatorOptions();
   const me = employees.find(e=>e.id===empId) || {};
   const myCoord = coords.find(e=>e.id===me.coordinatorId);
-  const firstTarget = forwarding ? "VALIDATION" : (coords.length ? "COORDINATOR" : "VALIDATION");
+  const st = coordStateForTask(taskId);
+  const targets = taskSendTargets(t);
+  const offReason = k => {
+    if(k!=="COORDINATOR") return "";
+    if(st.approved) return `&#10003; Already approved by ${esc(st.approved.resolvedBy||st.approved.targetName)}`;
+    if(st.pending) return `Waiting on ${esc(st.pending.targetName)}`;
+    if(!coords.length) return "No coordinators set up yet";
+    return "";
+  };
+  const firstTarget = (targets.find(x=>!offReason(x.key))||{}).key;
   const history = sendsForTask(taskId);
-  openModal(`<h3>${forwarding?"Forward this work":"Send completed work"}</h3>
+  openModal(`<h3>Send completed work</h3>
     <p class="msub">${esc(title)}${c?` &bull; ${esc(c.name)}`:""}${history.length?` &bull; already sent ${history.length}&times;`:""}</p>
+    ${t.task_type==="PROPOSAL"?`<div class="val-hint" style="margin-bottom:10px">Proposals go straight to your team's Technical TL or Technical Manager.</div>`:""}
     <div class="field"><label>Send it to</label>
-      <div class="val-folder-pick two" id="swTargets">${SEND_TARGETS.map(x=>{
-        const off = x.key==="COORDINATOR" && !coords.length;
+      <div class="val-folder-pick two" id="swTargets">${targets.map(x=>{
+        const why = offReason(x.key), off = !!why;
         return `<label style="${off?"opacity:.5;cursor:not-allowed":""}"><input type="radio" name="swTarget" value="${x.key}" ${x.key===firstTarget?"checked":""} ${off?"disabled":""} onchange="sendWorkToggle()">
-          <span><b>${x.icon} ${x.label}</b><br><small style="color:var(--muted)">${off?"No coordinators set up yet":x.desc}</small></span></label>`;}).join("")}</div></div>
-    <div id="swCoordWrap" class="field"><label for="swCoord">Which coordinator?</label>
-      <select id="swCoord">${coords.map(e=>`<option value="${e.id}" ${myCoord&&myCoord.id===e.id?"selected":""}>${esc(e.name)}${myCoord&&myCoord.id===e.id?" (your coordinator)":""} &mdash; ${esc(EMP_ROLE_LABEL[e.role]||e.role)}</option>`).join("")}</select></div>
+          <span><b>${x.icon} ${x.label}</b><br><small style="color:var(--muted)">${off?why:x.desc}</small></span></label>`;}).join("")}</div></div>
+    <div id="swCoordWrap">
+      <div class="field"><label for="swCoord">Which coordinator?</label>
+        <select id="swCoord">${coords.map(e=>`<option value="${e.id}" ${myCoord&&myCoord.id===e.id?"selected":""}>${esc(e.name)}${myCoord&&myCoord.id===e.id?" (your coordinator)":""} &mdash; ${esc(EMP_ROLE_LABEL[e.role]||e.role)}</option>`).join("")}</select></div>
+      ${valFileField("swCoordFile","Attach the paper (optional)","The coordinator can open it to review")}
+    </div>
     <div id="swValWrap">
       <div class="field"><label>What should be checked?</label><div class="val-folder-pick">${valAllFolderKeys().map((k,i)=>`
         <label><input type="radio" name="swFolder" value="${esc(k)}" ${i===0?"checked":""}>
@@ -11749,13 +11821,19 @@ function sendWorkToggle(){
   const tgt = (document.querySelector('input[name="swTarget"]:checked')||{}).value;
   $("swCoordWrap").style.display = tgt==="COORDINATOR" ? "block" : "none";
   $("swValWrap").style.display = tgt==="VALIDATION" ? "block" : "none";
-  $("swBtn").textContent = "Send to " + (SEND_TARGET_LABEL[tgt] || "…");
+  $("swBtn").textContent = tgt ? "Send to " + (SEND_TARGET_LABEL[tgt] || "…") : "Send";
+  $("swBtn").disabled = !tgt;
 }
 async function submitSendWork(taskId){
   const target = (document.querySelector('input[name="swTarget"]:checked')||{}).value;
   if(!target){ toast("Choose where to send it"); return; }
   const payload = {taskId, target, note:$("swNote").value.trim()};
-  if(target==="COORDINATOR") payload.coordinatorId = parseInt($("swCoord").value);
+  if(target==="COORDINATOR"){
+    payload.coordinatorId = parseInt($("swCoord").value);
+    let doc; try{ doc = await valReadDoc("swCoordFile", false, "paper"); }catch(e){ toast(e.message); return; }
+    if(doc===null) return;
+    Object.assign(payload, doc);
+  }
   if(target==="VALIDATION"){
     payload.folder = (document.querySelector('input[name="swFolder"]:checked')||{}).value;
     let doc; try{ doc = await valReadDoc("swFile", true, "paper"); }catch(e){ toast(e.message); return; }
@@ -11770,36 +11848,67 @@ async function submitSendWork(taskId){
   toast("Sent to " + (out.sentTo || SEND_TARGET_LABEL[target]));
   await refresh();
 }
-// Coordinator side: work other people sent to me, waiting on my review.
+// Coordinator side: a "Review" box with totals, then the work waiting on my decision.
 function coordinatorInboxHtml(){
-  const items = workSends.filter(x=>x.kind==="HANDOFF" && x.target==="COORDINATOR" && x.targetEmpId===empId && x.status==="SENT");
-  if(!items.length) return "";
-  let html = sectionHead("Work sent to me to review", items.length);
-  items.forEach(x=>{
+  const mine = workSends.filter(x=>x.kind==="HANDOFF" && x.target==="COORDINATOR" && x.targetEmpId===empId);
+  const me = employees.find(e=>e.id===empId) || {};
+  if(!mine.length && !me.isCoordinator) return "";
+  const pending = mine.filter(x=>x.status==="SENT");
+  const done = mine.filter(x=>x.status==="APPROVED" || x.status==="FORWARDED");
+  const back = mine.filter(x=>x.status==="RETURNED");
+  const box = (n, label, sub, color) => `<div class="val-folder-card" style="cursor:default"><span class="vf-count"${color?` style="color:${color}"`:""}>${n}</span><b>${label}</b><small>${sub}</small></div>`;
+  let html = sectionHead("Review", mine.length);
+  html += `<div class="val-intro">
+    ${box(mine.length, "Total received", "Work sent to you to review")}
+    ${box(done.length, "Completed", "You approved it", "var(--good,#7CD992)")}
+    ${box(pending.length, "Pending", "Waiting on your decision", "var(--gold)")}
+    ${box(back.length, "Sent back", "Returned for correction")}
+  </div>`;
+  html += sectionHead("Work sent to me to review", pending.length);
+  if(!pending.length) html += emptyBox("Nothing is waiting on your review right now.");
+  pending.forEach(x=>{
     const c = x.clientId ? findClient(x.clientId) : null;
-    const earlier = sendsForTask(x.taskId).length - 1;
+    const earlier = mine.filter(s=>s.taskId===x.taskId).length - 1;
     html += `<div class="pay-row">
-      <div class="pay-top"><b>${esc(x.taskTitle)}</b><span class="badge b-gold">Waiting on you</span></div>
-      <div class="pay-meta">From <b>${esc(x.sentBy)}</b> &bull; ${fmtDateTime(x.at)}${c?` &bull; ${esc(c.name)}`:""}${earlier>0?` &bull; sent ${earlier}&times; before`:""}</div>
+      <div class="pay-top"><b>${esc(x.taskTitle)}</b>${x.taskType?`<span class="badge b-dim">${esc(TASK_TYPE_LABEL[x.taskType]||x.taskType)}</span>`:""}<span class="badge b-gold">Waiting on you</span></div>
+      <div class="pay-meta">From <b>${esc(x.sentBy)}</b> &bull; ${fmtDateTime(x.at)}${c?` &bull; ${esc(c.name)}`:""}${earlier>0?` &bull; sent to you ${earlier}&times; before`:""}</div>
       ${x.note?`<div class="pc-meta" style="margin-top:6px;white-space:pre-wrap">&ldquo;${esc(x.note)}&rdquo;</div>`:""}
+      ${x.hasFile?`<div style="margin-top:6px">${handoffFileBtn(x,"send","Paper")}</div>`:""}
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn gold small" onclick="openSendWorkModal(${x.taskId}, true)">&#8599; Reviewed &mdash; forward to&hellip;</button>
+        <button class="btn gold small" onclick="openCoordApprove(${x.handoffId})">&#10003; Approve</button>
         <button class="btn ghost small" onclick="openCoordReturn(${x.handoffId})">&#8634; Send back for correction</button>
       </div></div>`;
   });
   return html;
 }
+function openCoordApprove(handoffId){
+  const x = workSends.find(s=>s.handoffId===handoffId); if(!x) return;
+  openModal(`<h3>Approve this work</h3><p class="msub">${esc(x.taskTitle)} &bull; from ${esc(x.sentBy)}</p>
+    <div class="val-hint" style="margin-bottom:10px">Once approved, your review is complete and ${esc(x.sentBy)} can't send this work to a coordinator again.</div>
+    <div class="field"><label for="caNote">Note (optional)</label><textarea id="caNote" rows="3" maxlength="4000"></textarea></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn gold" id="caBtn" onclick="submitCoordApprove(${handoffId})">Approve</button></div>`);
+}
+async function submitCoordApprove(handoffId){
+  valBusy("caBtn", true, "Approving…");
+  try{ await api("task_handoff_approve", {handoffId, note:$("caNote").value.trim()}); }
+  catch(e){ toast(e.message); valBusy("caBtn", false, "Approve"); return; }
+  closeModal(); toast("Approved"); await refresh();
+}
 function openCoordReturn(handoffId){
   const x = workSends.find(s=>s.handoffId===handoffId); if(!x) return;
   openModal(`<h3>Send back for correction</h3><p class="msub">${esc(x.taskTitle)} &bull; from ${esc(x.sentBy)}</p>
     <div class="field"><label for="crNote">What needs correcting?</label><textarea id="crNote" rows="4" maxlength="4000"></textarea></div>
+    ${valFileField("crFile","Attach a document (optional)","e.g. the paper with your corrections marked")}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn gold" id="crBtn" onclick="submitCoordReturn(${handoffId})">Send back</button></div>`);
 }
 async function submitCoordReturn(handoffId){
   const note = $("crNote").value.trim();
   if(!note){ toast("Explain what needs correcting"); return; }
+  let doc; try{ doc = await valReadDoc("crFile", false, "document"); }catch(e){ toast(e.message); return; }
+  if(doc===null) return;
   valBusy("crBtn", true, "Sending…");
-  try{ await api("task_handoff_return", {handoffId, note}); }catch(e){ toast(e.message); valBusy("crBtn", false, "Send back"); return; }
+  try{ await api("task_handoff_return", Object.assign({handoffId, note}, doc)); }
+  catch(e){ toast(e.message); valBusy("crBtn", false, "Send back"); return; }
   closeModal(); toast("Sent back for correction"); await refresh();
 }
 
@@ -11816,8 +11925,9 @@ function sendResultHtml(x){
     return `<span class="badge b-purp">Waiting</span> <small style="color:var(--muted)" title="${esc(v.join(", "))}">${v.length?"Can be checked by: "+esc(vt):"No one has access to this folder yet"}</small>`;
   }
   if(x.target==="COORDINATOR"){
+    if(x.status==="APPROVED") return `<span class="badge b-paid">&#10003; Approved</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
     if(x.status==="FORWARDED") return `<span class="badge b-paid">Reviewed</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
-    if(x.status==="RETURNED") return `<span class="badge b-gold">Sent back</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}`;
+    if(x.status==="RETURNED") return `<span class="badge b-gold">Sent back</span> by <b>${esc(x.resolvedBy)}</b>${when}${note}${x.hasReturnFile?`<div style="margin-top:4px">${handoffFileBtn(x,"return","Correction document")}</div>`:""}`;
     return `<span class="badge b-purp">Waiting on ${esc(x.targetName)}</span>`;
   }
   if(x.taskStatus==="COMPLETED") return `<span class="badge b-paid">&#10003; Task approved</span>`;
@@ -11833,7 +11943,8 @@ function projectSendsPanelHtml(c){
       <span class="vf-count">${n}</span><span class="vf-ic">${icon}</span><b>${label}</b><small>${sub}</small></button>`;
   const tiles = tile("VALIDATION","&#128737;&#65039;","Sent for validation", val.length,
         valAllFolderKeys().map(k=>`${esc(valFolderLabel(k))} ${byF(k)}`).join(" &middot; ") || "AI Check &middot; Plagiarism &middot; Test Paper")
-    + tile("COORDINATOR","&#128101;","Sent to coordinator", byT("COORDINATOR"), "Reviewed before going further")
+    + tile("COORDINATOR","&#128101;","Sent to coordinator", byT("COORDINATOR"),
+        `Approved ${all.filter(x=>x.target==="COORDINATOR"&&(x.status==="APPROVED"||x.status==="FORWARDED")).length} &middot; Pending ${all.filter(x=>x.target==="COORDINATOR"&&x.status==="SENT").length}`)
     + tile("TECH_TL","&#129513;","Sent to Technical TL", byT("TECH_TL"), "Straight to the TL")
     + tile("TECH_MANAGER","&#128736;&#65039;","Sent to Technical Manager", byT("TECH_MANAGER"), "Straight to the Manager");
   const shown = tbSendFilter==="ALL" ? all : all.filter(x=>x.target===tbSendFilter);

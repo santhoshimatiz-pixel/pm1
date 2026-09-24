@@ -827,6 +827,8 @@ ACTION_ROLES = {
     # "Send completed work to ..." (Coordinator / Validation / Technical TL / Manager)
     "task_send_work": ("employee",) + _R_TECH,
     "task_handoff_return": ("employee",),
+    "task_handoff_approve": ("employee",),
+    "task_handoff_file": ("employee",) + _R_TECH,
     "validation_resubmit": ("employee",) + _R_TECH,
     "validation_decide": ("validator",),
     "validation_set_access": _R_TECH_MGR,
@@ -1895,6 +1897,10 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_task_handoffs_target ON task_handoffs (target_emp_id, status);
     """)
     con.execute("ALTER TABLE validation_papers ADD COLUMN IF NOT EXISTS task_id INTEGER")
+    # Coordinator review: the employee may attach the paper when sending to a coordinator,
+    # and the coordinator may attach a marked-up document when sending it back.
+    for col in ("file_name", "file_type", "file_data", "return_file_name", "return_file_type", "return_file_data"):
+        con.execute("ALTER TABLE task_handoffs ADD COLUMN IF NOT EXISTS %s TEXT DEFAULT ''" % col)
     con.commit()
 
     if con.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] == 0:
@@ -2675,13 +2681,23 @@ def work_sends(con):
     """
     out = []
     for r in con.execute(
-            """SELECT h.*, t.title AS task_title, t.status AS task_status, t.assigned_to AS task_assigned
+            """SELECT h.id, h.task_id, h.client_id, h.target, h.target_emp_id, h.target_name, h.note,
+                      h.status, h.sent_by_name, h.sent_by_emp_id, h.resolved_by, h.resolved_note,
+                      h.resolved_at, h.created_at, h.file_name, h.return_file_name,
+                      (COALESCE(h.file_data, '') <> '') AS has_file,
+                      (COALESCE(h.return_file_data, '') <> '') AS has_return_file,
+                      t.title AS task_title, t.status AS task_status, t.assigned_to AS task_assigned,
+                      t.task_type AS task_type
                FROM task_handoffs h JOIN tasks t ON t.id = h.task_id
                ORDER BY h.created_at DESC, h.id DESC"""):
         out.append({
             "kind": "HANDOFF", "id": "h%d" % r["id"], "handoffId": r["id"],
             "clientId": r["client_id"] or "", "taskId": r["task_id"], "taskTitle": r["task_title"],
             "taskStatus": r["task_status"], "taskAssignedTo": r["task_assigned"] or "",
+            "taskType": r["task_type"] or "",
+            # File names only — the bytes are fetched on demand (task_handoff_file).
+            "hasFile": bool(r["has_file"]), "fileName": r["file_name"] or "",
+            "hasReturnFile": bool(r["has_return_file"]), "returnFileName": r["return_file_name"] or "",
             "target": r["target"], "targetLabel": HANDOFF_TARGETS.get(r["target"], r["target"]),
             "purpose": "", "purposeLabel": "",
             "targetEmpId": r["target_emp_id"], "targetName": r["target_name"] or "",
@@ -6400,13 +6416,19 @@ def handle_action(action, d, ip=""):
 
         # ----- "Send completed work to ..." ---------------------------------------------
         # A Programmer / Paper Writer finishing an assigned task picks where it goes:
-        #   COORDINATOR  (a named coordinator reviews it first)
+        #   COORDINATOR  (a named coordinator reviews it; the paper can be attached)
         #   VALIDATION   (AI Check / Plagiarism Check / Test Paper — creates a validation
         #                 paper linked to the task + client; needs the Word/PDF file)
         #   TECH_TL / TECH_MANAGER
-        # The same task can be sent again (e.g. coordinator first, then validation); every
-        # send is kept so the project Task Board can show counts, dates and reviewers.
-        # A coordinator who received the work can forward it on the same way.
+        # Rules:
+        #   * PROPOSAL tasks go straight to the team's Technical TL / Technical Manager —
+        #     no coordinator, no validation.
+        #   * Coordinator review (Paper Writing and other work): the coordinator either
+        #     APPROVES it (their part is then complete) or sends it BACK for correction.
+        #     The employee can send to a coordinator again only while it isn't approved —
+        #     never while a send is still waiting, and never after an approval.
+        #   * Coordinators don't forward work any more; after approval the employee sends
+        #     it on (Validation / Technical TL / Technical Manager) themselves.
         if action == "task_send_work":
             role_ = (d.get("role") or "").strip()
             try:
@@ -6421,25 +6443,20 @@ def handle_action(action, d, ip=""):
             me_key = d.get("_principal_key") or ""
             me_name = d.get("_principal_label") or role_
             me_emp = None
-            forwarding = None
-            is_assignee = False
             if role_ == "employee":
                 if (d.get("empRole") or "") not in VALIDATION_ELIGIBLE_ROLES:
                     raise ApiError("Only Programmers and Paper Writers can send work this way.", 403)
                 me_emp = d.get("empId")
                 me_name = (d.get("empName") or "").strip() or me_name
                 assignees = [x.strip() for x in (task["assigned_to"] or "").split(",") if x.strip()]
-                is_assignee = me_name in assignees
-                forwarding = con.execute(
-                    """SELECT * FROM task_handoffs WHERE task_id=? AND target='COORDINATOR'
-                       AND target_emp_id=? AND status='SENT' ORDER BY id DESC LIMIT 1""",
-                    (task["id"], me_emp)).fetchone()
-                if not is_assignee and not forwarding:
-                    raise ApiError("Only the person assigned to this task (or the coordinator it "
-                                   "was sent to) can send it on.", 403)
+                if me_name not in assignees:
+                    raise ApiError("Only the person assigned to this task can send it.", 403)
             target = (d.get("target") or "").strip().upper()
             if target not in HANDOFF_TARGETS:
                 raise ApiError("Choose where to send it: Coordinator, Validation, Technical TL or Technical Manager.")
+            task_type = (task["task_type"] or "").upper()
+            if task_type == "PROPOSAL" and target not in ("TECH_TL", "TECH_MANAGER"):
+                raise ApiError("A proposal goes straight to your team's Technical TL or Technical Manager.")
             note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if target == "VALIDATION":
@@ -6463,7 +6480,19 @@ def handle_action(action, d, ip=""):
                 sent_to = "Validation — %s" % VALIDATION_FOLDERS[folder]
             else:
                 target_emp_id, target_name = None, HANDOFF_TARGETS[target]
+                fname, ftype, fdata = "", "", ""
                 if target == "COORDINATOR":
+                    prev = con.execute(
+                        """SELECT status, target_name FROM task_handoffs
+                           WHERE task_id=? AND target='COORDINATOR' AND status IN ('APPROVED','SENT')
+                           ORDER BY (status='APPROVED') DESC, id DESC LIMIT 1""", (task["id"],)).fetchone()
+                    if prev and prev["status"] == "APPROVED":
+                        raise ApiError("Coordinator %s has already approved this work, so it can't go to a "
+                                       "coordinator again. Send it on to Validation, the Technical TL or the "
+                                       "Technical Manager." % prev["target_name"])
+                    if prev:
+                        raise ApiError("This work is already waiting on coordinator %s. You can send it "
+                                       "again only if they send it back for correction." % prev["target_name"])
                     try:
                         coord_id = int(d.get("coordinatorId"))
                     except (TypeError, ValueError):
@@ -6477,17 +6506,17 @@ def handle_action(action, d, ip=""):
                         raise ApiError("You can't send work to yourself — pick another coordinator, "
                                        "or send it to Validation / Technical TL / Technical Manager.")
                     target_emp_id, target_name = co["id"], co["name"]
+                    # The paper is optional here — attach it if the coordinator should read it.
+                    fname, ftype, fdata = read_validation_document(d, required=False, label="paper")
+                    fname, ftype, fdata = fname or "", ftype or "", fdata or ""
                 con.execute("""INSERT INTO task_handoffs
                                  (task_id, client_id, target, target_emp_id, target_name, note, status,
-                                  sent_by_key, sent_by_name, sent_by_emp_id, created_at)
-                               VALUES (?,?,?,?,?,?, 'SENT', ?,?,?,?)""",
+                                  sent_by_key, sent_by_name, sent_by_emp_id, created_at,
+                                  file_name, file_type, file_data)
+                               VALUES (?,?,?,?,?,?, 'SENT', ?,?,?,?, ?,?,?)""",
                             (task["id"], task["client_id"], target, target_emp_id, target_name, note,
-                             me_key, me_name, me_emp, now))
+                             me_key, me_name, me_emp, now, fname, ftype, fdata))
                 sent_to = target_name if target != "COORDINATOR" else "Coordinator %s" % target_name
-            if forwarding:
-                con.execute("""UPDATE task_handoffs SET status='FORWARDED', resolved_by=?, resolved_note=?,
-                                      resolved_at=? WHERE id=?""",
-                            (me_name, "Forwarded to " + sent_to, now, forwarding["id"]))
             # Finished work now waits on review (same status "Mark as done" always used).
             if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
                 con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
@@ -6497,8 +6526,10 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True, "sentTo": sent_to}
 
-        if action == "task_handoff_return":
-            # The coordinator the work was sent to hands it back for correction.
+        if action in ("task_handoff_return", "task_handoff_approve"):
+            # The coordinator the work was sent to either approves it (their review is then
+            # complete — it can't come back to a coordinator) or sends it back for correction,
+            # optionally with a marked-up Word/PDF document.
             try:
                 handoff_id = int(d.get("handoffId"))
             except (TypeError, ValueError):
@@ -6509,18 +6540,50 @@ def handle_action(action, d, ip=""):
             if h["status"] != "SENT":
                 raise ApiError("You've already dealt with this — refresh to see its latest status.")
             note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            if not note:
-                raise ApiError("Explain what needs correcting.")
             me_name = (d.get("empName") or "").strip()
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?, resolved_at=?
-                           WHERE id=?""", (me_name, note, now, h["id"]))
+            if action == "task_handoff_approve":
+                con.execute("""UPDATE task_handoffs SET status='APPROVED', resolved_by=?, resolved_note=?,
+                                      resolved_at=? WHERE id=?""", (me_name, note, now, h["id"]))
+                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                            (h["task_id"], me_name, "%s (coordinator) approved this work.%s"
+                             % (me_name, (" Note: " + note) if note else "")))
+                con.commit()
+                return {"ok": True}
+            if not note:
+                raise ApiError("Explain what needs correcting.")
+            fname, ftype, fdata = read_validation_document(d, required=False, label="correction document")
+            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?, resolved_at=?,
+                                  return_file_name=?, return_file_type=?, return_file_data=?
+                           WHERE id=?""", (me_name, note, now, fname or "", ftype or "", fdata or "", h["id"]))
             con.execute("UPDATE tasks SET status='NEEDS_CORRECTION' WHERE id=? AND status<>'COMPLETED'", (h["task_id"],))
             con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                        (h["task_id"], me_name, "%s (coordinator) sent this back for correction. Note: %s"
-                         % (me_name, note)))
+                        (h["task_id"], me_name, "%s (coordinator) sent this back for correction.%s Note: %s"
+                         % (me_name, (" Attached: " + fname + ".") if fname else "", note)))
             con.commit()
             return {"ok": True}
+
+        if action == "task_handoff_file":
+            # Download the paper attached to a coordinator send ("send") or the correction
+            # document the coordinator attached when sending it back ("return").
+            try:
+                handoff_id = int(d.get("handoffId"))
+            except (TypeError, ValueError):
+                raise ApiError("That file couldn't be found.", 404)
+            which = "return" if (d.get("which") or "") == "return" else "send"
+            h = con.execute("""SELECT h.*, t.assigned_to AS task_assigned FROM task_handoffs h
+                               JOIN tasks t ON t.id = h.task_id WHERE h.id=?""", (handoff_id,)).fetchone()
+            prefix = "return_" if which == "return" else ""
+            if not h or not h[prefix + "file_data"]:
+                raise ApiError("That file couldn't be found.", 404)
+            if (d.get("role") or "") == "employee":
+                me_emp = d.get("empId")
+                me_name = (d.get("empName") or "").strip()
+                assignees = [x.strip() for x in (h["task_assigned"] or "").split(",") if x.strip()]
+                if not (me_emp in (h["sent_by_emp_id"], h["target_emp_id"]) or me_name in assignees):
+                    raise ApiError("You don't have access to that file.", 403)
+            return {"fileName": h[prefix + "file_name"], "fileType": h[prefix + "file_type"],
+                    "fileData": h[prefix + "file_data"]}
 
         # ----- Validation folders: AI Check / Plagiarism Check / Test Paper --------------
         if action == "validation_list":
