@@ -1,0 +1,19 @@
+============================================================
+ CLEANER, ALIGNED LISTS
+============================================================
+1. Tasks > Assign Work (new work + already assigned)
+   Every row now uses fixed columns, so everything lines up
+   straight down the list no matter how long the client's name is:
+     Client name | Project ID | * Work N of M | Work type | Note
+   Very long names are shortened with "..." (full name on hover).
+   On small screens it falls back to a wrapped layout.
+
+2. Dashboard queue cards (New Work To Assign / Delivery /
+   Work Updates)
+   Each row is now two tidy lines:
+     Client name  [* 1/2]                    [Work type]
+     one line of detail (cut with "..." if too long)
+   The work-type badge is always pinned to the right, so the
+   rows no longer jump up and down.
+
+FILES CHANGED: index.html only.
