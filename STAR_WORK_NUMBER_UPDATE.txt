@@ -1,0 +1,25 @@
+============================================================
+ "★ WORK N OF M" = WHICH OF THE CLIENT'S WORKS THIS IS
+============================================================
+One client (same CL-ID) can take several works / projects.
+Example: Client A took 3 works ->
+    1st work  = "★ Work 1 of 3"
+    2nd work  = "★ Work 2 of 3"
+    3rd work  = "★ Work 3 of 3"
+Numbered in the order the works were registered - the SAME
+numbering as the ★ badge already shown on client cards.
+A client with only one work shows "★ Work 1 of 1".
+
+Shown everywhere in the technical team:
+  Assign Work (new work, in progress, delivery, reassign window),
+  Work Updates, Paper Writing approvals, and the employee's
+  My assigned tasks. Hover the badge to see all of that client's
+  works (project ID + service). The project ID (PRJ-...) is now
+  also shown next to the client name in Assign Work.
+
+The Proposal / Code Implementation / Paper Writing progress is
+still shown by the step bar (Proposal > Code > Paper), and the
+three boxes at the top of Assign Work are now labelled
+"Step 1 / Step 2 / Step 3" so they aren't confused with works.
+
+FILES CHANGED: index.html only.

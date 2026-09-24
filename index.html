@@ -3804,12 +3804,26 @@ function isSingleApproval(t){ return !!t && SINGLE_APPROVAL_TYPES.includes(t.tas
 function clientWorkSteps(c){
   return (c && serviceConf(c).hasImplementation) ? ["PROPOSAL","IMPLEMENTATION","PAPER_WRITING"] : ["PAPER_WRITING"];
 }
+// "★ Work N of M" = which of this CLIENT's works (projects) this is. One client (same
+// CL-ID) can take several works — e.g. client A took 3 works -> the 1st is "Work 1 of 3",
+// the 2nd "Work 2 of 3", ... (same numbering as the ★ badge on client cards). Hover
+// shows every work of that client.
+function clientWorks(c){
+  if(!c) return [];
+  const key = c.displayId || c.id;
+  return clients.filter(x=>(x.displayId||x.id)===key)
+    .slice().sort((a,b)=> new Date(a.regDate||0)-new Date(b.regDate||0) || String(a.id).localeCompare(b.id));   // same order as the ★ badge on client cards
+}
+function clientWorkIndex(c){
+  const list = clientWorks(c);
+  const i = list.findIndex(x=>x.id===c.id);
+  return {n: i<0 ? 1 : i+1, total: Math.max(list.length,1), list};
+}
 function workNumberBadge(c, type){
-  const steps = clientWorkSteps(c);
-  const i = steps.indexOf(type);
-  if(i<0) return "";
-  const ord = ["1st","2nd","3rd"][i] || (i+1)+"th";
-  return `<span class="badge b-gold wk-num" title="${ord} work for this client">Work ${i+1} of ${steps.length}</span>`;
+  if(!c) return "";
+  const {n, total, list} = clientWorkIndex(c);
+  const tip = list.map((x,i)=>`Work ${i+1}: ${x.projectId||x.id} — ${serviceLabel(x)}${x.id===c.id?" (this one)":""}`).join("\n");
+  return `<span class="badge b-gold wk-num" title="${esc(tip)}">&#9733; Work ${n} of ${total}</span>`;
 }
 function workStepperHtml(c, type){
   const steps = clientWorkSteps(c);
@@ -4062,7 +4076,7 @@ function tmAwBoxesHtml(){
     const stat = (n,l,cls)=>`<div class="aw-box-stat ${n&&cls?cls:""}"><b>${n}</b><span>${l}</span></div>`;
     return `<button type="button" class="aw-box ${tmAwType===type?'active':''}" data-box="${type}" onclick="tmAwPickType('${type}')">
       <div class="aw-box-top"><span class="aw-box-ico">${icons[type]}</span>
-        <div><div class="aw-box-step">Work ${i+1}</div><div class="aw-box-title">${WORK_TYPE_LABEL[type]}</div></div>
+        <div><div class="aw-box-step">Step ${i+1}</div><div class="aw-box-title">${WORK_TYPE_LABEL[type]}</div></div>
         ${k.newW?`<span class="badge b-bad" style="margin-left:auto">${k.newW} to assign</span>`:""}</div>
       <div class="aw-box-stats">
         ${stat(k.newW,"To assign","hot")}${stat(k.inProg,"In progress")}${stat(k.waiting,"Waiting approval","warn")}${stat(k.deliver,"To deliver","warn")}${stat(k.withClient,"With client")}
@@ -4187,7 +4201,7 @@ function tmAssignWorkHtml(){
     return `<div class="aw-row ${open?'aw-open':''}" data-aw-row="${esc(String(c.id))}" data-aw-type="${type}" data-aw-search="${esc(tmAwSearchHay(c, task))}">
       <div class="aw-head" onclick="tmAwToggle(${jsq(c.id)})">
         <div class="aw-head-main">
-          <b class="aw-name">${esc(c.name)}</b>
+          <b class="aw-name">${esc(c.name)}</b> <span class="badge b-dim" title="Project ID">${esc(c.projectId||c.id)}</span>
           ${workNumberBadge(c,type)}
           <span class="badge b-purp">${esc(task)}</span>
           <small class="aw-note">${note}</small>
@@ -4221,7 +4235,7 @@ function tmAssignWorkHtml(){
     const waitTask = a.type ? tasks.find(t=>t.client_id===c.id && t.task_type===a.type && t.status==="SUBMITTED") : null;
     return `<div class="aw-ip" data-aw-type="${a.type}" data-aw-search="${esc(tmAwSearchHay(c, a.work+" "+a.raw))}" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">
         <div class="aw-ip-top">
-          <b class="aw-name">${esc(c.name)}</b>
+          <b class="aw-name">${esc(c.name)}</b> <span class="badge b-dim" title="Project ID">${esc(c.projectId||c.id)}</span>
           ${a.type?workNumberBadge(c,a.type):""}
           ${a.work?`<span class="badge b-purp">${esc(a.work)}</span>`:""}
           <small class="aw-note">${g.label}</small>
