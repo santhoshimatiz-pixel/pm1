@@ -757,6 +757,7 @@ ACTION_ROLES = {
     "tl_verify": _R_MKT_MGMT,
     "verify_proposal": _R_TECH_MGMT,
     "reassign_work": _R_TECH_MGMT,
+    "task_mgmt_decision": _R_TECH_MGMT,
     "submit_proposal": _R_ALL_STAFF,
     "deliver_proposal": _R_TECH_MGMT,
     "complete_implementation": _R_TECH_MGMT,
@@ -2707,6 +2708,63 @@ def complete_work_tasks(con, client_id, task_type, by):
 
 def complete_proposal_tasks(con, client_id, by):
     complete_work_tasks(con, client_id, "PROPOSAL", by)
+
+
+# ----- Paper Writing: every reviewer approves INDIVIDUALLY. The writer can send to each
+#       reviewer (Coordinator, Technical TL, Technical Manager) as many times as needed
+#       until THAT reviewer approves; once all of them have approved, the paper is complete
+#       and the next step is the Journal Team. AI / Plagiarism checks: any number of times.
+PAPER_REVIEW_TARGETS = ("COORDINATOR", "TECH_TL", "TECH_MANAGER")
+
+
+def paper_required_reviewers(con, task):
+    """Technical TL + Technical Manager always; a Coordinator too, if there is an active
+    coordinator the writer could actually send it to (not the writer themself)."""
+    req = ["TECH_TL", "TECH_MANAGER"]
+    assignees = [x.strip() for x in (task["assigned_to"] or "").split(",") if x.strip()]
+    ph = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
+    rows = con.execute(f"""SELECT name FROM employees WHERE is_coordinator=1 AND active=1
+                           AND deleted_at IS NULL AND role IN ({ph})""", VALIDATION_ELIGIBLE_ROLES).fetchall()
+    if any(r["name"] not in assignees for r in rows):
+        req.insert(0, "COORDINATOR")
+    return req
+
+
+def paper_review_state(con, task_id):
+    """{target: 'APPROVED' | 'SENT' | 'RETURNED' | None} for each reviewer."""
+    state = {t: None for t in PAPER_REVIEW_TARGETS}
+    for r in con.execute("""SELECT target, status FROM task_handoffs WHERE task_id=?
+                            ORDER BY id""", (task_id,)).fetchall():
+        if r["target"] not in state:
+            continue
+        if state[r["target"]] == "APPROVED":
+            continue
+        state[r["target"]] = r["status"] if r["status"] != "FORWARDED" else "APPROVED"
+    return state
+
+
+def maybe_complete_paper_task(con, task_id, by):
+    """Called after any individual approval. When every required reviewer has approved,
+    the task is COMPLETED and the client's paper is ready for delivery / the Journal Team."""
+    task = con.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not task or (task["task_type"] or "") != "PAPER_WRITING" or task["status"] == "COMPLETED":
+        return False
+    state = paper_review_state(con, task_id)
+    need = paper_required_reviewers(con, task)
+    if not all(state.get(t) == "APPROVED" for t in need):
+        return False
+    con.execute("UPDATE tasks SET status='COMPLETED' WHERE id=?", (task_id,))
+    con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                (task_id, by, "All reviewers approved (%s) — paper writing completed. Next: the Journal Team."
+                 % ", ".join(HANDOFF_TARGETS[t] for t in need)))
+    if task["client_id"]:
+        c = con.execute("SELECT stage FROM clients WHERE id=?", (task["client_id"],)).fetchone()
+        if c and c["stage"] in ("PAPERWRITER_ASSIGNED", "WRITER_FIXING", "COORDINATOR_REVIEW",
+                                "TECHTL_REVIEW", "TECHMGR_REVIEW"):
+            move_stage(con, task["client_id"], "WRITING_COMPLETE", by,
+                       "Paper approved by every reviewer (%s) — ready to deliver / send to the Journal Team."
+                       % ", ".join(HANDOFF_TARGETS[t] for t in need))
+    return True
 
 
 def work_sends(con):
@@ -6760,6 +6818,19 @@ def handle_action(action, d, ip=""):
                     fname, ftype, fdata = read_validation_document(d, required=False, label="paper")
                     fname, ftype, fdata = fname or "", ftype or "", fdata or ""
                 else:
+                    if task_type not in SINGLE_APPROVAL_TASK_TYPES:
+                        prev = con.execute(
+                            """SELECT status, resolved_by FROM task_handoffs WHERE task_id=? AND target=?
+                               AND status IN ('APPROVED','SENT')
+                               ORDER BY (status='APPROVED') DESC, id DESC LIMIT 1""",
+                            (task["id"], target)).fetchone()
+                        if prev and prev["status"] == "APPROVED":
+                            raise ApiError("The %s has already approved this work (%s), so it can't go to them "
+                                           "again. Send it to the other reviewers / Validation." %
+                                           (HANDOFF_TARGETS[target], prev["resolved_by"] or "approved"))
+                        if prev:
+                            raise ApiError("This work is already waiting on the %s. You can send it to them "
+                                           "again once they approve it or send it back." % HANDOFF_TARGETS[target])
                     # Straight to the Technical TL / Manager: a proposal must carry the proposal
                     # document so they can read it before approving; other work may attach one.
                     is_prop = task_type == "PROPOSAL"
@@ -6778,7 +6849,7 @@ def handle_action(action, d, ip=""):
             # (SUBMITTED -> shows in Work Updates). Coordinator review and AI / plagiarism checks
             # are steps along the way, so the task stays "in progress" and the writer can keep
             # sending it on — to the next reviewer or to Validation again, any number of times.
-            if target in ("TECH_TL", "TECH_MANAGER") or task_type in SINGLE_APPROVAL_TASK_TYPES:
+            if task_type in SINGLE_APPROVAL_TASK_TYPES:
                 if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
                     con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
             elif task["status"] in ("OPEN", "NEEDS_CORRECTION"):
@@ -6820,8 +6891,10 @@ def handle_action(action, d, ip=""):
                 con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
                             (h["task_id"], me_name, "%s (coordinator) approved this work.%s"
                              % (me_name, (" Note: " + note) if note else "")))
+                done = maybe_complete_paper_task(con, h["task_id"], me_name)
                 con.commit()
-                return {"ok": True}
+                return {"ok": True, "allApproved": done}
+
             if not note:
                 raise ApiError("Explain what needs correcting.")
             fname, ftype, fdata = read_validation_document(d, required=False, label="correction document")
@@ -6832,6 +6905,44 @@ def handle_action(action, d, ip=""):
             con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
                         (h["task_id"], me_name, "%s (coordinator) sent this back for correction.%s Note: %s"
                          % (me_name, (" Attached: " + fname + ".") if fname else "", note)))
+            con.commit()
+            return {"ok": True}
+
+        # ----- Technical TL / Manager: their OWN individual decision on paper work sent to
+        #       them (TL decides on sends to the TL, Manager on sends to the Manager).
+        if action == "task_mgmt_decision":
+            try:
+                handoff_id = int(d.get("handoffId"))
+            except (TypeError, ValueError):
+                raise ApiError("That work wasn't sent to you.", 403)
+            h = con.execute("SELECT * FROM task_handoffs WHERE id=? FOR UPDATE", (handoff_id,)).fetchone()
+            role_ = (d.get("role") or "").strip()
+            mine = {"technical_tl": ("TECH_TL",), "technical_manager": ("TECH_MANAGER",)}.get(
+                role_, ("TECH_TL", "TECH_MANAGER") if role_ in ("super_admin", "md_admin") else ())
+            if not h or h["target"] not in mine:
+                raise ApiError("That work was sent to the %s, not to you." %
+                               (HANDOFF_TARGETS.get(h["target"], "someone else") if h else "someone else"), 403)
+            if h["status"] != "SENT":
+                raise ApiError("This has already been dealt with — refresh to see its latest status.")
+            approve = bool(d.get("approve"))
+            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
+            actor = (d.get("actorLabel") or HANDOFF_TARGETS[h["target"]]).strip()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if approve:
+                con.execute("""UPDATE task_handoffs SET status='APPROVED', resolved_by=?, resolved_note=?,
+                               resolved_at=? WHERE id=?""", (actor, note, now, h["id"]))
+                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                            (h["task_id"], actor, "%s approved this work.%s" % (actor, (" Note: " + note) if note else "")))
+                done = maybe_complete_paper_task(con, h["task_id"], actor)
+                con.commit()
+                return {"ok": True, "allApproved": done}
+            if not note:
+                raise ApiError("Add a rework note for the writer before sending it back.")
+            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?,
+                           resolved_at=? WHERE id=?""", (actor, note, now, h["id"]))
+            con.execute("UPDATE tasks SET status='NEEDS_CORRECTION' WHERE id=? AND status<>'COMPLETED'", (h["task_id"],))
+            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                        (h["task_id"], actor, "%s sent this back for rework. Note: %s" % (actor, note)))
             con.commit()
             return {"ok": True}
 

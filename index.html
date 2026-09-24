@@ -938,6 +938,14 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .aw-chip{all:unset;cursor:pointer;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid var(--line);color:var(--text);background:var(--card)}
 .aw-chip.active{background:var(--text);color:var(--card);border-color:var(--text)}
 @media (max-width:900px){ .aw-boxes{grid-template-columns:1fr} }
+
+/* ---- paper review checklist ---- */
+.pr-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pr-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--card)}
+.pr-chip small{font-size:11px;opacity:.8}
+.pr-chip.ok{color:#1a7f4b;border-color:rgba(26,127,75,.4);background:rgba(26,127,75,.08)}
+.pr-chip.wait{color:#9a6b00;border-color:rgba(184,134,11,.4);background:rgba(184,134,11,.08)}
+.pr-chip.back{color:var(--bad,#c0392b);border-color:rgba(192,57,43,.35);background:rgba(192,57,43,.06)}
 </style>
 <script>
   // Applies the person's saved theme (light/dark) before the page paints, so there's
@@ -3894,6 +3902,113 @@ function proposalPendingSend(taskId){
 function proposalApprovedSend(taskId){
   return workSends.find(x=>x.taskId===taskId && x.kind==="HANDOFF" && (x.target==="TECH_TL"||x.target==="TECH_MANAGER") && x.status==="APPROVED");
 }
+// ---------------------------------------------------------------------------
+// Paper Writing reviews: Coordinator, Technical TL and Technical Manager each approve
+// INDIVIDUALLY. The writer can send to each of them any number of times until THAT
+// reviewer approves. When all have approved the paper is complete -> Journal Team.
+// ---------------------------------------------------------------------------
+const PAPER_REVIEWERS = ["COORDINATOR","TECH_TL","TECH_MANAGER"];
+function paperRequiredReviewers(t){
+  const assignees = (t.assigned_to||"").split(",").map(x=>x.trim()).filter(Boolean);
+  const coords = employees.filter(e=>e.isCoordinator && (e.role==="PROGRAMMER"||e.role==="PAPER_WRITER") && !assignees.includes(e.name));
+  return coords.length ? PAPER_REVIEWERS.slice() : ["TECH_TL","TECH_MANAGER"];
+}
+function paperReviewState(taskId){
+  const st = {COORDINATOR:null, TECH_TL:null, TECH_MANAGER:null};
+  sendsForTask(taskId).filter(x=>x.kind==="HANDOFF" && PAPER_REVIEWERS.includes(x.target))
+    .slice().sort((a,b)=>new Date(a.at)-new Date(b.at)).forEach(x=>{
+      if(st[x.target] && st[x.target].status==="APPROVED") return;
+      st[x.target] = {status: x.status==="FORWARDED" ? "APPROVED" : x.status, by: x.resolvedBy||x.targetName||"", at: x.resolvedAt||x.at, note: x.resolvedNote||""};
+    });
+  return st;
+}
+function paperAllApproved(t){
+  const st = paperReviewState(t.id);
+  return paperRequiredReviewers(t).every(k=>st[k] && st[k].status==="APPROVED");
+}
+function paperChecklistHtml(t){
+  if(!t || t.task_type!=="PAPER_WRITING") return "";
+  const st = paperReviewState(t.id), need = paperRequiredReviewers(t);
+  const chip = k=>{
+    const s = st[k], lbl = SEND_TARGET_LABEL[k];
+    if(s && s.status==="APPROVED") return `<span class="pr-chip ok">&#10003; ${lbl}${s.by?` <small>(${esc(s.by)})</small>`:""}</span>`;
+    if(s && s.status==="SENT") return `<span class="pr-chip wait">&#8987; ${lbl} <small>waiting</small></span>`;
+    if(s && s.status==="RETURNED") return `<span class="pr-chip back">&#8617; ${lbl} <small>sent back</small></span>`;
+    return `<span class="pr-chip">&#9675; ${lbl} <small>not sent</small></span>`;
+  };
+  const all = need.every(k=>st[k] && st[k].status==="APPROVED");
+  return `<div class="pr-list">${need.map(chip).join("")}${all?`<span class="pr-chip ok" style="font-weight:700">&#10003; All approved &mdash; next: Journal Team</span>`:""}</div>`;
+}
+// Paper work sent to ME (the TL / the Manager) that's waiting on my own decision.
+function myMgmtTargets(){
+  if(role==="technical_tl") return ["TECH_TL"];
+  if(role==="technical_manager") return ["TECH_MANAGER"];
+  if(role==="super_admin" || role==="md_admin") return ["TECH_TL","TECH_MANAGER"];
+  return [];
+}
+function tmPaperDecisionQueue(){
+  const mine = myMgmtTargets();
+  return workSends.filter(x=>x.kind==="HANDOFF" && x.status==="SENT" && mine.includes(x.target) && x.taskType==="PAPER_WRITING")
+    .slice().sort((a,b)=>new Date(a.at)-new Date(b.at));
+}
+async function tmPaperDecision(handoffId, approve){
+  const note = (($("pd-note-"+handoffId)||{}).value||"").trim();
+  if(!approve && !note){ toast("Add a rework note for the writer first"); return; }
+  const actorLabel = role==="technical_tl" ? "Technical TL" : (role==="technical_manager" ? "Technical Manager" : taskActorName());
+  let out;
+  try{ out = await api("task_mgmt_decision", {handoffId, approve, note, actorLabel}); }
+  catch(e){ toast(e.message); await refresh(); return; }
+  await refresh(); rerenderCurrent();
+  toast(approve ? (out && out.allApproved ? "Approved — every reviewer has now approved. Paper is complete (next: Journal Team)" : "Approved — your approval is recorded") : "Sent back for rework");
+}
+function tmPaperDecisionHtml(x){
+  const t = tasks.find(y=>y.id===x.taskId) || {id:x.taskId, task_type:"PAPER_WRITING", assigned_to:x.taskAssignedTo, title:x.taskTitle};
+  const c = x.clientId ? clients.find(y=>y.id===x.clientId) : null;
+  return `<div class="adm-bar-row" style="display:block;cursor:default">
+    <div class="lbl" style="cursor:pointer" onclick="admOpenTaskDetail(${x.taskId})"><b>${esc(x.taskTitle)}</b>
+      ${c?workNumberBadge(c,"PAPER_WRITING"):""}
+      <span class="badge b-purp" style="margin:0 6px">Paper Writing &bull; sent to you (${esc(x.targetLabel)})</span>
+      <small style="color:#8DA39A">${esc(x.sentBy||x.taskAssignedTo||"—")}${c?(" &bull; "+esc(c.name)):""} &bull; ${fmtDateTime(x.at)}</small></div>
+    ${x.note?`<div class="val-hint" style="margin-top:4px">Writer's note: ${esc(x.note)}</div>`:""}
+    <div class="val-hint" style="margin-top:6px">Each reviewer approves on their own. The paper is complete once all of these are approved:</div>
+    ${paperChecklistHtml(t)}
+    ${x.hasFile?`<button class="btn ghost small" style="margin-top:6px" onclick="handoffDownload(${x.handoffId},'send')">&#128206; ${esc(x.fileName||"Attached paper")}</button>`:""}
+    <textarea id="pd-note-${x.handoffId}" placeholder="Rework note (only needed if sending back)" rows="2" style="margin-top:8px;margin-bottom:8px"></textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn gold small" onclick="tmPaperDecision(${x.handoffId}, true)">&#10003; Approve (my approval)</button>
+      <button class="btn ghost small" onclick="tmPaperDecision(${x.handoffId}, false)">&#8617; Rework &mdash; send back</button>
+      ${c && t.client_id && taskReassignable(t)?`<button class="btn ghost small" onclick="openReassignModal(${jsq(t.client_id)},'PAPER_WRITING',${t.id})">&#8634; Reassign</button>`:""}
+    </div>
+  </div>`;
+}
+// Clients whose paper is fully approved and accepted -> ready for the Journal Team.
+function tmJournalReadyQueue(){ return clients.filter(c=>c.stage==="CLIENT_ACCEPTED"); }
+async function tmSendToJournal(id){
+  const inp = $("jr-name-"+id); const journalName = inp ? inp.value.trim() : "";
+  if(!journalName){ toast("Enter the target journal name"); if(inp) inp.focus(); return; }
+  const actorLabel = role==="technical_tl" ? "Technical TL" : "Technical Manager";
+  try{ await api("select_journal", {clientId:id, actorLabel, journalName}); }
+  catch(e){ toast(e.message); return; }
+  await refresh(); rerenderCurrent(); toast("Sent to the Journal Team");
+}
+function tmJournalReadyHtml(){
+  const rows = tmJournalReadyQueue();
+  if(!rows.length) return "";
+  return `<div class="adm-panel" style="margin-top:16px" data-aw-section>
+    <div class="adm-panel-head"><h3>Ready for the Journal Team</h3><span class="badge b-bad" data-aw-count>${rows.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Paper approved by every reviewer and by the client. Enter the target journal and send it to the Journal Team.</p>
+      ${rows.map(c=>`<div class="adm-bar-row" style="display:block;cursor:default" data-aw-type="PAPER_WRITING" data-aw-search="${esc(tmAwSearchHay(c,"Paper Writing journal"))}">
+        <div class="lbl"><b>${esc(c.name)}</b> ${workNumberBadge(c,"PAPER_WRITING")} <span class="badge b-paid">&#10003; All approved</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" onclick="event.stopPropagation()">
+          <input id="jr-name-${esc(c.id)}" placeholder="Target journal name" value="${esc(c.journalName||"")}" style="flex:1;min-width:200px;margin:0">
+          <button class="btn gold small" onclick="tmSendToJournal(${jsq(c.id)})">Send to Journal Team &#8594;</button>
+        </div>
+      </div>`).join("")}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div>
+  </div>`;
+}
 function tmInProgressAwaitingNextStep(){
   const map = [
     ["PROPOSAL_ASSIGNED","Proposal being written"],
@@ -4156,14 +4271,16 @@ function tmAssignWorkHtml(){
       <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
     </div>
   </div>${inProgressHtml}
-  <div style="margin-top:16px">${tmDeliveryHtml()}</div>`;
+  <div style="margin-top:16px">${tmDeliveryHtml()}</div>${tmJournalReadyHtml()}`;
 }
 // Only the Technical team's own ad-hoc tasks belong here — a Journal team member's
 // submitted Proofreading/Formatting/Submission task must never show up (and be
 // approvable) on the Technical Manager/TL's dashboard.
 function tmWorkUpdatesQueue(){
-  return tasks.filter(t=>t.status==='SUBMITTED' && !JOURNAL_TASK_TYPES.includes(t.task_type)).slice().sort((a,b)=> new Date(a.created_at) - new Date(b.created_at));
+  const viaPaper = new Set(tmPaperDecisionQueue().map(x=>x.taskId));
+  return tasks.filter(t=>t.status==='SUBMITTED' && !JOURNAL_TASK_TYPES.includes(t.task_type) && !viaPaper.has(t.id)).slice().sort((a,b)=> new Date(a.created_at) - new Date(b.created_at));
 }
+function tmWorkUpdatesCount(){ return tmWorkUpdatesQueue().length + tmPaperDecisionQueue().length; }
 // Same idea, but for the Journal Manager/TL — only their own team's submitted
 // Proofreading/Formatting/Submission tasks (created via jmOpenAddTask) show up here.
 function jmWorkUpdatesQueue(){
@@ -4194,7 +4311,11 @@ function jmWorkUpdatesHtml(){
 }
 function tmWorkUpdatesHtml(){
   const rows = tmWorkUpdatesQueue();
-  return `<div class="adm-panel">
+  const paper = tmPaperDecisionQueue();
+  const paperHtml = paper.length ? `<div class="adm-panel" style="margin-bottom:16px">
+    <div class="adm-panel-head"><h3>Paper Writing &mdash; waiting on YOUR approval</h3><span class="badge b-bad">${paper.length}</span></div>
+    <div class="adm-panel-body">${paper.map(tmPaperDecisionHtml).join("")}</div></div>` : "";
+  return `${paperHtml}<div class="adm-panel">
     <div class="adm-panel-head"><h3>Work Updates — waiting on your approval</h3><span class="badge ${rows.length?'b-bad':'b-purp'}">${rows.length}</span></div>
     <div class="adm-panel-body">
       <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">When a Programmer or Paper Writer marks their task as done on their own dashboard, it lands here first. Nothing counts as Completed anywhere in the app — the stat boxes, Tasks Overview, everywhere — until a Technical Manager or Technical TL approves it here.</p>
@@ -4222,7 +4343,7 @@ function tmWorkUpdatesHtml(){
   </div>`;
 }
 function renderTMTasks(){
-  const wuCount = tmWorkUpdatesQueue().length;
+  const wuCount = tmWorkUpdatesCount();
   let html = `<div class="adm-tabbar">
     <button class="adm-tab ${tmTasksTab==='overview'?'active':''}" onclick="tmTasksTab='overview';refresh()">Overview</button>
     <button class="adm-tab" onclick="admOpenAddTask()">Add Task</button>
@@ -5145,6 +5266,7 @@ function myAssignedTasksHtml(name){
         <button class="btn small" style="background:#111;color:#fff;border:1px solid #111" onclick="${canSendWork()?`openSendWorkModal(${t.id})`:`myMarkTaskDone(${t.id})`}">${(canSendWork() && !isSingleApproval(t) && sendsForTask(t.id).length) ? "&#8599; Send to next reviewer / check again&hellip;" : taskDoneButtonLabel(t)+(canSendWork()?(isSingleApproval(t)?" &mdash; submit to TL / Manager&hellip;":" &mdash; send to&hellip;"):"")}</button>
       </div>` : ""}
       ${(t.status==='SUBMITTED' && canSendWork() && !isSingleApproval(t)) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send to someone else&hellip;</button></div>` : ""}
+      ${t.task_type==='PAPER_WRITING' && canSendWork() ? paperChecklistHtml(t) : ""}
       ${(t.status==='COMPLETED' && canSendWork() && !isSingleApproval(t)) ? `<div onclick="event.stopPropagation()" style="margin-top:8px"><button class="btn ghost small" onclick="openSendWorkModal(${t.id})">&#8599; Send for AI / Plagiarism check again&hellip;</button></div>` : ""}
       ${(t.status!=='SUBMITTED' && canSendWork() && sendsSummaryLine(t.id)) ? `<div class="pc-meta" style="margin-top:6px">${sendsSummaryLine(t.id)}</div>` : ""}
       ${t.status!=='COMPLETED' ? taskCoordBoxHtml(t) : ""}
@@ -12243,8 +12365,13 @@ function openSendWorkModal(taskId){
   const st = coordStateForTask(taskId);
   const targets = taskSendTargets(t);
   const doneAlready = t.status==="COMPLETED" && !isSingleApproval(t);
+  const prState = t.task_type==="PAPER_WRITING" ? paperReviewState(taskId) : null;
   const offReason = k => {
-    if(doneAlready && k!=="VALIDATION") return "Already approved &mdash; only AI / Plagiarism checks now";
+    if(doneAlready && k!=="VALIDATION") return "All approved &mdash; next is the Journal Team. Only AI / Plagiarism checks now";
+    if(prState && (k==="TECH_TL" || k==="TECH_MANAGER") && prState[k]){
+      if(prState[k].status==="APPROVED") return `&#10003; Already approved${prState[k].by?` by ${esc(prState[k].by)}`:""}`;
+      if(prState[k].status==="SENT") return "Waiting on their decision";
+    }
     if(k!=="COORDINATOR") return "";
     if(st.approved) return `&#10003; Already approved by ${esc(st.approved.resolvedBy||st.approved.targetName)}`;
     if(st.pending) return `Waiting on ${esc(st.pending.targetName)}`;
@@ -12255,6 +12382,7 @@ function openSendWorkModal(taskId){
   const history = sendsForTask(taskId);
   openModal(`<h3>Send completed work</h3>
     <p class="msub">${esc(title)}${c?` &bull; ${esc(c.name)}`:""}${history.length?` &bull; already sent ${history.length}&times;`:""}</p>
+    ${t.task_type==="PAPER_WRITING"?`<div class="val-hint" style="margin-bottom:6px">Each reviewer approves on their own &mdash; you can send to each one as many times as needed until they approve. AI / Plagiarism checks: any number of times.</div>${paperChecklistHtml(t)}<div style="height:8px"></div>`:""}
     ${isSingleApproval(t)?`<div class="val-hint" style="margin-bottom:10px">${t.task_type==="PROPOSAL"?"Proposals go":"Code implementation goes"} straight to your team's Technical TL or Technical Manager &mdash; no coordinator or validation step. They approve it (then it's completed) or send it back for rework.</div>`:""}
     <div class="field"><label>Send it to</label>
       <div class="val-folder-pick two" id="swTargets">${targets.map(x=>{
