@@ -5282,7 +5282,7 @@ function renderWriter(){
       <button class="btn ghost small" onclick="openWorkUpdateModal(${jsq(c.id)},'PAPER_DELIVERED')">+ Log paper delivered</button>
       <button class="btn ghost small" onclick="openMarkWritingDemoModal(${jsq(c.id)})">${c.writingDemoGivenDate?'Update paper demo date':'+ Mark paper demo given'}</button>
       ${demoScheduleEmployeeActionsHtml(c)}
-      <button class="btn gold small" onclick="submitWritingDemo(${jsq(c.id)})">Submit draft to Coordinator &#8594;</button>
+      ${writingCompletedHtml(c)}
       <button class="btn ghost small" onclick="openHoldModal(${jsq(c.id)})">Hold this work</button>
       <button class="btn ghost small" onclick="openExtensionModal(${jsq(c.id)},'PAPERWRITER_ASSIGNED')">Request deadline extension</button>`, extra +
       (c.extRequested?`<div class="pc-meta" style="color:var(--gold)">Extension requested (${esc(c.extAmount)}) &mdash; waiting on your Manager/TL.</div>`:""));
@@ -9405,7 +9405,7 @@ function drawerActions(c){
          ${coordinatorPickerHtml(c.id,'write','wdld-'+c.id)}`;
   }
   if(role==="employee" && empRole==="PAPER_WRITER" && c.stage==="PAPERWRITER_ASSIGNED" && c.assignedWriters.includes(empName))
-    h = `<button class="btn gold" onclick="submitWritingDemo(${jsq(c.id)})">Submit draft to Coordinator &#8594;</button>`;
+    h = writingCompletedHtml(c);
   if(role==="employee" && empRole==="PAPER_WRITER" && c.stage==="WRITER_FIXING" && c.assignedWriters.includes(empName))
     h = `<button class="btn gold" onclick="writerResubmit(${jsq(c.id)})">Resubmit correction &#8594;</button>`;
   if(role==="employee" && empRole==="PAPER_WRITER" && c.stage==="PROOFREAD_CORRECTION" && c.assignedWriters.includes(empName))
@@ -9890,6 +9890,26 @@ async function assignWriters(id, sfx){
   try{ await api("assign_writers",{clientId:id, writers:picked, deadline:dl, actorLabel}); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
   toast("Paper writing assigned to " + picked.join(", "));
+}
+// ---------------------------------------------------------------------------
+// Paper Writer: "Mark writing completed" (replaces "Submit draft to Coordinator").
+// It only records that the writing is done — where it goes next (Coordinator /
+// Validation / Technical TL / Manager) is still chosen from My assigned tasks.
+// ---------------------------------------------------------------------------
+function writingCompletedHtml(c){
+  if(c.writingCompletedAt){
+    return `<span class="pc-meta" style="color:var(--good,#1a7f4b);align-self:center">&#10003; Writing completed ${fmtDateTime(c.writingCompletedAt)}</span>
+      <button class="btn small" onclick="selectDashSection(${jsq(slugify("My assigned tasks"))})">Send it from My assigned tasks &#8594;</button>
+      <button class="btn ghost small" onclick="markWritingCompleted(${jsq(c.id)}, true)">Undo</button>`;
+  }
+  return `<button class="btn gold small" onclick="markWritingCompleted(${jsq(c.id)})">&#10003; Mark writing completed</button>`;
+}
+async function markWritingCompleted(id, undo){
+  try{ await api("mark_writing_completed", {clientId:id, empName, undo: !!undo}); }
+  catch(e){ toast(e.message); await refresh(); return; }
+  await refresh();
+  if(typeof closeDrawer==="function" && document.querySelector(".drawer.open")) closeDrawer();
+  toast(undo ? "Un-marked" : "Writing marked completed — send it on from My assigned tasks");
 }
 async function submitWritingDemo(id){
   try{ await api("submit_writing_demo",{clientId:id, empName}); }catch(e){ toast(e.message); await refresh(); return; }

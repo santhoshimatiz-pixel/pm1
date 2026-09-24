@@ -764,6 +764,7 @@ ACTION_ROLES = {
     "send_implementation_to_client": _R_TECH_MGMT,
     "approve_demo": _R_TECH_MGMT,
     "submit_writing_demo": _R_ALL_STAFF,
+    "mark_writing_completed": _R_ALL_STAFF,
     "mark_writing_demo_given": _R_TECH_MGMT + ("marketing_manager", "marketing_tl", "employee"),
     "writer_resubmit": _R_ALL_STAFF,
     "writer_resubmit_proofread": _R_ALL_STAFF,
@@ -2008,6 +2009,10 @@ def init_db():
         "proposal_start_date": "TEXT DEFAULT ''",
         "implementation_start_date": "TEXT DEFAULT ''",
         "writing_start_date": "TEXT DEFAULT ''",
+        # ----- Paper Writer's own "Mark writing completed" (they then send it on from
+        #       My assigned tasks: Coordinator / Validation / Technical TL / Manager). -----
+        "writing_completed_at": "TEXT DEFAULT ''",
+        "writing_completed_by": "TEXT DEFAULT ''",
     }
     for col, decl in extra_cols.items():
         con.execute(f"ALTER TABLE clients ADD COLUMN IF NOT EXISTS {col} {decl}")
@@ -2922,6 +2927,8 @@ def all_clients(con):
             "rejectedAt": iso(r["rejected_at"]) if r["rejected_at"] else None,
             "writingDeadline": r["writing_deadline"],
             "writingStartDate": r["writing_start_date"] or "",
+            "writingCompletedAt": r["writing_completed_at"] or "",
+            "writingCompletedBy": r["writing_completed_by"] or "",
             "demoCompletedDate": r["demo_completed_date"],
             "demoGivenDate": r["demo_given_date"],
             "demoSatisfied": r["demo_satisfied"] or "",
@@ -4420,6 +4427,13 @@ def handle_action(action, d, ip=""):
                         if start_idx < len(review_chain) - 1:
                             sync_note = ("Approved — this also signed off the remaining internal review "
                                          "round(s) for you, and the client is now ready for the Journal Team.")
+                    elif c["stage"] == "PAPERWRITER_ASSIGNED" and (
+                            row["status"] == "SUBMITTED" or (c["writing_completed_at"] or "")):
+                        # The writer marked the writing completed / sent it on from My assigned
+                        # tasks (not the old "Submit draft to Coordinator" pipeline button), so
+                        # this approval is the internal sign-off: ready for delivery.
+                        move_stage(con, c["id"], "WRITING_COMPLETE", actor_label,
+                                   "Paper writing approved — ready for delivery to the client.")
                     elif c["stage"] == "PAPERWRITER_ASSIGNED":
                         sync_note = ("Task marked complete, but the writer hasn't actually submitted their "
                                       "draft yet in the real pipeline — check with them before assuming this "
@@ -5019,7 +5033,8 @@ def handle_action(action, d, ip=""):
                 old = c["assigned_writers"] or ""
                 con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=?,
                                writing_awaiting_team_pick=0, review_level='', coordinator_rounds=0,
-                               techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
+                               techtl_rounds=0, techmgr_rounds=0, writing_completed_at='',
+                               writing_completed_by='' WHERE id=?""",
                             (names_csv, deadline, start_date, c["id"]))
                 back_to = "PAPERWRITER_ASSIGNED" if c["stage"] != "PAPERWRITER_ASSIGNED" else None
             old_txt = ", ".join([x.strip() for x in old.split(",") if x.strip()]) or "nobody"
@@ -5456,6 +5471,7 @@ def handle_action(action, d, ip=""):
                                techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
                             (",".join(picked), deadline, start_date, c["id"]))
                 note = ""
+            con.execute("UPDATE clients SET writing_completed_at='', writing_completed_by='' WHERE id=?", (c["id"],))
             move_stage(con, c["id"], "PAPERWRITER_ASSIGNED", actor, note)
             con.commit()
             return {"ok": True}
@@ -5517,6 +5533,30 @@ def handle_action(action, d, ip=""):
                 con.execute("UPDATE clients SET coordinator_name='' WHERE id=?", (c["id"],))
                 move_stage(con, c["id"], "TECHTL_REVIEW", who,
                            (note + " " if note else "") + "(no coordinator on this writer's team — sent straight to Technical TL)")
+            con.commit()
+            return {"ok": True}
+
+        # ----- Paper Writer marks their writing as completed. This replaces the old
+        #       "Submit draft to Coordinator" button on their card: it doesn't send the
+        #       paper anywhere — they choose where it goes from My assigned tasks. `undo`
+        #       clears the mark.
+        if action == "mark_writing_completed":
+            c = get_client(con, d.get("clientId") or "")
+            if c["stage"] not in ("PAPERWRITER_ASSIGNED", "WRITER_FIXING"):
+                raise ApiError("This client's paper writing isn't in progress right now.")
+            emp_name = (d.get("empName") or "").strip()
+            if (d.get("role") or "") == "employee" and emp_name not in names(c["assigned_writers"]):
+                raise ApiError("You are not assigned as a paper writer on this client.", 403)
+            who = emp_name or (d.get("actorLabel") or "Paper Writer").strip()
+            if d.get("undo"):
+                con.execute("UPDATE clients SET writing_completed_at='', writing_completed_by='' WHERE id=?", (c["id"],))
+                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                            (c["id"], c["stage"], who, "%s un-marked the writing as completed." % who))
+            else:
+                con.execute("""UPDATE clients SET writing_completed_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+                               writing_completed_by=? WHERE id=?""", (who, c["id"]))
+                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                            (c["id"], c["stage"], who, "%s marked the paper writing as completed." % who))
             con.commit()
             return {"ok": True}
 
