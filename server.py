@@ -684,10 +684,10 @@ ACTION_ROLES = {
     "add_service_item": _R_MARKETING,
     "delete_service_item": _R_MARKETING,
     "schedule_demo": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "postpone_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
+    "postpone_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
     "cancel_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "complete_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
-    "mark_demo_given": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
+    "complete_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
+    "mark_demo_given": _R_MARKETING + ("technical_manager", "technical_tl"),
     "reject_client": _R_MKT_MGMT,
     "unreject_client": _R_MKT_MGMT,
     # BUGFIX: widened from _R_MKT_MGMT. Telecallers can already add a client one at a
@@ -751,22 +751,15 @@ ACTION_ROLES = {
     "coordinator_decision": _R_ALL_STAFF,
     "techtl_decision": _R_TECH_MGMT,
     "techmgr_decision": _R_TECH_MGR,
-    # BUGFIX: this is the MARKETING TL's "Verify & send to Manager" step (TL_REVIEW ->
-    # MANAGER_REVIEW, recorded as "Marketing TL"), but it was mapped to the Technical
-    # roles, so the Marketing TL's button always failed with "You don't have permission".
-    "tl_verify": _R_MKT_MGMT,
+    "tl_verify": _R_TECH_MGMT,
     "verify_proposal": _R_TECH_MGMT,
-    "reassign_work": _R_TECH_MGMT,
-    "task_mgmt_decision": _R_TECH_MGMT,
     "submit_proposal": _R_ALL_STAFF,
     "deliver_proposal": _R_TECH_MGMT,
-    "complete_implementation": _R_TECH_MGMT,
-    "start_work_submission": _R_ALL_STAFF,
+    "complete_implementation": _R_ALL_STAFF,
     "send_implementation_to_client": _R_TECH_MGMT,
     "approve_demo": _R_TECH_MGMT,
     "submit_writing_demo": _R_ALL_STAFF,
-    "mark_writing_completed": _R_ALL_STAFF,
-    "mark_writing_demo_given": _R_TECH_MGMT + ("marketing_manager", "marketing_tl", "employee"),
+    "mark_writing_demo_given": _R_TECH_MGMT + ("marketing_manager", "marketing_tl"),
     "writer_resubmit": _R_ALL_STAFF,
     "writer_resubmit_proofread": _R_ALL_STAFF,
     "complete_formatting": _R_ALL_STAFF,
@@ -819,23 +812,6 @@ ACTION_ROLES = {
     "admin_import_data": _R_ADMIN,
     "admin_import_summary": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
-
-    # ---- Validation folders (AI Check / Plagiarism Check / Test Paper) ----
-    # "validator" is the dedicated Validation login (an employee whose Technical
-    # Manager granted them folder access). It can reach ONLY the actions below —
-    # never bootstrap, client data, DMs, etc. Each handler re-checks ownership /
-    # folder access itself; this matrix is just the first, coarse gate.
-    "validation_list": ("employee", "validator") + _R_TECH,
-    "validation_get_file": ("employee", "validator") + _R_TECH,
-    "validation_submit": ("employee",) + _R_TECH,
-    # "Send completed work to ..." (Coordinator / Validation / Technical TL / Manager)
-    "task_send_work": ("employee",) + _R_TECH,
-    "task_handoff_return": ("employee",),
-    "task_handoff_approve": ("employee",),
-    "task_handoff_file": ("employee",) + _R_TECH,
-    "validation_resubmit": ("employee",) + _R_TECH,
-    "validation_decide": ("validator",),
-    "validation_set_access": _R_TECH_MGR,
 
     # ---- client-portal actions (staff may also drive them where the UI allows) ----
     "client_approve_proposal": _R_ALL_STAFF,
@@ -897,7 +873,7 @@ def session_identity(session):
     """
     if not session:
         return {"key": "", "label": ""}
-    if session["kind"] in ("employee", "validator"):
+    if session["kind"] == "employee":
         return {"key": "EMP:%s" % session["emp_id"],
                 "label": session["emp_name"] or "Employee"}
     if session["kind"] == "client":
@@ -999,18 +975,6 @@ def get_session(con, token):
         e = con.execute("SELECT active, deleted_at FROM employees WHERE id=?",
                         (row["emp_id"],)).fetchone()
         if not e or not e["active"] or e["deleted_at"]:
-            con.execute("DELETE FROM sessions WHERE token=?", (hashed,))
-            con.commit()
-            return None
-    elif row["kind"] == "validator":
-        # A Validation login stays valid only while the employee is active AND the
-        # Technical Manager still grants them at least one folder. Revoking access
-        # therefore signs them out of the Validation login on their next request.
-        e = con.execute("SELECT active, deleted_at, role, validation_access FROM employees WHERE id=?",
-                        (row["emp_id"],)).fetchone()
-        if (not e or not e["active"] or e["deleted_at"]
-                or e["role"] not in VALIDATION_ELIGIBLE_ROLES
-                or not parse_validation_access(e["validation_access"])):
             con.execute("DELETE FROM sessions WHERE token=?", (hashed,))
             con.commit()
             return None
@@ -1159,85 +1123,6 @@ ADMIN_ROLES = ("md_admin", "super_admin")
 # already been registered — a tighter set than "who can edit a client at all" (update_client
 # below), since the service drives the whole payment schedule.
 SERVICE_EDIT_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "md_admin", "super_admin")
-
-
-# =====================================================================
-# VALIDATION FOLDERS — the Technical team's AI Check / Plagiarism Check /
-# Test Paper checks.
-# ---------------------------------------------------------------------
-# * The Technical Manager grants individual Programmers / Paper Writers
-#   access to one or more folders (employees.validation_access, a comma list
-#   of folder keys). Only those people can sign in with the "Validation"
-#   login, and each one only sees the folders they were given.
-# * Anyone on the Technical team sends a paper (Word/PDF) into a folder.
-#   A validator then Approves it, or sends it back for Rework — a rework MUST
-#   carry a Word/PDF attachment (the AI / plagiarism report, marked-up copy,
-#   etc.). The original sender downloads it and uploads an updated version,
-#   which goes back into the same folder as the next round.
-# * Every step (submission, decision, resubmission) is one row in
-#   validation_events, which doubles as the file store and the audit trail.
-# =====================================================================
-VALIDATION_FOLDERS = {
-    "AI_CHECK": "AI Check",
-    "PLAGIARISM_CHECK": "Plagiarism Check",
-    "TEST_PAPER": "Test Paper",
-}
-VALIDATION_FOLDER_ORDER = ("AI_CHECK", "PLAGIARISM_CHECK", "TEST_PAPER")
-# Employee roles the Technical Manager may grant validation access to, and who may
-# send papers for validation — i.e. the Technical team's own individual logins.
-VALIDATION_ELIGIBLE_ROLES = ("PROGRAMMER", "PAPER_WRITER")
-# Department logins (besides Admin) that may send papers and see every folder.
-VALIDATION_DEPT_ROLES = ("technical_manager", "technical_tl", "content_coordinator")
-VALIDATION_STATUSES = ("PENDING", "APPROVED", "REWORK")
-# Word / PDF only. The MIME type stored is derived from the extension (never the
-# browser's claim), and the bytes are sniffed so a renamed .exe can't get through.
-VALIDATION_DOC_TYPES = {
-    "pdf": "application/pdf",
-    "doc": "application/msword",
-    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-# Papers are bigger than chat attachments. Base64 inflates by 4/3, so keep the
-# decoded cap comfortably inside MAX_BODY_BYTES (which bounds the whole request).
-VALIDATION_MAX_FILE_BYTES = min(
-    int(_env("VALIDATION_MAX_FILE_BYTES", str(8 * 1024 * 1024))),
-    max(1024 * 1024, (MAX_BODY_BYTES - 256 * 1024) * 3 // 4))
-VALIDATION_MAX_TITLE = 200
-VALIDATION_MAX_NOTE = 4000
-
-
-def parse_validation_access(raw):
-    """employees.validation_access ('AI_CHECK,TEST_PAPER') -> ordered list of valid keys."""
-    have = {p.strip().upper() for p in (raw or "").split(",") if p.strip()}
-    return [k for k in VALIDATION_FOLDER_ORDER if k in have]
-
-
-def read_validation_document(d, required=True, label="document"):
-    """Validate an uploaded Word/PDF from the request body (fileName / fileData).
-
-    Returns (file_name, file_type, base64_data) or (None, None, None) when nothing
-    was attached and required is False. Raises ApiError on anything else.
-    """
-    raw_name = (d.get("fileName") or "").strip()
-    data = d.get("fileData") or ""
-    if not raw_name and not data:
-        if required:
-            raise ApiError("Please attach the %s as a Word (.doc / .docx) or PDF file." % label)
-        return None, None, None
-    name = sanitize_upload_filename(raw_name)
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    if ext not in VALIDATION_DOC_TYPES:
-        raise ApiError("Only Word (.doc / .docx) or PDF files can be attached here.")
-    b64 = check_base64_payload(data, VALIDATION_MAX_FILE_BYTES, label)
-    if not b64:
-        raise ApiError("That %s is empty. Please choose the file again." % label)
-    head = base64.b64decode(b64[:64])[:8]
-    looks_right = ((ext == "pdf" and head.startswith(b"%PDF"))
-                   or (ext == "docx" and head.startswith(b"PK\x03\x04"))
-                   or (ext == "doc" and head.startswith(b"\xd0\xcf\x11\xe0")))
-    if not looks_right:
-        raise ApiError("That file doesn't look like a real %s file. Please export it again from Word "
-                       "and re-attach it." % ext.upper())
-    return name, VALIDATION_DOC_TYPES[ext], b64
 
 
 def service_conf(key):
@@ -1411,7 +1296,7 @@ _SERIAL_ID_TABLES = {
     "client_installments", "journal_targets", "messages", "thread_reads",
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
-    "task_stages", "validation_papers", "validation_events", "task_handoffs",
+    "task_stages",
 }
 
 
@@ -1838,75 +1723,6 @@ def init_db():
     con.execute("UPDATE employees SET role='PAPER_WRITER', is_coordinator=1 WHERE role='COORDINATOR'")
     con.commit()
 
-    # ----- Validation folders (AI Check / Plagiarism Check / Test Paper) -----
-    # validation_access: comma list of folder keys the Technical Manager granted.
-    con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS validation_access TEXT DEFAULT ''")
-    con.executescript(f"""
-    CREATE TABLE IF NOT EXISTS validation_papers (
-        id SERIAL PRIMARY KEY,
-        folder TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT DEFAULT '',
-        client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
-        status TEXT NOT NULL DEFAULT 'PENDING',
-        round INTEGER NOT NULL DEFAULT 1,
-        submitted_by_key TEXT NOT NULL DEFAULT '',
-        submitted_by_name TEXT NOT NULL DEFAULT '',
-        submitted_by_emp_id INTEGER,
-        last_reviewer_name TEXT DEFAULT '',
-        last_reviewer_emp_id INTEGER,
-        created_at TEXT DEFAULT ({_NOW_SQL}),
-        updated_at TEXT DEFAULT ({_NOW_SQL})
-    );
-    CREATE INDEX IF NOT EXISTS idx_validation_papers_folder ON validation_papers (folder, status);
-    CREATE INDEX IF NOT EXISTS idx_validation_papers_sender ON validation_papers (submitted_by_key);
-    -- One row per step: SUBMITTED / RESUBMITTED (the paper itself) and
-    -- APPROVED / REWORK (the validator's decision; a REWORK always carries a file).
-    CREATE TABLE IF NOT EXISTS validation_events (
-        id SERIAL PRIMARY KEY,
-        paper_id INTEGER NOT NULL REFERENCES validation_papers(id) ON DELETE CASCADE,
-        round INTEGER NOT NULL DEFAULT 1,
-        event TEXT NOT NULL,
-        actor_key TEXT NOT NULL DEFAULT '',
-        actor_name TEXT NOT NULL DEFAULT '',
-        note TEXT DEFAULT '',
-        file_name TEXT DEFAULT '',
-        file_type TEXT DEFAULT '',
-        file_data TEXT,
-        file_size INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT DEFAULT ({_NOW_SQL})
-    );
-    CREATE INDEX IF NOT EXISTS idx_validation_events_paper ON validation_events (paper_id, id);
-    -- "Send completed work to ..." — one row every time finished task work is handed to a
-    -- Coordinator, the Technical TL or the Technical Manager. (Sends to a validation folder
-    -- are recorded as validation_papers/validation_events instead, linked by task_id.)
-    CREATE TABLE IF NOT EXISTS task_handoffs (
-        id SERIAL PRIMARY KEY,
-        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-        client_id TEXT REFERENCES clients(id) ON DELETE CASCADE,
-        target TEXT NOT NULL,
-        target_emp_id INTEGER,
-        target_name TEXT NOT NULL DEFAULT '',
-        note TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'SENT',
-        sent_by_key TEXT NOT NULL DEFAULT '',
-        sent_by_name TEXT NOT NULL DEFAULT '',
-        sent_by_emp_id INTEGER,
-        resolved_by TEXT DEFAULT '',
-        resolved_note TEXT DEFAULT '',
-        resolved_at TEXT DEFAULT '',
-        created_at TEXT DEFAULT ({_NOW_SQL})
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_handoffs_task ON task_handoffs (task_id);
-    CREATE INDEX IF NOT EXISTS idx_task_handoffs_target ON task_handoffs (target_emp_id, status);
-    """)
-    con.execute("ALTER TABLE validation_papers ADD COLUMN IF NOT EXISTS task_id INTEGER")
-    # Coordinator review: the employee may attach the paper when sending to a coordinator,
-    # and the coordinator may attach a marked-up document when sending it back.
-    for col in ("file_name", "file_type", "file_data", "return_file_name", "return_file_type", "return_file_data"):
-        con.execute("ALTER TABLE task_handoffs ADD COLUMN IF NOT EXISTS %s TEXT DEFAULT ''" % col)
-    con.commit()
-
     if con.execute("SELECT COUNT(*) c FROM employees").fetchone()["c"] == 0:
         for n in ("Janani", "Aishwarya", "Satish"):
             con.execute("INSERT INTO employees (name, role) VALUES (?, 'PROGRAMMER')", (n,))
@@ -2010,10 +1826,6 @@ def init_db():
         "proposal_start_date": "TEXT DEFAULT ''",
         "implementation_start_date": "TEXT DEFAULT ''",
         "writing_start_date": "TEXT DEFAULT ''",
-        # ----- Paper Writer's own "Mark writing completed" (they then send it on from
-        #       My assigned tasks: Coordinator / Validation / Technical TL / Manager). -----
-        "writing_completed_at": "TEXT DEFAULT ''",
-        "writing_completed_by": "TEXT DEFAULT ''",
     }
     for col, decl in extra_cols.items():
         con.execute(f"ALTER TABLE clients ADD COLUMN IF NOT EXISTS {col} {decl}")
@@ -2513,7 +2325,6 @@ _EMPLOYEE_HIDDEN_FIELDS = _CLIENT_INTERNAL_FIELDS + (
 def scrub_client_for_client(c):
     """Client-portal view of a client record."""
     out = {k: v for k, v in c.items() if k not in _CLIENT_INTERNAL_FIELDS}
-    out.pop("stageTimes", None)     # internal routing (who moved it when) isn't portal content
     # A client may see its own chat threads, but not staff-to-staff previews.
     out.pop("messageThreads", None)
     return out
@@ -2530,14 +2341,6 @@ def scrub_employee(e):
             "empUid", "is_coordinator", "isCoordinator", "coordinator_id",
             "coordinatorId", "designation", "department")
     return {k: v for k, v in e.items() if k in keep}
-
-
-def task_assigned_to(t, name):
-    """True if the task (a DB row / dict) is assigned to this person by name."""
-    if not name:
-        return False
-    raw = t.get("assigned_to") if t.get("assigned_to") is not None else t.get("assignedTo")
-    return name in [x.strip() for x in (raw or "").split(",") if x.strip()]
 
 
 def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
@@ -2560,10 +2363,7 @@ def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
                  like, like, like, like, like, like)):
             visible.add(r["id"])
     for t in tasks or []:
-        # BUGFIX: task rows carry "assigned_to" (a comma-separated list of names), not
-        # "assignedTo" — so a task the Technical Manager assigned from the Tasks page never
-        # made its client (or the task itself) visible to the employee it was assigned to.
-        if task_assigned_to(t, name) or t.get("assignedEmpId") == emp_id:
+        if (t.get("assignedTo") or "").strip() == name or t.get("assignedEmpId") == emp_id:
             if t.get("client_id"):
                 visible.add(t["client_id"])
     for q in queries or []:
@@ -2571,302 +2371,6 @@ def employee_visible_client_ids(con, emp_id, emp_name, tasks, queries):
             if q.get("client_id"):
                 visible.add(q["client_id"])
     return visible
-
-
-def validation_caller(con, d):
-    """Who is calling a validation action, resolved from the session-bound fields only.
-
-    Returns a dict with:
-      kind        "validator" | "employee" | "dept"
-      key/name    the caller's identity (EMP:<id> or ROLE:<role>) and display label
-      emp_id      employee id, or None for department logins
-      folders     folders this caller may review (validators only; read live from the DB
-                  so a revoked grant takes effect immediately)
-      sees_all    True for Technical department logins / Admin (every folder, read-only)
-      manages     True if the caller may grant/revoke validation access
-    """
-    role = (d.get("role") or "").strip()
-    out = {"kind": "", "key": d.get("_principal_key") or "", "name": d.get("_principal_label") or "",
-           "emp_id": None, "folders": [], "sees_all": False, "manages": False}
-    if role == "validator":
-        e = con.execute("SELECT id, role, active, deleted_at, validation_access FROM employees WHERE id=?",
-                        (d.get("empId"),)).fetchone()
-        folders = parse_validation_access(e["validation_access"]) if e else []
-        if not e or not e["active"] or e["deleted_at"] or e["role"] not in VALIDATION_ELIGIBLE_ROLES or not folders:
-            raise ApiError("Your validation access has been removed. Please sign in again.", 401)
-        out.update(kind="validator", emp_id=e["id"], folders=folders)
-    elif role == "employee":
-        if (d.get("empRole") or "") not in VALIDATION_ELIGIBLE_ROLES:
-            raise ApiError("Validation folders are only available to the Technical team.", 403)
-        out.update(kind="employee", emp_id=d.get("empId"))
-    elif role in VALIDATION_DEPT_ROLES or role in ADMIN_ROLES:
-        out.update(kind="dept", sees_all=True,
-                   manages=role in ("technical_manager",) + ADMIN_ROLES)
-    else:
-        raise ApiError("You don't have permission to do that.", 403)
-    return out
-
-
-def validation_can_view_paper(caller, paper):
-    if caller["sees_all"]:
-        return True
-    if caller["kind"] == "validator":
-        return paper["folder"] in caller["folders"]
-    return paper["submitted_by_key"] == caller["key"]
-
-
-def validation_load_paper(con, paper_id, for_update=False):
-    try:
-        pid = int(paper_id)
-    except (TypeError, ValueError):
-        raise ApiError("That paper couldn't be found.", 404)
-    row = con.execute("SELECT * FROM validation_papers WHERE id=?" + (" FOR UPDATE" if for_update else ""),
-                      (pid,)).fetchone()
-    if not row:
-        raise ApiError("That paper couldn't be found. It may have been removed.", 404)
-    return row
-
-
-def validation_papers_out(con, rows, caller):
-    """Serialize papers + their history. File bytes are never included here —
-    they're fetched one at a time through validation_get_file."""
-    ids = [r["id"] for r in rows]
-    events_by = {}
-    if ids:
-        ph = ",".join(["?"] * len(ids))
-        for e in con.execute(
-                f"""SELECT id, paper_id, round, event, actor_name, note, file_name, file_type,
-                           file_size, created_at
-                    FROM validation_events WHERE paper_id IN ({ph}) ORDER BY id ASC""", tuple(ids)):
-            events_by.setdefault(e["paper_id"], []).append({
-                "id": e["id"], "round": e["round"], "event": e["event"], "actorName": e["actor_name"],
-                "note": e["note"] or "", "fileName": e["file_name"] or "", "fileType": e["file_type"] or "",
-                "fileSize": e["file_size"] or 0, "hasFile": bool(e["file_name"]), "at": iso(e["created_at"]),
-            })
-    client_ids = {r["client_id"] for r in rows if r["client_id"]}
-    clients_by = {}
-    if client_ids:
-        ph = ",".join(["?"] * len(client_ids))
-        for c in con.execute(f"SELECT id, name, display_id, project_id FROM clients WHERE id IN ({ph})",
-                             tuple(client_ids)):
-            clients_by[c["id"]] = c
-    out = []
-    for r in rows:
-        c = clients_by.get(r["client_id"])
-        out.append({
-            "id": r["id"], "folder": r["folder"], "folderLabel": VALIDATION_FOLDERS.get(r["folder"], r["folder"]),
-            "title": r["title"], "description": r["description"] or "", "status": r["status"],
-            "round": r["round"], "submittedByName": r["submitted_by_name"],
-            "isMine": r["submitted_by_key"] == caller["key"],
-            "lastReviewerName": r["last_reviewer_name"] or "",
-            "clientId": r["client_id"] or "", "clientName": c["name"] if c else "",
-            "clientDisplayId": (c["display_id"] or c["id"]) if c else "",
-            "projectId": (c["project_id"] or "") if c else "",
-            "createdAt": iso(r["created_at"]), "updatedAt": iso(r["updated_at"]),
-            "events": events_by.get(r["id"], []),
-        })
-    return out
-
-
-HANDOFF_TARGETS = {
-    "COORDINATOR": "Coordinator",
-    "VALIDATION": "Validation",
-    "TECH_TL": "Technical TL",
-    "TECH_MANAGER": "Technical Manager",
-}
-
-
-def resolve_mgmt_handoffs(con, task_id, status, by, note="", targets=("TECH_TL", "TECH_MANAGER")):
-    """Close any still-waiting sends of this task to the Technical TL / Manager (or the
-    given targets), so the Task Board shows who approved / returned it instead of
-    'Waiting' forever after the decision was actually made somewhere else."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ph = ",".join(["?"] * len(targets))
-    con.execute(f"""UPDATE task_handoffs SET status=?, resolved_by=?, resolved_note=?, resolved_at=?
-                    WHERE task_id=? AND status='SENT' AND target IN ({ph})""",
-                (status, by or "", note or "", now, task_id) + tuple(targets))
-
-
-# Proposal and Code Implementation need ONE approval from the Technical TL / Manager —
-# no coordinator, no validation. Everything else keeps the full send-to flow.
-SINGLE_APPROVAL_TASK_TYPES = ("PROPOSAL", "IMPLEMENTATION")
-
-
-def complete_work_tasks(con, client_id, task_type, by):
-    """Once the Technical TL / Manager approves a proposal / code implementation (from any
-    screen), every open task of that kind for the client is marked COMPLETED, so the
-    employee sees it as done and can't keep sending it somewhere else."""
-    label = {"PROPOSAL": "proposal", "IMPLEMENTATION": "code implementation"}.get(task_type, "work")
-    rows = con.execute("""SELECT id FROM tasks WHERE client_id=? AND task_type=?
-                          AND status<>'COMPLETED'""", (client_id, task_type)).fetchall()
-    for r in rows:
-        con.execute("UPDATE tasks SET status='COMPLETED' WHERE id=?", (r["id"],))
-        con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                    (r["id"], by, "%s approved the %s — marked completed." % (by, label)))
-        resolve_mgmt_handoffs(con, r["id"], "APPROVED", by, "Approved — completed.")
-
-
-def complete_proposal_tasks(con, client_id, by):
-    complete_work_tasks(con, client_id, "PROPOSAL", by)
-
-
-# ----- Paper Writing: every reviewer approves INDIVIDUALLY. The writer can send to each
-#       reviewer (Coordinator, Technical TL, Technical Manager) as many times as needed
-#       until THAT reviewer approves; once all of them have approved, the paper is complete
-#       and the next step is the Journal Team. AI / Plagiarism checks: any number of times.
-PAPER_REVIEW_TARGETS = ("COORDINATOR", "TECH_TL", "TECH_MANAGER")
-
-
-def paper_required_reviewers(con, task):
-    """Technical TL + Technical Manager always; a Coordinator too, if there is an active
-    coordinator the writer could actually send it to (not the writer themself)."""
-    req = ["TECH_TL", "TECH_MANAGER"]
-    assignees = [x.strip() for x in (task["assigned_to"] or "").split(",") if x.strip()]
-    ph = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
-    rows = con.execute(f"""SELECT name FROM employees WHERE is_coordinator=1 AND active=1
-                           AND deleted_at IS NULL AND role IN ({ph})""", VALIDATION_ELIGIBLE_ROLES).fetchall()
-    if any(r["name"] not in assignees for r in rows):
-        req.insert(0, "COORDINATOR")
-    return req
-
-
-def paper_review_state(con, task_id):
-    """{target: 'APPROVED' | 'SENT' | 'RETURNED' | None} for each reviewer."""
-    state = {t: None for t in PAPER_REVIEW_TARGETS}
-    for r in con.execute("""SELECT target, status FROM task_handoffs WHERE task_id=?
-                            ORDER BY id""", (task_id,)).fetchall():
-        if r["target"] not in state:
-            continue
-        if state[r["target"]] == "APPROVED":
-            continue
-        state[r["target"]] = r["status"] if r["status"] != "FORWARDED" else "APPROVED"
-    return state
-
-
-def maybe_complete_paper_task(con, task_id, by):
-    """Called after any individual approval. When every required reviewer has approved,
-    the task is COMPLETED and the client's paper is ready for delivery / the Journal Team."""
-    task = con.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    if not task or (task["task_type"] or "") != "PAPER_WRITING" or task["status"] == "COMPLETED":
-        return False
-    state = paper_review_state(con, task_id)
-    need = paper_required_reviewers(con, task)
-    if not all(state.get(t) == "APPROVED" for t in need):
-        return False
-    con.execute("UPDATE tasks SET status='COMPLETED' WHERE id=?", (task_id,))
-    con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                (task_id, by, "All reviewers approved (%s) — paper writing completed. Next: the Journal Team."
-                 % ", ".join(HANDOFF_TARGETS[t] for t in need)))
-    if task["client_id"]:
-        c = con.execute("SELECT stage FROM clients WHERE id=?", (task["client_id"],)).fetchone()
-        if c and c["stage"] in ("PAPERWRITER_ASSIGNED", "WRITER_FIXING", "COORDINATOR_REVIEW",
-                                "TECHTL_REVIEW", "TECHMGR_REVIEW"):
-            move_stage(con, task["client_id"], "WRITING_COMPLETE", by,
-                       "Paper approved by every reviewer (%s) — ready to deliver / send to the Journal Team."
-                       % ", ".join(HANDOFF_TARGETS[t] for t in need))
-    return True
-
-
-def work_sends(con):
-    """Every time finished work was sent somewhere, newest first — for the project Task
-    Board counts/timeline and the coordinator's "sent to me" queue.
-
-    Two sources, merged into one shape:
-      * task_handoffs      — sends to a Coordinator / Technical TL / Technical Manager
-      * validation_events  — every SUBMITTED / RESUBMITTED round of a validation paper
-                             that is linked to a client or a task, paired with the
-                             validator's decision on that same round (if made yet)
-    No file bytes, no note-free PII beyond names already shown elsewhere in the app.
-    """
-    out = []
-    for r in con.execute(
-            """SELECT h.id, h.task_id, h.client_id, h.target, h.target_emp_id, h.target_name, h.note,
-                      h.status, h.sent_by_name, h.sent_by_emp_id, h.resolved_by, h.resolved_note,
-                      h.resolved_at, h.created_at, h.file_name, h.return_file_name,
-                      (COALESCE(h.file_data, '') <> '') AS has_file,
-                      (COALESCE(h.return_file_data, '') <> '') AS has_return_file,
-                      t.title AS task_title, t.status AS task_status, t.assigned_to AS task_assigned,
-                      t.task_type AS task_type
-               FROM task_handoffs h JOIN tasks t ON t.id = h.task_id
-               ORDER BY h.created_at DESC, h.id DESC"""):
-        out.append({
-            "kind": "HANDOFF", "id": "h%d" % r["id"], "handoffId": r["id"],
-            "clientId": r["client_id"] or "", "taskId": r["task_id"], "taskTitle": r["task_title"],
-            "taskStatus": r["task_status"], "taskAssignedTo": r["task_assigned"] or "",
-            "taskType": r["task_type"] or "",
-            # File names only — the bytes are fetched on demand (task_handoff_file).
-            "hasFile": bool(r["has_file"]), "fileName": r["file_name"] or "",
-            "hasReturnFile": bool(r["has_return_file"]), "returnFileName": r["return_file_name"] or "",
-            "target": r["target"], "targetLabel": HANDOFF_TARGETS.get(r["target"], r["target"]),
-            "purpose": "", "purposeLabel": "",
-            "targetEmpId": r["target_emp_id"], "targetName": r["target_name"] or "",
-            "sentBy": r["sent_by_name"], "sentByEmpId": r["sent_by_emp_id"], "note": r["note"] or "",
-            "at": iso(r["created_at"]), "round": None, "status": r["status"],
-            "resolvedBy": r["resolved_by"] or "", "resolvedNote": r["resolved_note"] or "",
-            "resolvedAt": iso(r["resolved_at"]) if r["resolved_at"] else None,
-        })
-    papers = {p["id"]: p for p in con.execute(
-        """SELECT p.*, t.title AS task_title FROM validation_papers p
-           LEFT JOIN tasks t ON t.id = p.task_id
-           WHERE p.client_id IS NOT NULL OR p.task_id IS NOT NULL""")}
-    if papers:
-        ph = ",".join(["?"] * len(papers))
-        decisions = {}
-        sends = []
-        for e in con.execute(f"""SELECT id, paper_id, round, event, actor_name, note, created_at
-                                 FROM validation_events WHERE paper_id IN ({ph}) ORDER BY id""",
-                             tuple(papers.keys())):
-            if e["event"] in ("SUBMITTED", "RESUBMITTED"):
-                sends.append(e)
-            else:
-                decisions[(e["paper_id"], e["round"])] = e
-        # Who can currently review each folder — shown while a round is still waiting.
-        validators = {k: [] for k in VALIDATION_FOLDERS}
-        ph2 = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
-        for v in con.execute(f"""SELECT name, validation_access FROM employees
-                                 WHERE active=1 AND deleted_at IS NULL AND role IN ({ph2})
-                                 ORDER BY name""", VALIDATION_ELIGIBLE_ROLES):
-            for f in parse_validation_access(v["validation_access"]):
-                validators[f].append(v["name"])
-        for e in sends:
-            p = papers[e["paper_id"]]
-            dec = decisions.get((e["paper_id"], e["round"]))
-            out.append({
-                "kind": "VALIDATION", "id": "v%d" % e["id"], "paperId": p["id"],
-                "clientId": p["client_id"] or "", "taskId": p["task_id"],
-                "taskTitle": p["task_title"] or p["title"], "paperTitle": p["title"],
-                "target": "VALIDATION", "targetLabel": "Validation",
-                "purpose": p["folder"], "purposeLabel": VALIDATION_FOLDERS.get(p["folder"], p["folder"]),
-                "targetEmpId": None,
-                "targetName": dec["actor_name"] if dec else "",
-                # A validator can't check their own paper, so the sender is never listed here.
-                "possibleValidators": [] if dec else [n for n in validators.get(p["folder"], [])
-                                                     if n != p["submitted_by_name"]],
-                "sentBy": p["submitted_by_name"], "sentByEmpId": p["submitted_by_emp_id"],
-                "note": e["note"] or "", "at": iso(e["created_at"]), "round": e["round"],
-                "status": dec["event"] if dec else "PENDING",
-                "resolvedBy": dec["actor_name"] if dec else "", "resolvedNote": (dec["note"] or "") if dec else "",
-                "resolvedAt": iso(dec["created_at"]) if dec else None,
-            })
-    out.sort(key=lambda x: x["at"] or "", reverse=True)
-    return out
-
-
-def validation_client_linkable(con, d, client_id):
-    """A paper may optionally be linked to a client. Individually-added employees may
-    only link clients they can already see on their own dashboard (same rule as
-    bootstrap), so this can't be used to discover other clients' names."""
-    if not client_id:
-        return None
-    row = con.execute("SELECT id FROM clients WHERE id=?", (client_id,)).fetchone()
-    if not row:
-        raise ApiError("That client couldn't be found.")
-    if (d.get("role") or "") == "employee":
-        tasks = [dict(r) for r in con.execute("SELECT client_id, assigned_to FROM tasks")]
-        queries = [dict(r) for r in con.execute("SELECT client_id, assigned_to FROM client_queries")]
-        if client_id not in employee_visible_client_ids(con, d.get("empId"), d.get("empName"), tasks, queries):
-            raise ApiError("You can only link a client you're working on.")
-    return row["id"]
 
 
 def all_clients(con):
@@ -2974,19 +2478,12 @@ def all_clients(con):
             "history": [{"stage": h["stage"], "actor": h["actor"], "at": iso(h["created_at"]),
                          "note": h["note"] or ""}
                         for h in hist_by.get(cid, [])],
-            # When each pipeline stage was reached, and by whom — for the project Task Board.
-            # Kept separate from "history" (which carries internal notes and is stripped for
-            # employees) so programmers/writers opening a project still see the dates.
-            "stageTimes": [{"stage": h["stage"], "actor": h["actor"], "at": iso(h["created_at"])}
-                           for h in hist_by.get(cid, [])],
             "workUpdates": [{"empName": w["emp_name"], "milestone": w["milestone"], "note": w["note"],
                               "at": iso(w["created_at"])} for w in work_by.get(cid, [])],
             "rejected": bool(r["rejected"]), "rejectReason": r["reject_reason"] or "",
             "rejectedAt": iso(r["rejected_at"]) if r["rejected_at"] else None,
             "writingDeadline": r["writing_deadline"],
             "writingStartDate": r["writing_start_date"] or "",
-            "writingCompletedAt": r["writing_completed_at"] or "",
-            "writingCompletedBy": r["writing_completed_by"] or "",
             "demoCompletedDate": r["demo_completed_date"],
             "demoGivenDate": r["demo_given_date"],
             "demoSatisfied": r["demo_satisfied"] or "",
@@ -3526,7 +3023,7 @@ def handle_action(action, d, ip=""):
                 return {"authenticated": False}
             out = {"authenticated": True, "kind": sess["kind"], "role": sess["role"],
                    "csrfToken": sess["csrf"]}
-            if sess["kind"] in ("employee", "validator"):
+            if sess["kind"] == "employee":
                 out.update({"empId": sess["emp_id"], "empUid": sess["emp_uid"],
                             "empName": sess["emp_name"], "empRole": sess["emp_role"],
                             "empTeamType": sess["emp_team_type"] or ""})
@@ -3553,35 +3050,6 @@ def handle_action(action, d, ip=""):
             # checked (and burned) before any account lookup or password check.
             verify_login_captcha(d.get("captchaId"), d.get("captchaAnswer"))
             role = d.get("role") or ""
-            if role == "validator":
-                # The Validation login: same Employee ID + password as the person's normal
-                # login, but only for Technical-team employees the Technical Manager has
-                # granted at least one validation folder. It opens a separate, narrow
-                # session (kind "validator") that can reach nothing but the validation
-                # folders — see ACTION_ROLES.
-                uid = (d.get("empUid") or "").strip()
-                if not uid:
-                    raise ApiError("Enter your employee ID.")
-                e = con.execute("SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?) AND deleted_at IS NULL",
-                                (uid,)).fetchone()
-                # Same generic wording whether the ID is unknown or the password is wrong,
-                # so this screen can't be used to discover who has validation access.
-                if not e or not verify_password(d.get("password") or "", e["password"] or ""):
-                    raise ApiError("Incorrect employee ID or password. Please try again.")
-                if not e["active"]:
-                    raise ApiError("Your access has been disabled by the Super Admin. Contact them for help.")
-                folders = parse_validation_access(e["validation_access"])
-                if e["role"] not in VALIDATION_ELIGIBLE_ROLES or not folders:
-                    raise ApiError("You don't have validation access yet. Ask your Technical Manager to give "
-                                   "you access to a validation folder (AI Check, Plagiarism Check or Test Paper).")
-                delete_session(con, d.get("_session_token"))   # no session fixation
-                sess = create_session(con, "validator", "validator", ip=ip, emp_id=e["id"],
-                                       emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
-                                       emp_team_type=e["team_type"] or "")
-                return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
-                        "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
-                        "validationFolders": folders,
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
             if role == "employee":
                 uid = (d.get("empUid") or "").strip()
                 if not uid:
@@ -3807,7 +3275,6 @@ def handle_action(action, d, ip=""):
                 """SELECT id, client_id, designation, name, email, mobile, created_at
                    FROM client_referrals ORDER BY created_at DESC""")]
             clients_out = all_clients(con)
-            sends_out = work_sends(con)
 
             # SECURITY (IDOR fix): a logged-in "client" session must only ever receive data
             # about itself (and any other service under the same CL-ID "family" — the app's
@@ -3834,7 +3301,6 @@ def handle_action(action, d, ip=""):
                 # setup token, hold/rejection reasons and internal history.
                 clients_out = [scrub_client_for_client(c) for c in clients_out]
                 client_notes = []          # internal staff notes are not portal content
-                sends_out = []             # internal review routing is not portal content
 
             # SECURITY: individually-added employees (programmers, writers, ...) used to
             # receive the entire client table here — every phone number, e-mail address,
@@ -3848,17 +3314,11 @@ def handle_action(action, d, ip=""):
                 clients_out = [scrub_client_for_employee(c) for c in clients_out
                                if c["id"] in visible]
                 queries = [q for q in queries if q["client_id"] in visible]
-                # An employee's own tasks always show, including ones with no client.
-                tasks = [t for t in tasks if t.get("client_id") in visible or task_assigned_to(t, emp_name)]
+                tasks = [t for t in tasks if t.get("client_id") in visible]
                 client_docs = [x for x in client_docs if x["client_id"] in visible]
                 client_notes = [x for x in client_notes if x["client_id"] in visible]
                 client_refs = []
                 events = [e for e in events if (e.get("visibility") or "everyone") != "private"]
-                # Sends on clients they work on, plus anything sent BY or TO them (a coordinator
-                # must see work routed to them even on a client they aren't otherwise attached to).
-                sends_out = [x for x in sends_out
-                             if x["clientId"] in visible or x.get("sentByEmpId") == emp_id
-                             or x.get("targetEmpId") == emp_id]
 
             employees_out = all_employees(con)
             if (d.get("role") or "") in ("client", "employee"):
@@ -3867,7 +3327,7 @@ def handle_action(action, d, ip=""):
             return {"clients": clients_out, "employees": employees_out,
                     "settings": get_settings(con), "calendarEvents": events, "clientQueries": queries,
                     "tasks": tasks, "clientDocuments": client_docs, "clientNotes": client_notes,
-                    "clientReferrals": client_refs, "workSends": sends_out,
+                    "clientReferrals": client_refs,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
                                       "amounts": v["amounts"]} for k, v in SERVICES.items()}}
@@ -4424,15 +3884,6 @@ def handle_action(action, d, ip=""):
                 if not c:
                     pass
                 elif ttype == "PROPOSAL":
-                    if c["stage"] == "PROPOSAL_ASSIGNED" and row["status"] == "SUBMITTED":
-                        # The writer sent the proposal to the TL/Manager from their task (not the
-                        # old "Submit proposal" button), so the pipeline never recorded it as
-                        # submitted. Record that now, then approve it — one approval is enough.
-                        con.execute("UPDATE clients SET proposal_submitted_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
-                                    (c["id"],))
-                        move_stage(con, c["id"], "PROPOSAL_SUBMITTED", (row["assigned_to"] or "Writer").strip(),
-                                   "Proposal sent to the Technical TL / Manager for approval.")
-                        c = con.execute("SELECT * FROM clients WHERE id=?", (c["id"],)).fetchone()
                     if c["stage"] == "PROPOSAL_SUBMITTED":
                         con.execute("UPDATE clients SET proposal_verified_by=? WHERE id=?", (actor_label, c["id"]))
                         move_stage(con, c["id"], "PROPOSAL_VERIFIED", actor_label,
@@ -4445,12 +3896,13 @@ def handle_action(action, d, ip=""):
                 elif ttype == "IMPLEMENTATION":
                     if c["stage"] == "IMPLEMENTATION_ASSIGNED":
                         if c["demo_given_date"] and not c["demo_approved_at"]:
-                            # Approving the programmer's submitted work also signs off the demo
-                            # they recorded — one approval, not two separate ones.
-                            con.execute("""UPDATE clients SET demo_approved_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
-                                           demo_approved_by=? WHERE id=?""", (actor_label, c["id"]))
-                        move_stage(con, c["id"], "IMPLEMENTATION_COMPLETE", actor_label,
-                                   "Code implementation approved — completed, ready for delivery to the client.")
+                            sync_note = ("Task marked complete, but this client's implementation is still "
+                                          "waiting on demo approval before it can move forward for real — "
+                                          "approve the demo first.")
+                        else:
+                            c = con.execute("SELECT * FROM clients WHERE id=?", (c["id"],)).fetchone()
+                            move_stage(con, c["id"], "IMPLEMENTATION_COMPLETE", actor_label,
+                                       "Marked complete via Work Updates approval — ready for delivery to the client.")
                     elif stageIdxServer(c["stage"]) > stageIdxServer("IMPLEMENTATION_ASSIGNED"):
                         pass
                     else:
@@ -4485,13 +3937,6 @@ def handle_action(action, d, ip=""):
                         if start_idx < len(review_chain) - 1:
                             sync_note = ("Approved — this also signed off the remaining internal review "
                                          "round(s) for you, and the client is now ready for the Journal Team.")
-                    elif c["stage"] == "PAPERWRITER_ASSIGNED" and (
-                            row["status"] == "SUBMITTED" or (c["writing_completed_at"] or "")):
-                        # The writer marked the writing completed / sent it on from My assigned
-                        # tasks (not the old "Submit draft to Coordinator" pipeline button), so
-                        # this approval is the internal sign-off: ready for delivery.
-                        move_stage(con, c["id"], "WRITING_COMPLETE", actor_label,
-                                   "Paper writing approved — ready for delivery to the client.")
                     elif c["stage"] == "PAPERWRITER_ASSIGNED":
                         sync_note = ("Task marked complete, but the writer hasn't actually submitted their "
                                       "draft yet in the real pipeline — check with them before assuming this "
@@ -4506,17 +3951,6 @@ def handle_action(action, d, ip=""):
                                       "review in the real pipeline for this client.")
 
 
-            if "status" in d and status == "COMPLETED":
-                resolve_mgmt_handoffs(con, tid, "APPROVED", note_author, "Approved as complete.")
-                if (row["task_type"] or "") in SINGLE_APPROVAL_TASK_TYPES and row["client_id"]:
-                    complete_work_tasks(con, row["client_id"], row["task_type"], note_author)
-            elif "status" in d and status == "NEEDS_CORRECTION":
-                resolve_mgmt_handoffs(con, tid, "RETURNED", note_author, extra_note or "Sent back for correction.")
-                if (row["task_type"] or "") == "PROPOSAL" and row["client_id"]:
-                    pc = con.execute("SELECT stage FROM clients WHERE id=?", (row["client_id"],)).fetchone()
-                    if pc and pc["stage"] == "PROPOSAL_SUBMITTED":
-                        move_stage(con, row["client_id"], "PROPOSAL_ASSIGNED", note_author,
-                                   "Proposal sent back for rework." + (" Note: " + extra_note if extra_note else ""))
             con.commit()
             return {"ok": True, "pipelineSyncNote": sync_note} if sync_note else {"ok": True}
 
@@ -5024,114 +4458,8 @@ def handle_action(action, d, ip=""):
             #       implementation can be assigned.
             move_stage(con, c["id"], "PROPOSAL_VERIFIED", verifier,
                        "Approved by " + verifier + " — ready for delivery to the client.")
-            complete_proposal_tasks(con, c["id"], verifier)
             con.commit()
             return {"ok": True}
-
-        # ----- Technical Manager / TL hands work that's already assigned (and possibly
-        #       already submitted / waiting on approval) to someone else. Updates the real
-        #       pipeline assignee + dates AND the tracking task, so the new person sees it
-        #       in "My assigned tasks" and the old one doesn't.
-        if action == "reassign_work":
-            c = get_client(con, d.get("clientId") or "")
-            work = (d.get("workType") or "").strip().upper()
-            work_label = {"PROPOSAL": "Proposal writing", "IMPLEMENTATION": "Code implementation",
-                          "PAPER_WRITING": "Paper writing"}.get(work)
-            if not work_label:
-                raise ApiError("Unknown kind of work to reassign.")
-            allowed = {
-                "PROPOSAL": ("PROPOSAL_ASSIGNED", "PROPOSAL_SUBMITTED",
-                             "PROPOSAL_VERIFIED", "PROPOSAL_CLIENT_REVIEW"),
-                "IMPLEMENTATION": ("IMPLEMENTATION_ASSIGNED",
-                                   "IMPLEMENTATION_COMPLETE", "IMPLEMENTATION_CLIENT_REVIEW"),
-                "PAPER_WRITING": ("PAPERWRITER_ASSIGNED", "WRITER_FIXING", "COORDINATOR_REVIEW",
-                                  "TECHTL_REVIEW", "TECHMGR_REVIEW", "WRITING_COMPLETE", "CLIENT_REVIEW"),
-            }[work]
-            if c["stage"] not in allowed:
-                raise ApiError("This client's %s isn't in progress right now, so there's nothing to "
-                               "reassign. Refresh to see where it is." % work_label.lower())
-            valid = active_names(con, "PROGRAMMER" if work == "IMPLEMENTATION" else "PAPER_WRITER")
-            people = []
-            for p_ in (d.get("people") or []):
-                p_ = (p_ or "").strip()
-                if p_ in valid and p_ not in people:
-                    people.append(p_)
-            if not people:
-                raise ApiError("Pick who to reassign this work to.")
-            if work == "PROPOSAL":
-                people = people[:1]
-            deadline = (d.get("deadline") or "").strip()
-            if not deadline:
-                raise ApiError("Set a deadline for the reassigned work.")
-            start_date = (d.get("startDate") or "").strip() or date.today().isoformat()
-            if start_date > deadline:
-                raise ApiError("Start date can't be after the deadline.")
-            reason = (d.get("note") or "").strip()[:1000]
-            actor = (d.get("actorLabel") or "Technical Manager").strip()
-            names_csv = ",".join(people)
-            if work == "PROPOSAL":
-                old = c["proposal_writer"] or ""
-                con.execute("""UPDATE clients SET proposal_writer=?, proposal_deadline=?, proposal_start_date=?,
-                               proposal_coordinator='', proposal_awaiting_team_pick=0 WHERE id=?""",
-                            (names_csv, deadline, start_date, c["id"]))
-                if c["stage"] in ("PROPOSAL_VERIFIED", "PROPOSAL_CLIENT_REVIEW"):
-                    con.execute("UPDATE clients SET proposal_verified_by=NULL WHERE id=?", (c["id"],))
-                back_to = "PROPOSAL_ASSIGNED" if c["stage"] != "PROPOSAL_ASSIGNED" else None
-            elif work == "IMPLEMENTATION":
-                old = c["assigned_programmers"] or ""
-                con.execute("""UPDATE clients SET assigned_programmers=?, implementation_deadline=?,
-                               implementation_start_date=?, impl_coordinator='', impl_awaiting_team_pick=0
-                               WHERE id=?""", (names_csv, deadline, start_date, c["id"]))
-                back_to = "IMPLEMENTATION_ASSIGNED" if c["stage"] != "IMPLEMENTATION_ASSIGNED" else None
-                if back_to:
-                    # Already-approved code is being redone: the new programmer gives a fresh demo.
-                    con.execute("""UPDATE clients SET demo_given_date=NULL, demo_satisfied='',
-                                   demo_approved_at=NULL, demo_approved_by='' WHERE id=?""", (c["id"],))
-            else:
-                old = c["assigned_writers"] or ""
-                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=?,
-                               writing_awaiting_team_pick=0, review_level='', coordinator_rounds=0,
-                               techtl_rounds=0, techmgr_rounds=0, writing_completed_at='',
-                               writing_completed_by='' WHERE id=?""",
-                            (names_csv, deadline, start_date, c["id"]))
-                back_to = "PAPERWRITER_ASSIGNED" if c["stage"] != "PAPERWRITER_ASSIGNED" else None
-            old_txt = ", ".join([x.strip() for x in old.split(",") if x.strip()]) or "nobody"
-            hist_note = "%s reassigned from %s to %s (deadline %s).%s" % (
-                work_label, old_txt, ", ".join(people), deadline, (" Reason: " + reason) if reason else "")
-            if back_to:
-                move_stage(con, c["id"], back_to, actor, hist_note)
-            else:
-                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                            (c["id"], c["stage"], actor, hist_note))
-            # The tracking task: the one given, else the newest open one of this kind.
-            task = None
-            if d.get("taskId"):
-                try:
-                    task = con.execute("SELECT * FROM tasks WHERE id=? AND client_id=?",
-                                       (int(d.get("taskId")), c["id"])).fetchone()
-                except (TypeError, ValueError):
-                    task = None
-            if not task:
-                task = con.execute("""SELECT * FROM tasks WHERE client_id=? AND task_type=? AND status<>'COMPLETED'
-                                      ORDER BY id DESC LIMIT 1""", (c["id"], work)).fetchone()
-            assignees_txt = ", ".join(people)
-            if task:
-                con.execute("""UPDATE tasks SET assigned_to=?, start_date=?, finish_date=?, status='OPEN'
-                               WHERE id=?""", (assignees_txt, start_date, deadline, task["id"]))
-                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                            (task["id"], actor, hist_note))
-                resolve_mgmt_handoffs(con, task["id"], "RETURNED", actor,
-                                      "Work reassigned to %s." % assignees_txt,
-                                      targets=("TECH_TL", "TECH_MANAGER", "COORDINATOR"))
-                task_id = task["id"]
-            else:
-                cur = con.execute("""INSERT INTO tasks
-                    (title, description, client_id, priority, start_date, finish_date, assigned_to, created_by, task_type)
-                    VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (work_label, reason, c["id"], "MEDIUM", start_date, deadline, assignees_txt, actor, work))
-                task_id = cur.lastrowid
-            con.commit()
-            return {"ok": True, "taskId": task_id}
 
         # ----- Delivery step: Technical TL/Manager hands the internally-approved proposal to
         #       the client. Shows in the "Delivery" section of New Work To Assign / Task Board.
@@ -5392,33 +4720,6 @@ def handle_action(action, d, ip=""):
         #       This moves it into the Technical TL/Manager's "Delivery" queue - it still needs
         #       to be delivered to the client and approved there before paper writing can be
         #       assigned (see "send_implementation_to_client" / "client_approve_implementation").
-        # ----- The Programmer's "Submit to Technical TL / Manager" button. Older clients may
-        #       have no tracking task (it's created by Assign Work); make one so the work can
-        #       be sent for approval exactly like a proposal. Returns the task to send.
-        if action == "start_work_submission":
-            c = get_client(con, d.get("clientId") or "")
-            emp_name = (d.get("empName") or "").strip()
-            if c["stage"] != "IMPLEMENTATION_ASSIGNED":
-                raise ApiError("This client's code implementation isn't in progress right now.")
-            if (d.get("role") or "") == "employee" and emp_name not in names(c["assigned_programmers"]):
-                raise ApiError("You are not assigned as a programmer on this client.", 403)
-            rows = con.execute("""SELECT * FROM tasks WHERE client_id=? AND task_type='IMPLEMENTATION'
-                                  AND status<>'COMPLETED' ORDER BY id DESC""", (c["id"],)).fetchall()
-            mine = [r for r in rows if emp_name in [x.strip() for x in (r["assigned_to"] or "").split(",")]]
-            t = mine[0] if mine else None
-            if not t:
-                cur = con.execute("""INSERT INTO tasks
-                    (title, description, client_id, priority, start_date, finish_date, assigned_to, created_by, task_type)
-                    VALUES (?,?,?,?,?,?,?,?,?)""",
-                    ("Code implementation", "", c["id"], "MEDIUM",
-                     c["implementation_start_date"] or date.today().isoformat(),
-                     c["implementation_deadline"] or date.today().isoformat(),
-                     ", ".join(names(c["assigned_programmers"])) or emp_name, emp_name or "Programmer",
-                     "IMPLEMENTATION"))
-                con.commit()
-                return {"ok": True, "taskId": cur.lastrowid, "status": "OPEN"}
-            return {"ok": True, "taskId": t["id"], "status": t["status"]}
-
         if action == "complete_implementation":
             c = get_client(con, d.get("clientId") or "")
             require_stage(c, "IMPLEMENTATION_ASSIGNED")
@@ -5529,7 +4830,6 @@ def handle_action(action, d, ip=""):
                                techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
                             (",".join(picked), deadline, start_date, c["id"]))
                 note = ""
-            con.execute("UPDATE clients SET writing_completed_at='', writing_completed_by='' WHERE id=?", (c["id"],))
             move_stage(con, c["id"], "PAPERWRITER_ASSIGNED", actor, note)
             con.commit()
             return {"ok": True}
@@ -5591,30 +4891,6 @@ def handle_action(action, d, ip=""):
                 con.execute("UPDATE clients SET coordinator_name='' WHERE id=?", (c["id"],))
                 move_stage(con, c["id"], "TECHTL_REVIEW", who,
                            (note + " " if note else "") + "(no coordinator on this writer's team — sent straight to Technical TL)")
-            con.commit()
-            return {"ok": True}
-
-        # ----- Paper Writer marks their writing as completed. This replaces the old
-        #       "Submit draft to Coordinator" button on their card: it doesn't send the
-        #       paper anywhere — they choose where it goes from My assigned tasks. `undo`
-        #       clears the mark.
-        if action == "mark_writing_completed":
-            c = get_client(con, d.get("clientId") or "")
-            if c["stage"] not in ("PAPERWRITER_ASSIGNED", "WRITER_FIXING"):
-                raise ApiError("This client's paper writing isn't in progress right now.")
-            emp_name = (d.get("empName") or "").strip()
-            if (d.get("role") or "") == "employee" and emp_name not in names(c["assigned_writers"]):
-                raise ApiError("You are not assigned as a paper writer on this client.", 403)
-            who = emp_name or (d.get("actorLabel") or "Paper Writer").strip()
-            if d.get("undo"):
-                con.execute("UPDATE clients SET writing_completed_at='', writing_completed_by='' WHERE id=?", (c["id"],))
-                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                            (c["id"], c["stage"], who, "%s un-marked the writing as completed." % who))
-            else:
-                con.execute("""UPDATE clients SET writing_completed_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
-                               writing_completed_by=? WHERE id=?""", (who, c["id"]))
-                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                            (c["id"], c["stage"], who, "%s marked the paper writing as completed." % who))
             con.commit()
             return {"ok": True}
 
@@ -6495,10 +5771,7 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             actor_role = (d.get("role") or "").strip()
             emp_name = (d.get("empName") or "").strip()
-            is_assigned_emp = actor_role == "employee" and emp_name and (
-                emp_name == (c["demo_scheduled_emp"] or "") or
-                emp_name in names(c["assigned_programmers"] if (c["demo_scheduled_type"] or "code") == "code"
-                                  else c["assigned_writers"]))
+            is_assigned_emp = actor_role == "employee" and emp_name and emp_name == (c["demo_scheduled_emp"] or "")
             if not (is_assigned_emp or actor_role in ("super_admin", "md_admin",
                                                         "marketing_tl", "marketing_manager",
                                                         "technical_tl", "technical_manager")):
@@ -6530,10 +5803,7 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             actor_role = (d.get("role") or "").strip()
             emp_name = (d.get("empName") or "").strip()
-            is_assigned_emp = actor_role == "employee" and emp_name and (
-                emp_name == (c["demo_scheduled_emp"] or "") or
-                emp_name in names(c["assigned_programmers"] if (c["demo_scheduled_type"] or "code") == "code"
-                                  else c["assigned_writers"]))
+            is_assigned_emp = actor_role == "employee" and emp_name and emp_name == (c["demo_scheduled_emp"] or "")
             if not (is_assigned_emp or actor_role in ("super_admin", "md_admin")):
                 raise ApiError("Only the employee this demo was scheduled for can mark it completed.")
             if not c["demo_scheduled_date"] or (c["demo_schedule_status"] or "") != "SCHEDULED":
@@ -6705,424 +5975,6 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
-        # ----- "Send completed work to ..." ---------------------------------------------
-        # A Programmer / Paper Writer finishing an assigned task picks where it goes:
-        #   COORDINATOR  (a named coordinator reviews it; the paper can be attached)
-        #   VALIDATION   (AI Check / Plagiarism Check / Test Paper — creates a validation
-        #                 paper linked to the task + client; needs the Word/PDF file)
-        #   TECH_TL / TECH_MANAGER
-        # Rules:
-        #   * PROPOSAL tasks go straight to the team's Technical TL / Technical Manager —
-        #     no coordinator, no validation.
-        #   * Coordinator review (Paper Writing and other work): the coordinator either
-        #     APPROVES it (their part is then complete) or sends it BACK for correction.
-        #     The employee can send to a coordinator again only while it isn't approved —
-        #     never while a send is still waiting, and never after an approval.
-        #   * Coordinators don't forward work any more; after approval the employee sends
-        #     it on (Validation / Technical TL / Technical Manager) themselves.
-        if action == "task_send_work":
-            role_ = (d.get("role") or "").strip()
-            try:
-                task_id = int(d.get("taskId"))
-            except (TypeError, ValueError):
-                raise ApiError("That task no longer exists.")
-            task = con.execute("SELECT * FROM tasks WHERE id=? FOR UPDATE", (task_id,)).fetchone()
-            if not task:
-                raise ApiError("That task no longer exists.")
-            _target_peek = (d.get("target") or "").strip().upper()
-            _type_peek = (task["task_type"] or "").upper()
-            if task["status"] == "COMPLETED" and not (
-                    _type_peek not in SINGLE_APPROVAL_TASK_TYPES and _target_peek == "VALIDATION"):
-                # Paper work can still go for AI Check / Plagiarism Check after approval —
-                # as many times as needed. Everything else is locked once approved.
-                raise ApiError("This task has already been approved as complete."
-                               + ("" if _type_peek in SINGLE_APPROVAL_TASK_TYPES else
-                                  " You can still send it to Validation (AI Check / Plagiarism Check)."))
-            me_key = d.get("_principal_key") or ""
-            me_name = d.get("_principal_label") or role_
-            me_emp = None
-            if role_ == "employee":
-                if (d.get("empRole") or "") not in VALIDATION_ELIGIBLE_ROLES:
-                    raise ApiError("Only Programmers and Paper Writers can send work this way.", 403)
-                me_emp = d.get("empId")
-                me_name = (d.get("empName") or "").strip() or me_name
-                assignees = [x.strip() for x in (task["assigned_to"] or "").split(",") if x.strip()]
-                if me_name not in assignees:
-                    raise ApiError("Only the person assigned to this task can send it.", 403)
-            target = (d.get("target") or "").strip().upper()
-            if target not in HANDOFF_TARGETS:
-                raise ApiError("Choose where to send it: Coordinator, Validation, Technical TL or Technical Manager.")
-            task_type = (task["task_type"] or "").upper()
-            if task_type in SINGLE_APPROVAL_TASK_TYPES and target not in ("TECH_TL", "TECH_MANAGER"):
-                raise ApiError("A %s goes straight to your team's Technical TL or Technical Manager — "
-                               "there's no coordinator or validation step for it." %
-                               ("proposal" if task_type == "PROPOSAL" else "code implementation"))
-            if task_type in SINGLE_APPROVAL_TASK_TYPES:
-                waiting = con.execute("""SELECT target_name FROM task_handoffs WHERE task_id=? AND status='SENT'
-                                         AND target IN ('TECH_TL','TECH_MANAGER') ORDER BY id DESC LIMIT 1""",
-                                      (task["id"],)).fetchone()
-                if waiting or task["status"] == "SUBMITTED":
-                    raise ApiError("This work is already waiting on approval%s. It can be sent again only "
-                                   "if it's sent back for correction." %
-                                   ((" from the " + waiting["target_name"]) if waiting else ""))
-            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if target == "VALIDATION":
-                folder = (d.get("folder") or "").strip().upper()
-                if folder not in VALIDATION_FOLDERS:
-                    raise ApiError("Choose what it's for: AI Check, Plagiarism Check or Test Paper.")
-                fname, ftype, fdata = read_validation_document(d, required=True, label="paper")
-                cur = con.execute("""INSERT INTO validation_papers
-                                       (folder, title, description, client_id, task_id, status, round,
-                                        submitted_by_key, submitted_by_name, submitted_by_emp_id,
-                                        created_at, updated_at)
-                                     VALUES (?,?,?,?,?, 'PENDING', 1, ?,?,?,?,?)""",
-                                  (folder, task["title"][:VALIDATION_MAX_TITLE], note, task["client_id"],
-                                   task["id"], me_key, me_name, me_emp, now, now))
-                pid = cur.lastrowid
-                con.execute("""INSERT INTO validation_events
-                                 (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
-                                  file_data, file_size, created_at)
-                               VALUES (?, 1, 'SUBMITTED', ?,?,?,?,?,?,?,?)""",
-                            (pid, me_key, me_name, note, fname, ftype, fdata, len(fdata) * 3 // 4, now))
-                sent_to = "Validation — %s" % VALIDATION_FOLDERS[folder]
-            else:
-                target_emp_id, target_name = None, HANDOFF_TARGETS[target]
-                fname, ftype, fdata = "", "", ""
-                if target == "COORDINATOR":
-                    prev = con.execute(
-                        """SELECT status, target_name FROM task_handoffs
-                           WHERE task_id=? AND target='COORDINATOR' AND status IN ('APPROVED','SENT')
-                           ORDER BY (status='APPROVED') DESC, id DESC LIMIT 1""", (task["id"],)).fetchone()
-                    if prev and prev["status"] == "APPROVED":
-                        raise ApiError("Coordinator %s has already approved this work, so it can't go to a "
-                                       "coordinator again. Send it on to Validation, the Technical TL or the "
-                                       "Technical Manager." % prev["target_name"])
-                    if prev:
-                        raise ApiError("This work is already waiting on coordinator %s. You can send it "
-                                       "again only if they send it back for correction." % prev["target_name"])
-                    try:
-                        coord_id = int(d.get("coordinatorId"))
-                    except (TypeError, ValueError):
-                        raise ApiError("Choose a coordinator to send it to.")
-                    co = con.execute("""SELECT id, name, role FROM employees WHERE id=? AND is_coordinator=1
-                                        AND active=1 AND deleted_at IS NULL""",
-                                     (coord_id,)).fetchone()
-                    if not co or co["role"] not in VALIDATION_ELIGIBLE_ROLES:
-                        raise ApiError("Choose a coordinator to send it to.")
-                    if me_emp and co["id"] == me_emp:
-                        raise ApiError("You can't send work to yourself — pick another coordinator, "
-                                       "or send it to Validation / Technical TL / Technical Manager.")
-                    target_emp_id, target_name = co["id"], co["name"]
-                    # The paper is optional here — attach it if the coordinator should read it.
-                    fname, ftype, fdata = read_validation_document(d, required=False, label="paper")
-                    fname, ftype, fdata = fname or "", ftype or "", fdata or ""
-                else:
-                    if task_type not in SINGLE_APPROVAL_TASK_TYPES:
-                        prev = con.execute(
-                            """SELECT status, resolved_by FROM task_handoffs WHERE task_id=? AND target=?
-                               AND status IN ('APPROVED','SENT')
-                               ORDER BY (status='APPROVED') DESC, id DESC LIMIT 1""",
-                            (task["id"], target)).fetchone()
-                        if prev and prev["status"] == "APPROVED":
-                            raise ApiError("The %s has already approved this work (%s), so it can't go to them "
-                                           "again. Send it to the other reviewers / Validation." %
-                                           (HANDOFF_TARGETS[target], prev["resolved_by"] or "approved"))
-                        if prev:
-                            raise ApiError("This work is already waiting on the %s. You can send it to them "
-                                           "again once they approve it or send it back." % HANDOFF_TARGETS[target])
-                    # Straight to the Technical TL / Manager: a proposal must carry the proposal
-                    # document so they can read it before approving; other work may attach one.
-                    is_prop = task_type == "PROPOSAL"
-                    fname, ftype, fdata = read_validation_document(d, required=is_prop,
-                                                                   label="proposal" if is_prop else "paper")
-                    fname, ftype, fdata = fname or "", ftype or "", fdata or ""
-                con.execute("""INSERT INTO task_handoffs
-                                 (task_id, client_id, target, target_emp_id, target_name, note, status,
-                                  sent_by_key, sent_by_name, sent_by_emp_id, created_at,
-                                  file_name, file_type, file_data)
-                               VALUES (?,?,?,?,?,?, 'SENT', ?,?,?,?, ?,?,?)""",
-                            (task["id"], task["client_id"], target, target_emp_id, target_name, note,
-                             me_key, me_name, me_emp, now, fname, ftype, fdata))
-                sent_to = target_name if target != "COORDINATOR" else "Coordinator %s" % target_name
-            # Only sending it to the Technical TL / Manager puts it up for their final approval
-            # (SUBMITTED -> shows in Work Updates). Coordinator review and AI / plagiarism checks
-            # are steps along the way, so the task stays "in progress" and the writer can keep
-            # sending it on — to the next reviewer or to Validation again, any number of times.
-            if task_type in SINGLE_APPROVAL_TASK_TYPES:
-                if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
-                    con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
-            elif task["status"] in ("OPEN", "NEEDS_CORRECTION"):
-                con.execute("UPDATE tasks SET status='IN_PROGRESS' WHERE id=?", (task["id"],))
-            # A proposal sent to the TL / Manager IS the proposal submission — record it in the
-            # real pipeline too, so approving it (Work Updates or Work Validation) moves it on.
-            if task_type == "PROPOSAL" and task["client_id"]:
-                pc = con.execute("SELECT stage FROM clients WHERE id=?", (task["client_id"],)).fetchone()
-                if pc and pc["stage"] == "PROPOSAL_ASSIGNED":
-                    con.execute("UPDATE clients SET proposal_submitted_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
-                                (task["client_id"],))
-                    move_stage(con, task["client_id"], "PROPOSAL_SUBMITTED", me_name,
-                               "Proposal sent to the %s for approval." % sent_to)
-            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                        (task["id"], me_name, "%s sent this to %s.%s" % (me_name, sent_to,
-                                                                         (" Note: " + note) if note else "")))
-            con.commit()
-            return {"ok": True, "sentTo": sent_to}
-
-        if action in ("task_handoff_return", "task_handoff_approve"):
-            # The coordinator the work was sent to either approves it (their review is then
-            # complete — it can't come back to a coordinator) or sends it back for correction,
-            # optionally with a marked-up Word/PDF document.
-            try:
-                handoff_id = int(d.get("handoffId"))
-            except (TypeError, ValueError):
-                raise ApiError("That work wasn't sent to you.", 403)
-            h = con.execute("SELECT * FROM task_handoffs WHERE id=? FOR UPDATE", (handoff_id,)).fetchone()
-            if not h or h["target"] != "COORDINATOR" or h["target_emp_id"] != d.get("empId"):
-                raise ApiError("That work wasn't sent to you.", 403)
-            if h["status"] != "SENT":
-                raise ApiError("You've already dealt with this — refresh to see its latest status.")
-            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            me_name = (d.get("empName") or "").strip()
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if action == "task_handoff_approve":
-                con.execute("""UPDATE task_handoffs SET status='APPROVED', resolved_by=?, resolved_note=?,
-                                      resolved_at=? WHERE id=?""", (me_name, note, now, h["id"]))
-                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                            (h["task_id"], me_name, "%s (coordinator) approved this work.%s"
-                             % (me_name, (" Note: " + note) if note else "")))
-                done = maybe_complete_paper_task(con, h["task_id"], me_name)
-                con.commit()
-                return {"ok": True, "allApproved": done}
-
-            if not note:
-                raise ApiError("Explain what needs correcting.")
-            fname, ftype, fdata = read_validation_document(d, required=False, label="correction document")
-            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?, resolved_at=?,
-                                  return_file_name=?, return_file_type=?, return_file_data=?
-                           WHERE id=?""", (me_name, note, now, fname or "", ftype or "", fdata or "", h["id"]))
-            con.execute("UPDATE tasks SET status='NEEDS_CORRECTION' WHERE id=? AND status<>'COMPLETED'", (h["task_id"],))
-            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                        (h["task_id"], me_name, "%s (coordinator) sent this back for correction.%s Note: %s"
-                         % (me_name, (" Attached: " + fname + ".") if fname else "", note)))
-            con.commit()
-            return {"ok": True}
-
-        # ----- Technical TL / Manager: their OWN individual decision on paper work sent to
-        #       them (TL decides on sends to the TL, Manager on sends to the Manager).
-        if action == "task_mgmt_decision":
-            try:
-                handoff_id = int(d.get("handoffId"))
-            except (TypeError, ValueError):
-                raise ApiError("That work wasn't sent to you.", 403)
-            h = con.execute("SELECT * FROM task_handoffs WHERE id=? FOR UPDATE", (handoff_id,)).fetchone()
-            role_ = (d.get("role") or "").strip()
-            mine = {"technical_tl": ("TECH_TL",), "technical_manager": ("TECH_MANAGER",)}.get(
-                role_, ("TECH_TL", "TECH_MANAGER") if role_ in ("super_admin", "md_admin") else ())
-            if not h or h["target"] not in mine:
-                raise ApiError("That work was sent to the %s, not to you." %
-                               (HANDOFF_TARGETS.get(h["target"], "someone else") if h else "someone else"), 403)
-            if h["status"] != "SENT":
-                raise ApiError("This has already been dealt with — refresh to see its latest status.")
-            approve = bool(d.get("approve"))
-            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            actor = (d.get("actorLabel") or HANDOFF_TARGETS[h["target"]]).strip()
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if approve:
-                con.execute("""UPDATE task_handoffs SET status='APPROVED', resolved_by=?, resolved_note=?,
-                               resolved_at=? WHERE id=?""", (actor, note, now, h["id"]))
-                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                            (h["task_id"], actor, "%s approved this work.%s" % (actor, (" Note: " + note) if note else "")))
-                done = maybe_complete_paper_task(con, h["task_id"], actor)
-                con.commit()
-                return {"ok": True, "allApproved": done}
-            if not note:
-                raise ApiError("Add a rework note for the writer before sending it back.")
-            con.execute("""UPDATE task_handoffs SET status='RETURNED', resolved_by=?, resolved_note=?,
-                           resolved_at=? WHERE id=?""", (actor, note, now, h["id"]))
-            con.execute("UPDATE tasks SET status='NEEDS_CORRECTION' WHERE id=? AND status<>'COMPLETED'", (h["task_id"],))
-            con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                        (h["task_id"], actor, "%s sent this back for rework. Note: %s" % (actor, note)))
-            con.commit()
-            return {"ok": True}
-
-        if action == "task_handoff_file":
-            # Download the paper attached to a coordinator send ("send") or the correction
-            # document the coordinator attached when sending it back ("return").
-            try:
-                handoff_id = int(d.get("handoffId"))
-            except (TypeError, ValueError):
-                raise ApiError("That file couldn't be found.", 404)
-            which = "return" if (d.get("which") or "") == "return" else "send"
-            h = con.execute("""SELECT h.*, t.assigned_to AS task_assigned FROM task_handoffs h
-                               JOIN tasks t ON t.id = h.task_id WHERE h.id=?""", (handoff_id,)).fetchone()
-            prefix = "return_" if which == "return" else ""
-            if not h or not h[prefix + "file_data"]:
-                raise ApiError("That file couldn't be found.", 404)
-            if (d.get("role") or "") == "employee":
-                me_emp = d.get("empId")
-                me_name = (d.get("empName") or "").strip()
-                assignees = [x.strip() for x in (h["task_assigned"] or "").split(",") if x.strip()]
-                if not (me_emp in (h["sent_by_emp_id"], h["target_emp_id"]) or me_name in assignees):
-                    raise ApiError("You don't have access to that file.", 403)
-            return {"fileName": h[prefix + "file_name"], "fileType": h[prefix + "file_type"],
-                    "fileData": h[prefix + "file_data"]}
-
-        # ----- Validation folders: AI Check / Plagiarism Check / Test Paper --------------
-        if action == "validation_list":
-            caller = validation_caller(con, d)
-            if caller["kind"] == "validator":
-                ph = ",".join(["?"] * len(caller["folders"]))
-                rows = con.execute(f"""SELECT * FROM validation_papers WHERE folder IN ({ph})
-                                       ORDER BY updated_at DESC, id DESC""", tuple(caller["folders"])).fetchall()
-            elif caller["sees_all"]:
-                rows = con.execute("SELECT * FROM validation_papers ORDER BY updated_at DESC, id DESC").fetchall()
-            else:
-                rows = con.execute("""SELECT * FROM validation_papers WHERE submitted_by_key=?
-                                      ORDER BY updated_at DESC, id DESC""", (caller["key"],)).fetchall()
-            out = {"folders": [{"key": k, "label": VALIDATION_FOLDERS[k]} for k in VALIDATION_FOLDER_ORDER],
-                   "myFolders": caller["folders"], "canManageAccess": caller["manages"],
-                   "papers": validation_papers_out(con, rows, caller),
-                   "maxFileMb": VALIDATION_MAX_FILE_BYTES // (1024 * 1024)}
-            if caller["sees_all"]:
-                ph = ",".join(["?"] * len(VALIDATION_ELIGIBLE_ROLES))
-                out["team"] = [{"id": r["id"], "name": r["name"], "empUid": r["emp_uid"] or "", "role": r["role"],
-                                "access": parse_validation_access(r["validation_access"])}
-                               for r in con.execute(
-                                   f"""SELECT id, name, emp_uid, role, validation_access FROM employees
-                                       WHERE role IN ({ph}) AND active=1 AND deleted_at IS NULL
-                                       ORDER BY role, name""", VALIDATION_ELIGIBLE_ROLES)]
-            return out
-
-        if action == "validation_set_access":
-            caller = validation_caller(con, d)
-            if not caller["manages"]:
-                raise ApiError("Only the Technical Manager can give validation access.", 403)
-            e = con.execute("SELECT id, name, role, deleted_at FROM employees WHERE id=?",
-                            (d.get("targetEmpId"),)).fetchone()
-            if not e or e["deleted_at"]:
-                raise ApiError("That employee couldn't be found.")
-            if e["role"] not in VALIDATION_ELIGIBLE_ROLES:
-                raise ApiError("Validation access can only be given to Programmers and Paper Writers.")
-            wanted = d.get("folders")
-            if not isinstance(wanted, list) or any(not isinstance(f, str) or f not in VALIDATION_FOLDERS
-                                                   for f in wanted):
-                raise ApiError("Unknown validation folder.")
-            folders = parse_validation_access(",".join(wanted))
-            con.execute("UPDATE employees SET validation_access=? WHERE id=?", (",".join(folders), e["id"]))
-            if not folders:
-                # Revoked completely: end any open Validation login for this person now,
-                # not just on their next request (get_session would also catch it).
-                con.execute("DELETE FROM sessions WHERE kind='validator' AND emp_id=?", (e["id"],))
-            con.commit()
-            return {"ok": True, "empId": e["id"], "access": folders}
-
-        if action == "validation_submit":
-            caller = validation_caller(con, d)
-            if caller["kind"] == "validator":
-                raise ApiError("Send papers from your normal login, not the Validation login.", 403)
-            folder = (d.get("folder") or "").strip().upper()
-            if folder not in VALIDATION_FOLDERS:
-                raise ApiError("Choose a folder: AI Check, Plagiarism Check or Test Paper.")
-            title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
-            if not title:
-                raise ApiError("Give the paper a title so the validator knows what it is.")
-            if len(title) > VALIDATION_MAX_TITLE:
-                raise ApiError("Keep the title under %d characters." % VALIDATION_MAX_TITLE)
-            description = (d.get("description") or "").strip()[:VALIDATION_MAX_NOTE]
-            client_id = validation_client_linkable(con, d, (d.get("clientId") or "").strip())
-            fname, ftype, fdata = read_validation_document(d, required=True, label="paper")
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cur = con.execute("""INSERT INTO validation_papers
-                                   (folder, title, description, client_id, status, round, submitted_by_key,
-                                    submitted_by_name, submitted_by_emp_id, created_at, updated_at)
-                                 VALUES (?,?,?,?, 'PENDING', 1, ?,?,?,?,?)""",
-                              (folder, title, description, client_id, caller["key"], caller["name"],
-                               caller["emp_id"], now, now))
-            pid = cur.lastrowid
-            con.execute("""INSERT INTO validation_events
-                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
-                              file_data, file_size, created_at)
-                           VALUES (?, 1, 'SUBMITTED', ?,?,?,?,?,?,?,?)""",
-                        (pid, caller["key"], caller["name"], description, fname, ftype, fdata,
-                         len(fdata) * 3 // 4, now))
-            con.commit()
-            return {"ok": True, "paperId": pid}
-
-        if action == "validation_resubmit":
-            caller = validation_caller(con, d)
-            if caller["kind"] == "validator":
-                raise ApiError("Send the updated paper from your normal login, not the Validation login.", 403)
-            paper = validation_load_paper(con, d.get("paperId"), for_update=True)
-            if paper["submitted_by_key"] != caller["key"]:
-                raise ApiError("Only the person who sent this paper can upload the updated version.", 403)
-            if paper["status"] != "REWORK":
-                raise ApiError("This paper isn't waiting for rework any more — refresh to see its latest status.")
-            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            fname, ftype, fdata = read_validation_document(d, required=True, label="updated paper")
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            new_round = (paper["round"] or 1) + 1
-            con.execute("UPDATE validation_papers SET status='PENDING', round=?, updated_at=? WHERE id=?",
-                        (new_round, now, paper["id"]))
-            con.execute("""INSERT INTO validation_events
-                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
-                              file_data, file_size, created_at)
-                           VALUES (?,?, 'RESUBMITTED', ?,?,?,?,?,?,?,?)""",
-                        (paper["id"], new_round, caller["key"], caller["name"], note, fname, ftype, fdata,
-                         len(fdata) * 3 // 4, now))
-            con.commit()
-            return {"ok": True, "round": new_round}
-
-        if action == "validation_decide":
-            caller = validation_caller(con, d)          # validators only (see ACTION_ROLES)
-            # Row lock: two validators clicking at the same moment can't both decide.
-            paper = validation_load_paper(con, d.get("paperId"), for_update=True)
-            if paper["folder"] not in caller["folders"]:
-                raise ApiError("You don't have access to the %s folder."
-                               % VALIDATION_FOLDERS.get(paper["folder"], paper["folder"]), 403)
-            if paper["status"] != "PENDING":
-                raise ApiError("Someone has already reviewed this paper — refresh to see its latest status.")
-            if paper["submitted_by_emp_id"] and paper["submitted_by_emp_id"] == caller["emp_id"]:
-                raise ApiError("You sent this paper yourself, so another validator needs to review it.", 403)
-            decision = (d.get("decision") or "").strip().upper()
-            if decision not in ("APPROVED", "REWORK"):
-                raise ApiError("Choose Approve or Rework.")
-            note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
-            if decision == "REWORK":
-                if not note:
-                    raise ApiError("Explain what needs to be reworked so the sender knows what to fix.")
-                fname, ftype, fdata = read_validation_document(d, required=True, label="rework document")
-            else:
-                # An approval may optionally carry the report too (e.g. the clean AI/plagiarism report).
-                fname, ftype, fdata = read_validation_document(d, required=False, label="report")
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            con.execute("""UPDATE validation_papers SET status=?, last_reviewer_name=?, last_reviewer_emp_id=?,
-                                  updated_at=? WHERE id=?""",
-                        (decision, caller["name"], caller["emp_id"], now, paper["id"]))
-            con.execute("""INSERT INTO validation_events
-                             (paper_id, round, event, actor_key, actor_name, note, file_name, file_type,
-                              file_data, file_size, created_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                        (paper["id"], paper["round"], decision, caller["key"], caller["name"], note,
-                         fname or "", ftype or "", fdata, len(fdata) * 3 // 4 if fdata else 0, now))
-            con.commit()
-            return {"ok": True, "status": decision}
-
-        if action == "validation_get_file":
-            caller = validation_caller(con, d)
-            try:
-                eid = int(d.get("eventId"))
-            except (TypeError, ValueError):
-                raise ApiError("That file couldn't be found.", 404)
-            ev = con.execute("""SELECT e.file_name, e.file_type, e.file_data, p.folder, p.submitted_by_key
-                                FROM validation_events e JOIN validation_papers p ON p.id = e.paper_id
-                                WHERE e.id=?""", (eid,)).fetchone()
-            if not ev or not ev["file_data"]:
-                raise ApiError("That file couldn't be found.", 404)
-            if not validation_can_view_paper(caller, ev):
-                raise ApiError("You don't have access to that file.", 403)
-            return {"fileName": ev["file_name"], "fileType": ev["file_type"], "fileData": ev["file_data"]}
-
         # ----- Admin Panel > Database Management -----------------------------------
         # SECURITY: both actions are super_admin/md_admin only (see ACTION_ROLES).
         # admin_clear_data additionally re-checks the caller's own password here —
@@ -7182,19 +6034,15 @@ def handle_action(action, d, ip=""):
             if mode == "all":
                 export["task_stages"] = [dict(r) for r in con.execute("SELECT * FROM task_stages").fetchall()]
                 export["task_comments"] = [dict(r) for r in con.execute("SELECT * FROM task_comments").fetchall()]
-                export["task_handoffs"] = [dict(r) for r in con.execute("SELECT * FROM task_handoffs").fetchall()]
             elif task_ids:
                 ph = ",".join(["?"] * len(task_ids))
                 export["task_stages"] = [dict(r) for r in con.execute(
                     f"SELECT * FROM task_stages WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
                 export["task_comments"] = [dict(r) for r in con.execute(
                     f"SELECT * FROM task_comments WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
-                export["task_handoffs"] = [dict(r) for r in con.execute(
-                    f"SELECT * FROM task_handoffs WHERE task_id IN ({ph})", tuple(task_ids)).fetchall()]
             else:
                 export["task_stages"] = []
                 export["task_comments"] = []
-                export["task_handoffs"] = []
             export["backupFormat"] = 2
             # These aren't tied to any client, so there's no meaningful client-date
             # range to scope them by — only included (and only cleared) in "all" mode.
@@ -7203,11 +6051,6 @@ def handle_action(action, d, ip=""):
                 export["dm_messages"] = [dict(r) for r in con.execute("SELECT * FROM dm_messages").fetchall()]
                 export["dm_reads"] = [dict(r) for r in con.execute("SELECT * FROM dm_reads").fetchall()]
                 export["emp_calls"] = [dict(r) for r in con.execute("SELECT * FROM emp_calls").fetchall()]
-                # Validation folders (AI Check / Plagiarism Check / Test Paper), incl. files.
-                export["validation_papers"] = [dict(r) for r in con.execute(
-                    "SELECT * FROM validation_papers ORDER BY id").fetchall()]
-                export["validation_events"] = [dict(r) for r in con.execute(
-                    "SELECT * FROM validation_events ORDER BY id").fetchall()]
             return export
 
         # ----- Admin Panel > Database Management > Upload (restore) a backup -------------
@@ -7278,7 +6121,6 @@ def handle_action(action, d, ip=""):
                 con.execute("DELETE FROM dm_messages")
                 con.execute("DELETE FROM dm_reads")
                 con.execute("DELETE FROM emp_calls")
-                con.execute("DELETE FROM validation_papers")   # cascades to validation_events
                 # Deliberately untouched: users, employees, settings, sessions,
                 # login_captchas — so logins keep working right after a clear.
             else:
@@ -7323,9 +6165,6 @@ _IMPORT_TABLES = {
     "dm_messages":         ("p1", "p2", "sender_key", "body", "created_at"),
     "dm_reads":            ("p1", "p2", "viewer_key"),
     "emp_calls":           ("emp_id", "message", "created_at"),
-    "validation_papers":   ("folder", "title", "submitted_by_key", "created_at"),
-    "validation_events":   ("paper_id", "event", "round", "created_at"),
-    "task_handoffs":       ("task_id", "target", "sent_by_key", "created_at"),
 }
 
 _STAGE_INDEX = {st: i for i, st in enumerate(STAGES)}
@@ -7374,26 +6213,11 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
     data = _clean_import_row(row, cols)
 
     # Re-point task children at the task's id in THIS database.
-    if table in ("task_stages", "task_comments", "task_handoffs"):
+    if table in ("task_stages", "task_comments"):
         new_tid = (id_map_parent or {}).get(str(data.get("task_id")))
         if new_tid is None:
             return "orphan", None
         data["task_id"] = new_tid
-
-    # A validation paper's client link is optional: keep the paper, drop a dangling link.
-    if table == "validation_papers" and data.get("client_id"):
-        cur.execute("SELECT 1 FROM clients WHERE id=%s", (data["client_id"],))
-        if not cur.fetchone():
-            data["client_id"] = None
-    # Same for its (optional) task link. Tasks restore before validation papers; a task
-    # that kept its original id is matched, otherwise the link is dropped, not guessed.
-    if table == "validation_papers" and data.get("task_id") is not None:
-        ref = row.get("__task") or {}
-        cur.execute("""SELECT id FROM tasks WHERE title=%s AND created_at IS NOT DISTINCT FROM %s
-                       ORDER BY (id=%s) DESC LIMIT 1""",
-                    (ref.get("title"), ref.get("created_at"), data["task_id"]))
-        hit = cur.fetchone()
-        data["task_id"] = hit["id"] if hit else None
 
     # Parent must exist, otherwise the row has nothing to attach to.
     if data.get("client_id"):
@@ -7406,19 +6230,6 @@ def _import_one(cur, table, cols, row, ident, id_map_parent=None):
         cur.execute("SELECT 1 FROM employees WHERE id=%s", (data.get("emp_id"),))
         if not cur.fetchone():
             return "orphan", None
-    if table == "validation_events":
-        # Events travel in their own batches, so they can't rely on an in-request id
-        # map. Each one carries its paper's identity (__paper) and is re-pointed at
-        # whichever row that paper landed on in THIS database.
-        ref = row.get("__paper") or {}
-        cur.execute("""SELECT id FROM validation_papers
-                       WHERE folder=%s AND title=%s AND submitted_by_key=%s
-                         AND created_at IS NOT DISTINCT FROM %s LIMIT 1""",
-                    (ref.get("folder"), ref.get("title"), ref.get("submitted_by_key"), ref.get("created_at")))
-        hit = cur.fetchone()
-        if not hit:
-            return "orphan", None
-        data["paper_id"] = hit["id"]
 
     if table == "clients":
         if not orig_id:
@@ -7485,16 +6296,13 @@ def _import_backup_rows(con, table, rows):
         # re-linked to the task's id in this database even if it had to change.
         if table == "tasks" and new_id is not None:
             id_map = {str(r.get("id")): new_id}
-            for key, child in (("__stages", "task_stages"), ("__comments", "task_comments"),
-                               ("__handoffs", "task_handoffs")):
+            for key, child in (("__stages", "task_stages"), ("__comments", "task_comments")):
                 kids = r.get(key) or []
                 if not kids:
                     continue
                 if child == "task_stages":
                     stage_cols = stage_cols or _table_columns(cur, child)
                     ccols = stage_cols
-                elif child == "task_handoffs":
-                    ccols = _table_columns(cur, child)
                 else:
                     comment_cols = comment_cols or _table_columns(cur, child)
                     ccols = comment_cols
@@ -7504,7 +6312,7 @@ def _import_backup_rows(con, table, rows):
                         child_stats[st] += 1
 
     # Move SERIAL counters past the restored ids, or the next "Add ..." would collide.
-    touched = [table] + (["task_stages", "task_comments", "task_handoffs"] if table == "tasks" else [])
+    touched = [table] + (["task_stages", "task_comments"] if table == "tasks" else [])
     for t in touched:
         if t == "clients":
             continue
@@ -7695,7 +6503,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if action not in PUBLIC_ACTIONS:
             data["role"] = session["kind"] if session["kind"] == "employee" else session["role"]
-            if session["kind"] in ("employee", "validator"):
+            if session["kind"] == "employee":
                 data["empId"] = session["emp_id"]
                 data["empUid"] = session["emp_uid"]
                 data["empName"] = session["emp_name"]
