@@ -684,10 +684,10 @@ ACTION_ROLES = {
     "add_service_item": _R_MARKETING,
     "delete_service_item": _R_MARKETING,
     "schedule_demo": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "postpone_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
+    "postpone_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
     "cancel_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "complete_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "mark_demo_given": _R_MARKETING + ("technical_manager", "technical_tl"),
+    "complete_demo_schedule": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
+    "mark_demo_given": _R_MARKETING + ("technical_manager", "technical_tl", "employee"),
     "reject_client": _R_MKT_MGMT,
     "unreject_client": _R_MKT_MGMT,
     # BUGFIX: widened from _R_MKT_MGMT. Telecallers can already add a client one at a
@@ -756,13 +756,15 @@ ACTION_ROLES = {
     # roles, so the Marketing TL's button always failed with "You don't have permission".
     "tl_verify": _R_MKT_MGMT,
     "verify_proposal": _R_TECH_MGMT,
+    "reassign_work": _R_TECH_MGMT,
     "submit_proposal": _R_ALL_STAFF,
     "deliver_proposal": _R_TECH_MGMT,
-    "complete_implementation": _R_ALL_STAFF,
+    "complete_implementation": _R_TECH_MGMT,
+    "start_work_submission": _R_ALL_STAFF,
     "send_implementation_to_client": _R_TECH_MGMT,
     "approve_demo": _R_TECH_MGMT,
     "submit_writing_demo": _R_ALL_STAFF,
-    "mark_writing_demo_given": _R_TECH_MGMT + ("marketing_manager", "marketing_tl"),
+    "mark_writing_demo_given": _R_TECH_MGMT + ("marketing_manager", "marketing_tl", "employee"),
     "writer_resubmit": _R_ALL_STAFF,
     "writer_resubmit_proofread": _R_ALL_STAFF,
     "complete_formatting": _R_ALL_STAFF,
@@ -2668,6 +2670,40 @@ HANDOFF_TARGETS = {
 }
 
 
+def resolve_mgmt_handoffs(con, task_id, status, by, note="", targets=("TECH_TL", "TECH_MANAGER")):
+    """Close any still-waiting sends of this task to the Technical TL / Manager (or the
+    given targets), so the Task Board shows who approved / returned it instead of
+    'Waiting' forever after the decision was actually made somewhere else."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = ",".join(["?"] * len(targets))
+    con.execute(f"""UPDATE task_handoffs SET status=?, resolved_by=?, resolved_note=?, resolved_at=?
+                    WHERE task_id=? AND status='SENT' AND target IN ({ph})""",
+                (status, by or "", note or "", now, task_id) + tuple(targets))
+
+
+# Proposal and Code Implementation need ONE approval from the Technical TL / Manager —
+# no coordinator, no validation. Everything else keeps the full send-to flow.
+SINGLE_APPROVAL_TASK_TYPES = ("PROPOSAL", "IMPLEMENTATION")
+
+
+def complete_work_tasks(con, client_id, task_type, by):
+    """Once the Technical TL / Manager approves a proposal / code implementation (from any
+    screen), every open task of that kind for the client is marked COMPLETED, so the
+    employee sees it as done and can't keep sending it somewhere else."""
+    label = {"PROPOSAL": "proposal", "IMPLEMENTATION": "code implementation"}.get(task_type, "work")
+    rows = con.execute("""SELECT id FROM tasks WHERE client_id=? AND task_type=?
+                          AND status<>'COMPLETED'""", (client_id, task_type)).fetchall()
+    for r in rows:
+        con.execute("UPDATE tasks SET status='COMPLETED' WHERE id=?", (r["id"],))
+        con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                    (r["id"], by, "%s approved the %s — marked completed." % (by, label)))
+        resolve_mgmt_handoffs(con, r["id"], "APPROVED", by, "Approved — completed.")
+
+
+def complete_proposal_tasks(con, client_id, by):
+    complete_work_tasks(con, client_id, "PROPOSAL", by)
+
+
 def work_sends(con):
     """Every time finished work was sent somewhere, newest first — for the project Task
     Board counts/timeline and the coordinator's "sent to me" queue.
@@ -4323,6 +4359,15 @@ def handle_action(action, d, ip=""):
                 if not c:
                     pass
                 elif ttype == "PROPOSAL":
+                    if c["stage"] == "PROPOSAL_ASSIGNED" and row["status"] == "SUBMITTED":
+                        # The writer sent the proposal to the TL/Manager from their task (not the
+                        # old "Submit proposal" button), so the pipeline never recorded it as
+                        # submitted. Record that now, then approve it — one approval is enough.
+                        con.execute("UPDATE clients SET proposal_submitted_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
+                                    (c["id"],))
+                        move_stage(con, c["id"], "PROPOSAL_SUBMITTED", (row["assigned_to"] or "Writer").strip(),
+                                   "Proposal sent to the Technical TL / Manager for approval.")
+                        c = con.execute("SELECT * FROM clients WHERE id=?", (c["id"],)).fetchone()
                     if c["stage"] == "PROPOSAL_SUBMITTED":
                         con.execute("UPDATE clients SET proposal_verified_by=? WHERE id=?", (actor_label, c["id"]))
                         move_stage(con, c["id"], "PROPOSAL_VERIFIED", actor_label,
@@ -4335,13 +4380,12 @@ def handle_action(action, d, ip=""):
                 elif ttype == "IMPLEMENTATION":
                     if c["stage"] == "IMPLEMENTATION_ASSIGNED":
                         if c["demo_given_date"] and not c["demo_approved_at"]:
-                            sync_note = ("Task marked complete, but this client's implementation is still "
-                                          "waiting on demo approval before it can move forward for real — "
-                                          "approve the demo first.")
-                        else:
-                            c = con.execute("SELECT * FROM clients WHERE id=?", (c["id"],)).fetchone()
-                            move_stage(con, c["id"], "IMPLEMENTATION_COMPLETE", actor_label,
-                                       "Marked complete via Work Updates approval — ready for delivery to the client.")
+                            # Approving the programmer's submitted work also signs off the demo
+                            # they recorded — one approval, not two separate ones.
+                            con.execute("""UPDATE clients SET demo_approved_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+                                           demo_approved_by=? WHERE id=?""", (actor_label, c["id"]))
+                        move_stage(con, c["id"], "IMPLEMENTATION_COMPLETE", actor_label,
+                                   "Code implementation approved — completed, ready for delivery to the client.")
                     elif stageIdxServer(c["stage"]) > stageIdxServer("IMPLEMENTATION_ASSIGNED"):
                         pass
                     else:
@@ -4390,6 +4434,17 @@ def handle_action(action, d, ip=""):
                                       "review in the real pipeline for this client.")
 
 
+            if "status" in d and status == "COMPLETED":
+                resolve_mgmt_handoffs(con, tid, "APPROVED", note_author, "Approved as complete.")
+                if (row["task_type"] or "") in SINGLE_APPROVAL_TASK_TYPES and row["client_id"]:
+                    complete_work_tasks(con, row["client_id"], row["task_type"], note_author)
+            elif "status" in d and status == "NEEDS_CORRECTION":
+                resolve_mgmt_handoffs(con, tid, "RETURNED", note_author, extra_note or "Sent back for correction.")
+                if (row["task_type"] or "") == "PROPOSAL" and row["client_id"]:
+                    pc = con.execute("SELECT stage FROM clients WHERE id=?", (row["client_id"],)).fetchone()
+                    if pc and pc["stage"] == "PROPOSAL_SUBMITTED":
+                        move_stage(con, row["client_id"], "PROPOSAL_ASSIGNED", note_author,
+                                   "Proposal sent back for rework." + (" Note: " + extra_note if extra_note else ""))
             con.commit()
             return {"ok": True, "pipelineSyncNote": sync_note} if sync_note else {"ok": True}
 
@@ -4897,8 +4952,113 @@ def handle_action(action, d, ip=""):
             #       implementation can be assigned.
             move_stage(con, c["id"], "PROPOSAL_VERIFIED", verifier,
                        "Approved by " + verifier + " — ready for delivery to the client.")
+            complete_proposal_tasks(con, c["id"], verifier)
             con.commit()
             return {"ok": True}
+
+        # ----- Technical Manager / TL hands work that's already assigned (and possibly
+        #       already submitted / waiting on approval) to someone else. Updates the real
+        #       pipeline assignee + dates AND the tracking task, so the new person sees it
+        #       in "My assigned tasks" and the old one doesn't.
+        if action == "reassign_work":
+            c = get_client(con, d.get("clientId") or "")
+            work = (d.get("workType") or "").strip().upper()
+            work_label = {"PROPOSAL": "Proposal writing", "IMPLEMENTATION": "Code implementation",
+                          "PAPER_WRITING": "Paper writing"}.get(work)
+            if not work_label:
+                raise ApiError("Unknown kind of work to reassign.")
+            allowed = {
+                "PROPOSAL": ("PROPOSAL_ASSIGNED", "PROPOSAL_SUBMITTED",
+                             "PROPOSAL_VERIFIED", "PROPOSAL_CLIENT_REVIEW"),
+                "IMPLEMENTATION": ("IMPLEMENTATION_ASSIGNED",
+                                   "IMPLEMENTATION_COMPLETE", "IMPLEMENTATION_CLIENT_REVIEW"),
+                "PAPER_WRITING": ("PAPERWRITER_ASSIGNED", "WRITER_FIXING", "COORDINATOR_REVIEW",
+                                  "TECHTL_REVIEW", "TECHMGR_REVIEW", "WRITING_COMPLETE", "CLIENT_REVIEW"),
+            }[work]
+            if c["stage"] not in allowed:
+                raise ApiError("This client's %s isn't in progress right now, so there's nothing to "
+                               "reassign. Refresh to see where it is." % work_label.lower())
+            valid = active_names(con, "PROGRAMMER" if work == "IMPLEMENTATION" else "PAPER_WRITER")
+            people = []
+            for p_ in (d.get("people") or []):
+                p_ = (p_ or "").strip()
+                if p_ in valid and p_ not in people:
+                    people.append(p_)
+            if not people:
+                raise ApiError("Pick who to reassign this work to.")
+            if work == "PROPOSAL":
+                people = people[:1]
+            deadline = (d.get("deadline") or "").strip()
+            if not deadline:
+                raise ApiError("Set a deadline for the reassigned work.")
+            start_date = (d.get("startDate") or "").strip() or date.today().isoformat()
+            if start_date > deadline:
+                raise ApiError("Start date can't be after the deadline.")
+            reason = (d.get("note") or "").strip()[:1000]
+            actor = (d.get("actorLabel") or "Technical Manager").strip()
+            names_csv = ",".join(people)
+            if work == "PROPOSAL":
+                old = c["proposal_writer"] or ""
+                con.execute("""UPDATE clients SET proposal_writer=?, proposal_deadline=?, proposal_start_date=?,
+                               proposal_coordinator='', proposal_awaiting_team_pick=0 WHERE id=?""",
+                            (names_csv, deadline, start_date, c["id"]))
+                if c["stage"] in ("PROPOSAL_VERIFIED", "PROPOSAL_CLIENT_REVIEW"):
+                    con.execute("UPDATE clients SET proposal_verified_by=NULL WHERE id=?", (c["id"],))
+                back_to = "PROPOSAL_ASSIGNED" if c["stage"] != "PROPOSAL_ASSIGNED" else None
+            elif work == "IMPLEMENTATION":
+                old = c["assigned_programmers"] or ""
+                con.execute("""UPDATE clients SET assigned_programmers=?, implementation_deadline=?,
+                               implementation_start_date=?, impl_coordinator='', impl_awaiting_team_pick=0
+                               WHERE id=?""", (names_csv, deadline, start_date, c["id"]))
+                back_to = "IMPLEMENTATION_ASSIGNED" if c["stage"] != "IMPLEMENTATION_ASSIGNED" else None
+                if back_to:
+                    # Already-approved code is being redone: the new programmer gives a fresh demo.
+                    con.execute("""UPDATE clients SET demo_given_date=NULL, demo_satisfied='',
+                                   demo_approved_at=NULL, demo_approved_by='' WHERE id=?""", (c["id"],))
+            else:
+                old = c["assigned_writers"] or ""
+                con.execute("""UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=?,
+                               writing_awaiting_team_pick=0, review_level='', coordinator_rounds=0,
+                               techtl_rounds=0, techmgr_rounds=0 WHERE id=?""",
+                            (names_csv, deadline, start_date, c["id"]))
+                back_to = "PAPERWRITER_ASSIGNED" if c["stage"] != "PAPERWRITER_ASSIGNED" else None
+            old_txt = ", ".join([x.strip() for x in old.split(",") if x.strip()]) or "nobody"
+            hist_note = "%s reassigned from %s to %s (deadline %s).%s" % (
+                work_label, old_txt, ", ".join(people), deadline, (" Reason: " + reason) if reason else "")
+            if back_to:
+                move_stage(con, c["id"], back_to, actor, hist_note)
+            else:
+                con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                            (c["id"], c["stage"], actor, hist_note))
+            # The tracking task: the one given, else the newest open one of this kind.
+            task = None
+            if d.get("taskId"):
+                try:
+                    task = con.execute("SELECT * FROM tasks WHERE id=? AND client_id=?",
+                                       (int(d.get("taskId")), c["id"])).fetchone()
+                except (TypeError, ValueError):
+                    task = None
+            if not task:
+                task = con.execute("""SELECT * FROM tasks WHERE client_id=? AND task_type=? AND status<>'COMPLETED'
+                                      ORDER BY id DESC LIMIT 1""", (c["id"], work)).fetchone()
+            assignees_txt = ", ".join(people)
+            if task:
+                con.execute("""UPDATE tasks SET assigned_to=?, start_date=?, finish_date=?, status='OPEN'
+                               WHERE id=?""", (assignees_txt, start_date, deadline, task["id"]))
+                con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                            (task["id"], actor, hist_note))
+                resolve_mgmt_handoffs(con, task["id"], "RETURNED", actor,
+                                      "Work reassigned to %s." % assignees_txt,
+                                      targets=("TECH_TL", "TECH_MANAGER", "COORDINATOR"))
+                task_id = task["id"]
+            else:
+                cur = con.execute("""INSERT INTO tasks
+                    (title, description, client_id, priority, start_date, finish_date, assigned_to, created_by, task_type)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (work_label, reason, c["id"], "MEDIUM", start_date, deadline, assignees_txt, actor, work))
+                task_id = cur.lastrowid
+            con.commit()
+            return {"ok": True, "taskId": task_id}
 
         # ----- Delivery step: Technical TL/Manager hands the internally-approved proposal to
         #       the client. Shows in the "Delivery" section of New Work To Assign / Task Board.
@@ -5159,6 +5319,33 @@ def handle_action(action, d, ip=""):
         #       This moves it into the Technical TL/Manager's "Delivery" queue - it still needs
         #       to be delivered to the client and approved there before paper writing can be
         #       assigned (see "send_implementation_to_client" / "client_approve_implementation").
+        # ----- The Programmer's "Submit to Technical TL / Manager" button. Older clients may
+        #       have no tracking task (it's created by Assign Work); make one so the work can
+        #       be sent for approval exactly like a proposal. Returns the task to send.
+        if action == "start_work_submission":
+            c = get_client(con, d.get("clientId") or "")
+            emp_name = (d.get("empName") or "").strip()
+            if c["stage"] != "IMPLEMENTATION_ASSIGNED":
+                raise ApiError("This client's code implementation isn't in progress right now.")
+            if (d.get("role") or "") == "employee" and emp_name not in names(c["assigned_programmers"]):
+                raise ApiError("You are not assigned as a programmer on this client.", 403)
+            rows = con.execute("""SELECT * FROM tasks WHERE client_id=? AND task_type='IMPLEMENTATION'
+                                  AND status<>'COMPLETED' ORDER BY id DESC""", (c["id"],)).fetchall()
+            mine = [r for r in rows if emp_name in [x.strip() for x in (r["assigned_to"] or "").split(",")]]
+            t = mine[0] if mine else None
+            if not t:
+                cur = con.execute("""INSERT INTO tasks
+                    (title, description, client_id, priority, start_date, finish_date, assigned_to, created_by, task_type)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    ("Code implementation", "", c["id"], "MEDIUM",
+                     c["implementation_start_date"] or date.today().isoformat(),
+                     c["implementation_deadline"] or date.today().isoformat(),
+                     ", ".join(names(c["assigned_programmers"])) or emp_name, emp_name or "Programmer",
+                     "IMPLEMENTATION"))
+                con.commit()
+                return {"ok": True, "taskId": cur.lastrowid, "status": "OPEN"}
+            return {"ok": True, "taskId": t["id"], "status": t["status"]}
+
         if action == "complete_implementation":
             c = get_client(con, d.get("clientId") or "")
             require_stage(c, "IMPLEMENTATION_ASSIGNED")
@@ -6210,7 +6397,10 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             actor_role = (d.get("role") or "").strip()
             emp_name = (d.get("empName") or "").strip()
-            is_assigned_emp = actor_role == "employee" and emp_name and emp_name == (c["demo_scheduled_emp"] or "")
+            is_assigned_emp = actor_role == "employee" and emp_name and (
+                emp_name == (c["demo_scheduled_emp"] or "") or
+                emp_name in names(c["assigned_programmers"] if (c["demo_scheduled_type"] or "code") == "code"
+                                  else c["assigned_writers"]))
             if not (is_assigned_emp or actor_role in ("super_admin", "md_admin",
                                                         "marketing_tl", "marketing_manager",
                                                         "technical_tl", "technical_manager")):
@@ -6242,7 +6432,10 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             actor_role = (d.get("role") or "").strip()
             emp_name = (d.get("empName") or "").strip()
-            is_assigned_emp = actor_role == "employee" and emp_name and emp_name == (c["demo_scheduled_emp"] or "")
+            is_assigned_emp = actor_role == "employee" and emp_name and (
+                emp_name == (c["demo_scheduled_emp"] or "") or
+                emp_name in names(c["assigned_programmers"] if (c["demo_scheduled_type"] or "code") == "code"
+                                  else c["assigned_writers"]))
             if not (is_assigned_emp or actor_role in ("super_admin", "md_admin")):
                 raise ApiError("Only the employee this demo was scheduled for can mark it completed.")
             if not c["demo_scheduled_date"] or (c["demo_schedule_status"] or "") != "SCHEDULED":
@@ -6455,8 +6648,18 @@ def handle_action(action, d, ip=""):
             if target not in HANDOFF_TARGETS:
                 raise ApiError("Choose where to send it: Coordinator, Validation, Technical TL or Technical Manager.")
             task_type = (task["task_type"] or "").upper()
-            if task_type == "PROPOSAL" and target not in ("TECH_TL", "TECH_MANAGER"):
-                raise ApiError("A proposal goes straight to your team's Technical TL or Technical Manager.")
+            if task_type in SINGLE_APPROVAL_TASK_TYPES and target not in ("TECH_TL", "TECH_MANAGER"):
+                raise ApiError("A %s goes straight to your team's Technical TL or Technical Manager — "
+                               "there's no coordinator or validation step for it." %
+                               ("proposal" if task_type == "PROPOSAL" else "code implementation"))
+            if task_type in SINGLE_APPROVAL_TASK_TYPES:
+                waiting = con.execute("""SELECT target_name FROM task_handoffs WHERE task_id=? AND status='SENT'
+                                         AND target IN ('TECH_TL','TECH_MANAGER') ORDER BY id DESC LIMIT 1""",
+                                      (task["id"],)).fetchone()
+                if waiting or task["status"] == "SUBMITTED":
+                    raise ApiError("This work is already waiting on approval%s. It can be sent again only "
+                                   "if it's sent back for correction." %
+                                   ((" from the " + waiting["target_name"]) if waiting else ""))
             note = (d.get("note") or "").strip()[:VALIDATION_MAX_NOTE]
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if target == "VALIDATION":
@@ -6527,6 +6730,15 @@ def handle_action(action, d, ip=""):
             # Finished work now waits on review (same status "Mark as done" always used).
             if task["status"] in ("OPEN", "IN_PROGRESS", "NEEDS_CORRECTION"):
                 con.execute("UPDATE tasks SET status='SUBMITTED' WHERE id=?", (task["id"],))
+            # A proposal sent to the TL / Manager IS the proposal submission — record it in the
+            # real pipeline too, so approving it (Work Updates or Work Validation) moves it on.
+            if task_type == "PROPOSAL" and task["client_id"]:
+                pc = con.execute("SELECT stage FROM clients WHERE id=?", (task["client_id"],)).fetchone()
+                if pc and pc["stage"] == "PROPOSAL_ASSIGNED":
+                    con.execute("UPDATE clients SET proposal_submitted_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
+                                (task["client_id"],))
+                    move_stage(con, task["client_id"], "PROPOSAL_SUBMITTED", me_name,
+                               "Proposal sent to the %s for approval." % sent_to)
             con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
                         (task["id"], me_name, "%s sent this to %s.%s" % (me_name, sent_to,
                                                                          (" Note: " + note) if note else "")))
