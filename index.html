@@ -418,6 +418,27 @@ tbody tr:last-child td{border-bottom:none}
 #pingAlert .pa-body span{font-size:13px;color:#D6E3DC;white-space:pre-wrap;word-break:break-word}
 #pingAlert .pa-body small{display:block;color:#8DA39A;font-size:11px;margin-top:5px}
 #pingAlert button{background:var(--card);color:var(--text);border:0;border-radius:9px;padding:8px 13px;font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap}
+/* ---------- Stage reminders (overdue hand-off pop-up) ---------- */
+#stageRemBg{position:fixed;inset:0;z-index:125;background:rgba(10,14,26,.55);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;padding:18px}
+#stageRemBg.open{display:flex}
+#stageRemBox{background:var(--card);color:var(--text);width:min(560px,96vw);max-height:86vh;display:flex;flex-direction:column;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);border:1px solid var(--line-strong);overflow:hidden;animation:remPop .28s var(--ease)}
+@keyframes remPop{from{transform:translateY(14px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.rem-head{padding:18px 20px 12px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,rgba(220,38,38,.07),transparent)}
+.rem-head .rem-ic{font-size:26px;line-height:1}
+.rem-head h3{font-size:16.5px;margin:0 0 3px}
+.rem-head p{font-size:12.5px;color:var(--muted);line-height:1.45;margin:0}
+.rem-list{padding:12px 20px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.rem-item{border:1px solid var(--line-strong);border-left:4px solid var(--bad);border-radius:12px;padding:12px 14px;background:var(--card2)}
+.rem-item .rem-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rem-item .rem-top b{font-size:14px}
+.rem-item .rem-meta{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.5}
+.rem-item .rem-next{font-size:13px;font-weight:700;margin-top:6px;color:var(--text)}
+.rem-item .rem-late{color:var(--bad);font-weight:700}
+.rem-item .rem-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.rem-foot{padding:12px 20px 16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.rem-foot small{color:var(--muted);font-size:12px}
+.rem-ov-row{display:grid;grid-template-columns:1.3fr 1.2fr .9fr .6fr;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);font-size:12.5px;align-items:center}
+.rem-ov-row.h{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
 #pingPermBar{display:none;background:#EAF7F8;border:1px solid rgba(14,116,144,.25);color:#0E7490;font-size:13px;border-radius:12px;padding:10px 15px;margin-bottom:14px;align-items:center;gap:12px;flex-wrap:wrap}
 #pingPermBar.show{display:flex}
 #pingPermBar .btn{margin-left:auto}
@@ -664,33 +685,6 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-status.good{background:#E7F5EC;color:var(--ok)}
 .adm-status.warn{background:#FEF3E2;color:var(--warn)}
 .adm-status.bad{background:#FDECEC;color:#B42318}
-/* ---------- AI Schedule Assistant (project page > AI Schedule tab) ---------- */
-.ais-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px 20px}
-.ais-facts p{font-weight:700;margin-top:3px;font-size:14px}
-.ais-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:14px;font-size:12.5px}
-.ais-flow .ais-step{padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong);background:var(--card2);font-weight:600}
-.ais-flow .ais-step.done{opacity:.55;text-decoration:line-through}
-.ais-flow .ais-arrow{color:var(--faint)}
-.ais-note{width:100%;min-height:62px;resize:vertical;margin-top:6px}
-.ais-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;align-items:center}
-.ais-err{margin-top:14px;padding:12px 14px;border-radius:10px;border:1px solid rgba(220,38,38,.3);background:rgba(220,38,38,.07);color:var(--bad);font-size:13px;line-height:1.5}
-.ais-ok{margin-top:14px;padding:12px 14px;border-radius:10px;border:1px solid rgba(21,128,61,.3);background:rgba(21,128,61,.07);color:var(--ok);font-size:13px}
-.ais-table-wrap{overflow-x:auto}
-table.ais-table{width:100%;border-collapse:collapse;min-width:560px}
-table.ais-table th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-table.ais-table td{padding:10px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}
-table.ais-table tr:last-child td{border-bottom:none}
-table.ais-table input[type=date]{min-width:140px}
-.ais-bar{height:8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);position:relative;min-width:90px;overflow:hidden}
-.ais-bar i{position:absolute;top:0;bottom:0;background:var(--purple);border-radius:999px}
-.ais-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:16px}
-.ais-metric{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card2)}
-.ais-metric b{display:block;font-size:18px;margin-top:3px}
-.ais-risk-LOW{color:var(--ok)} .ais-risk-MEDIUM{color:var(--warn)} .ais-risk-HIGH{color:var(--bad)}
-.ais-reason{margin-top:16px;font-size:13.5px;line-height:1.6}
-.ais-warn{margin-top:10px;padding-left:18px;font-size:12.5px;color:var(--warn);line-height:1.6}
-.ais-muted{font-size:12.5px;color:var(--muted);line-height:1.5}
-.ais-inline-err{color:var(--bad);font-size:12px;margin-top:4px}
 
 .adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:380px;margin:0 auto}
 .adm-cal .dow{font-size:10px;color:var(--faint);font-weight:700;text-align:center;padding-bottom:4px;text-transform:uppercase}
@@ -1269,6 +1263,7 @@ table.ais-table input[type=date]{min-width:140px}
 </div>
 
 <div id="toast"></div>
+<div id="stageRemBg" role="alertdialog" aria-modal="true" aria-labelledby="stageRemTitle"><div id="stageRemBox"></div></div>
 <div id="pingAlert" role="alert" aria-live="assertive">
   <div class="pa-ic">&#128222;</div>
   <div class="pa-body"><b id="pingAlertTitle"></b><span id="pingAlertMsg"></span><small id="pingAlertMeta"></small></div>
@@ -1320,7 +1315,6 @@ const PAY_KEYS = ["reg","start","code","writing","paper"];
 const PAY_LABELS = {reg:"Registration", start:"Start Work (proposal approval)", code:"Code Implementation",
   writing:"Writing Fee", paper:"Paper Delivery"};
 let services = {};
-let aiScheduleConfigured = false;   // server has an LLM key set (never the key itself)
 function serviceConf(c){ return services[c.serviceKey] || services["SCI"] || {amounts:{}}; }
 function activePayKeys(c){
   const conf = serviceConf(c);
@@ -1424,7 +1418,7 @@ async function loadData(){
       clientNotesV2 = out.clientNotes || [];
       clientReferrals = out.clientReferrals || [];
       workSends = out.workSends || [];
-      aiScheduleConfigured = !!(out.aiSchedule && out.aiSchedule.configured);
+      if(out.stageReminders) stageRemCfg = out.stageReminders;
       $("memWarn").style.display = "none";
       lastLoadOk = true;
       return;
@@ -4252,7 +4246,7 @@ function tmAssignWorkHtml(){
     }
     const open = tmAwOpen.has(String(c.id));
     const clientDl = c.deadlineDate ? `<span class="aw-meta">Client deadline: <b>${fmtDate(c.deadlineDate)}</b></span>` : "";
-    // If a schedule was accepted for this phase (AI Schedule tab), start from those dates
+    // If phase dates were already planned for this phase, start from those dates
     // instead of blank. Past/expired plans are ignored. Still fully editable here.
     const planPair = type==="PROPOSAL" ? [c.proposalStartDate, c.proposalDeadline]
       : type==="IMPLEMENTATION" ? [c.implementationStartDate, c.implementationDeadline]
@@ -4260,7 +4254,7 @@ function tmAssignWorkHtml(){
     const planDl = planPair[1] ? String(planPair[1]).slice(0,10) : "";
     const planOk = !!planDl && planDl >= todayISO();
     const planSd = planOk && planPair[0] && String(planPair[0]).slice(0,10) >= todayISO() ? String(planPair[0]).slice(0,10) : todayISO();
-    const planHint = planOk ? `<div class="ais-muted" style="margin-top:6px">Dates pre-filled from the accepted schedule — change them if needed.</div>` : "";
+    const planHint = planOk ? `<div style="margin-top:6px;font-size:12.5px;color:var(--muted)">Dates pre-filled from the planned phase dates — change them if needed.</div>` : "";
     return `<div class="aw-row ${open?'aw-open':''}" data-aw-row="${esc(String(c.id))}" data-aw-type="${type}" data-aw-search="${esc(tmAwSearchHay(c, task))}">
       <div class="aw-head" onclick="tmAwToggle(${jsq(c.id)})">
         <div class="aw-head-main">
@@ -4285,7 +4279,6 @@ function tmAssignWorkHtml(){
         <div class="aw-actions">
           ${btn}
           <button class="btn ghost small" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">Open project</button>
-          ${canUseAiSchedule() ? `<button class="btn ghost small" onclick="admOpenProjectTab(${jsq(c.id)},'aischedule')">&#10024; AI schedule</button>` : ""}
         </div>
         ${extra}
       </div>
@@ -6732,7 +6725,6 @@ const PROJ_TABS = [
   {key:"discussion", label:"Discussion"}, {key:"notes", label:"Notes"}, {key:"activity", label:"Activity"},
   {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"validation", label:"Work Validation"},
   {key:"extensions", label:"Date Extensions"}, {key:"payment", label:"Payment Information"}, {key:"query", label:"Client's Query"},
-  {key:"aischedule", label:"AI Schedule"},
 ];
 let adminProjectClientId = null, admProjTab = "dashboard";
 let admDetailReturnRole = null; // 'admin' | 'mkt' | 'tm' — which shell to return to from a shared detail page
@@ -6786,12 +6778,9 @@ function renderAdminProjectDetail(){
   // Employees (Programmers/Paper Writers/Journal team) get the same tabbed project view as
   // Admin/Technical Manager/TL, minus the Payment Information tab — that stays limited to
   // roles covered by canSeeMoney().
-  // The AI Schedule tab only appears for roles allowed to plan/approve phase dates
-  // (the server enforces the same list — see ai_schedule_* in ACTION_ROLES).
-  const projTabs = (role==="employee" ? PROJ_TABS.filter(t=>t.key!=="payment") : PROJ_TABS)
-    .filter(t=>t.key!=="aischedule" || canUseAiSchedule());
+  const projTabs = (role==="employee" ? PROJ_TABS.filter(t=>t.key!=="payment") : PROJ_TABS);
   if(role==="employee" && admProjTab==="payment") admProjTab = "dashboard";
-  if(admProjTab==="aischedule" && !canUseAiSchedule()) admProjTab = "dashboard";
+  if(!projTabs.some(t=>t.key===admProjTab)) admProjTab = "dashboard";
   const tabsHtml = projTabs.map(t=>`<button class="adm-tab ${admProjTab===t.key?'active':''}" onclick="admSetProjTab(${jsq(t.key)})">${esc(t.label)}</button>`).join("");
   let body = "";
   if(admProjTab==="dashboard") body = admProjDashboardTab(c);
@@ -6806,7 +6795,6 @@ function renderAdminProjectDetail(){
   else if(admProjTab==="extensions") body = admProjExtensionsTab(c);
   else if(admProjTab==="payment") body = admProjPaymentTab(c);
   else if(admProjTab==="query") body = admProjQueryTab(c);
-  else if(admProjTab==="aischedule") body = admProjAiScheduleTab(c);
 
   $("content").innerHTML = `
     <button class="btn ghost small" style="margin-bottom:14px" onclick="admBackFromProject()">&larr; Back to Projects</button>
@@ -6843,7 +6831,6 @@ function admProjDashboardTab(c){
             <div><label class="adm-field-label">Team Members</label><div style="margin-top:4px">${admMembersHtml(c)}</div></div>
           </div>
           ${demoScheduleSectionHtml(c)}
-          ${canUseAiSchedule() && c.stage!=="COMPLETED" ? `<div style="margin-top:14px"><button class="btn ghost small" onclick="admSetProjTab('aischedule')">&#10024; Generate AI schedule</button></div>` : ""}
         </div>
       </div>
     </div>
@@ -6881,236 +6868,6 @@ function admProjCalendarTab(c){
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Key dates</h3></div><div class="adm-panel-body">
     ${rows.length ? rows.map(r=>`<div class="adm-bar-row"><div class="lbl">${r[0]}</div><div style="font-weight:700">${fmtDate(r[1])}</div></div>`).join("") : `<div class="adm-empty">No dates recorded yet.</div>`}
   </div></div>`;
-}
-// =====================================================================
-// AI SCHEDULE ASSISTANT (project page > "AI Schedule" tab)
-// ---------------------------------------------------------------------
-// Flow: Generate (server asks the LLM, validates, returns a suggestion —
-// nothing is saved) -> manager reviews / edits dates / regenerates with
-// instructions -> Accept (server re-validates everything and saves into the
-// existing proposal/implementation/writing start-date + deadline fields).
-// The API key never reaches the browser; only a yes/no "configured" flag does.
-// =====================================================================
-const AI_SCHED_ROLES = ["md_admin","super_admin","technical_manager","technical_tl","marketing_manager"];
-function canUseAiSchedule(){ return AI_SCHED_ROLES.includes(role); }
-// Display-only mirror of ai_scheduler.PHASE_DEFS (the server is authoritative):
-// the phase order follows the existing pipeline, Proposal + Implementation only
-// for services with hasImplementation — same rule as clientWorkSteps().
-const AIS_PHASES = [
-  {key:"PROPOSAL", name:"Proposal", needsImpl:true, first:"PROPOSAL_ASSIGNED", last:"PROPOSAL_APPROVED", start:"proposalStartDate", end:"proposalDeadline"},
-  {key:"IMPLEMENTATION", name:"Code Implementation", needsImpl:true, first:"IMPLEMENTATION_ASSIGNED", last:"IMPLEMENTATION_APPROVED", start:"implementationStartDate", end:"implementationDeadline"},
-  {key:"PAPER_WRITING", name:"Paper Writing", needsImpl:false, first:"PAPERWRITER_ASSIGNED", last:"CLIENT_ACCEPTED", start:"writingStartDate", end:"writingDeadline"},
-  {key:"JOURNAL", name:"Final Review & Journal Submission", needsImpl:false, first:"JOURNAL_MANAGER_REVIEW", last:"JOURNAL_SUBMITTED", start:null, end:null},
-];
-let aiSched = {};   // clientId -> {note, loading, saving, result, edits, dirty, error, saved}
-function aisState(id){
-  return aiSched[id] || (aiSched[id] = {note:"", loading:false, saving:false, result:null, edits:null, dirty:false, error:"", saved:""});
-}
-function aisShort(iso){
-  if(!iso) return "—";
-  const d = new Date(String(iso).slice(0,10)+"T00:00:00");
-  return isNaN(d) ? "—" : d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-}
-function aisDays(a, b){
-  const x = new Date(String(a||"").slice(0,10)+"T00:00:00"), y = new Date(String(b||"").slice(0,10)+"T00:00:00");
-  if(isNaN(x) || isNaN(y)) return NaN;
-  return Math.round((y - x)/86400000) + 1;   // inclusive of both ends
-}
-function aisPhaseStatus(c, ph){
-  if(c.stage==="COMPLETED") return "done";
-  const i = stageIdx(c.stage), f = stageIdx(ph.first), l = stageIdx(ph.last);
-  return i > l ? "done" : (i >= f ? "active" : "pending");
-}
-// Recompute everything from the (possibly edited) dates, and catch obvious
-// problems before the manager clicks Accept. The server repeats all of this.
-function aisLive(st){
-  const sched = st.result.schedule, deadline = sched.final_deadline;
-  const errors = [];
-  let prevEnd = null;
-  const rows = st.edits.map((r, i)=>{
-    const days = aisDays(r.start_date, r.end_date);
-    let err = "";
-    if(!r.start_date || !r.end_date || isNaN(days)) err = "Pick both dates.";
-    else if(days < 1) err = "Ends before it starts.";
-    else if(i===0 && r.start_date !== st.edits[0].locked_start) err = "Must start on " + aisShort(st.edits[0].locked_start) + ".";
-    else if(prevEnd && r.start_date <= prevEnd) err = "Overlaps the previous phase.";
-    else if(r.end_date > deadline) err = "Goes past the final deadline.";
-    if(err) errors.push(r.name + ": " + err);
-    prevEnd = r.end_date || prevEnd;
-    return Object.assign({}, r, {days, err});
-  });
-  const start = st.edits[0].locked_start;
-  const available = aisDays(start, deadline);
-  const required = rows.reduce((s, r)=>s + (isNaN(r.days) ? 0 : Math.max(0, r.days)), 0);
-  const lastEnd = rows[rows.length-1].end_date;
-  const buffer = lastEnd ? aisDays(lastEnd, deadline) - 1 : NaN;
-  return {rows, errors, available, required, buffer, start, deadline};
-}
-function aisSetNote(id, v){ aisState(id).note = String(v||"").slice(0,500); }
-function aisEdit(id, idx, field, value){
-  const st = aisState(id);
-  if(!st.edits || !st.edits[idx]) return;
-  st.edits[idx][field] = value;
-  st.dirty = true; st.saved = "";
-  rerenderCurrent();
-}
-async function aisGenerate(id){
-  const st = aisState(id);
-  if(st.loading) return;
-  const noteEl = $("aisNote-"+id); if(noteEl) st.note = noteEl.value.slice(0,500);
-  st.loading = true; st.error = ""; st.saved = "";
-  rerenderCurrent();
-  try{
-    const out = await api("ai_schedule_generate", {clientId:id, note:st.note});
-    st.result = out;
-    const locked = out.schedule.stages[0].start_date;
-    st.edits = out.schedule.stages.map(s=>({key:s.key, name:s.name, start_date:s.start_date, end_date:s.end_date,
-      min_days:s.min_days, typical_days:s.typical_days, saves_dates:s.saves_dates, status:s.status, locked_start:locked}));
-    st.dirty = false;
-  }catch(e){
-    st.error = e.message || "Couldn't generate a schedule. Please try again.";
-  }finally{
-    st.loading = false;
-    rerenderCurrent();
-  }
-}
-function aisCancel(id){
-  const st = aisState(id);
-  st.result = null; st.edits = null; st.dirty = false; st.error = "";
-  rerenderCurrent();
-}
-async function aisAccept(id){
-  const st = aisState(id);
-  if(!st.result || st.saving) return;
-  const live = aisLive(st);
-  if(live.errors.length){ toast("Fix the highlighted dates first"); return; }
-  const c = clients.find(x=>x.id===id);
-  const list = live.rows.map(r=>`${r.name}: ${aisShort(r.start_date)} – ${aisShort(r.end_date)}`).join("\n");
-  if(!confirm(`Save this schedule for ${c ? c.name : "this project"}?\n\n${list}\n\nThis updates the project's phase start dates and deadlines (and any open tasks for those phases).`)) return;
-  st.saving = true; st.error = "";
-  rerenderCurrent();
-  const aiReason = st.result.schedule.reason || "";
-  try{
-    await api("ai_schedule_accept", {
-      clientId:id, fingerprint:st.result.fingerprint,
-      stages: st.edits.map(r=>({key:r.key, start_date:r.start_date, end_date:r.end_date})),
-      risk: st.result.schedule.risk,
-      reason: st.dirty ? ("Manager adjusted the AI recommendation. AI reasoning: " + aiReason) : aiReason,
-    });
-    st.result = null; st.edits = null; st.dirty = false;
-    st.saved = "Schedule saved. The phase dates below now drive the Assign Work form, deadlines and task dates.";
-    toast("AI schedule accepted and saved");
-    await refresh();
-  }catch(e){
-    st.error = e.message || "Couldn't save the schedule. Nothing was changed.";
-  }finally{
-    st.saving = false;
-    rerenderCurrent();
-  }
-}
-function aisResultHtml(c, st){
-  const sched = st.result.schedule, live = aisLive(st);
-  const id = c.id;
-  const span = Math.max(1, live.available || 1);
-  const rows = live.rows.map((r, i)=>{
-    const left = Math.max(0, (aisDays(live.start, r.start_date) - 1) / span * 100);
-    const width = isNaN(r.days) ? 0 : Math.max(2, Math.min(100 - left, r.days / span * 100));
-    const tight = !isNaN(r.days) && r.days < r.min_days;
-    const firstLocked = i===0;
-    return `<tr>
-      <td><b>${esc(r.name)}</b>${r.status==="active" ? ` <span class="badge b-purp">In progress</span>` : ""}
-        ${r.saves_dates ? "" : `<div class="ais-muted">Planned only — ends by the final deadline</div>`}
-        ${r.err ? `<div class="ais-inline-err">${esc(r.err)}</div>` : ""}</td>
-      <td><input type="date" class="mini-date" id="aisS-${esc(id)}-${i}" value="${esc(r.start_date)}" ${firstLocked?'disabled title="The first phase starts on this fixed date"':''}
-          onchange="aisEdit(${jsq(id)},${i},'start_date',this.value)"></td>
-      <td><input type="date" class="mini-date" id="aisE-${esc(id)}-${i}" value="${esc(r.end_date)}" max="${esc(live.deadline)}"
-          onchange="aisEdit(${jsq(id)},${i},'end_date',this.value)"></td>
-      <td style="white-space:nowrap"><b>${isNaN(r.days)?"—":r.days}</b> day${r.days===1?"":"s"}
-        ${tight ? `<div class="ais-inline-err">Usually ≥ ${r.min_days}</div>` : `<div class="ais-muted">Typical ~${r.typical_days}</div>`}</td>
-      <td style="width:28%"><div class="ais-bar" title="${esc(aisShort(r.start_date))} – ${esc(aisShort(r.end_date))}"><i style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></i></div></td>
-    </tr>`;
-  }).join("");
-  const warnings = (sched.warnings||[]).map(w=>`<li>${esc(w)}</li>`).join("");
-  const riskTxt = {LOW:"Low", MEDIUM:"Medium", HIGH:"High"}[sched.risk] || sched.risk;
-  return `<div class="adm-panel" style="margin-top:16px">
-    <div class="adm-panel-head"><h3>AI Recommended Schedule</h3>
-      ${st.dirty ? `<span class="badge b-wait">Edited — re-checked on save</span>` : `<span class="badge b-dim">Not saved yet</span>`}</div>
-    <div class="adm-panel-body">
-      <p class="ais-muted" style="margin-bottom:10px">Review the dates. You can change any end date (or later start dates) before accepting — each phase must start after the previous one ends and finish by ${esc(fmtDate(live.deadline))}.</p>
-      <div class="ais-table-wrap"><table class="ais-table">
-        <thead><tr><th>Phase</th><th>Start</th><th>End</th><th>Duration</th><th>Timeline</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      <div class="ais-metrics">
-        <div class="ais-metric"><span class="adm-field-label">Available time</span><b>${isNaN(live.available)?"—":live.available} days</b></div>
-        <div class="ais-metric"><span class="adm-field-label">Required time</span><b>${live.required} days</b></div>
-        <div class="ais-metric"><span class="adm-field-label">Buffer</span><b>${isNaN(live.buffer)?"—":Math.max(0,live.buffer)} day${live.buffer===1?"":"s"}</b></div>
-        <div class="ais-metric"><span class="adm-field-label">Deadline risk</span><b class="ais-risk-${esc(sched.risk)}">${esc(riskTxt)}</b></div>
-      </div>
-      <div class="ais-reason"><span class="adm-field-label">Why this plan</span><div style="margin-top:4px">${esc(sched.reason)}</div></div>
-      ${warnings ? `<ul class="ais-warn">${warnings}</ul>` : ""}
-      ${live.errors.length ? `<div class="ais-err">${live.errors.map(esc).join("<br>")}</div>` : ""}
-      <div class="ais-actions">
-        <button class="btn gold" onclick="aisAccept(${jsq(id)})" ${live.errors.length||st.saving||st.loading?"disabled":""}>${st.saving?"Saving…":"&#10003; Accept Schedule"}</button>
-        <button class="btn ghost" onclick="aisGenerate(${jsq(id)})" ${st.loading||st.saving?"disabled":""}>${st.loading?"Regenerating…":"&#8635; Regenerate"}</button>
-        <button class="btn ghost" onclick="aisCancel(${jsq(id)})" ${st.saving?"disabled":""}>Cancel</button>
-      </div>
-    </div>
-  </div>`;
-}
-function admProjAiScheduleTab(c){
-  const st = aisState(c.id);
-  const conf = serviceConf(c);
-  const phases = AIS_PHASES.filter(p=>conf.hasImplementation || !p.needsImpl);
-  const flow = phases.map(p=>`<span class="ais-step ${aisPhaseStatus(c,p)==="done"?"done":""}">${esc(p.name)}</span>`).join(`<span class="ais-arrow">&#8594;</span>`);
-  const daysLeft = c.deadlineDate ? aisDays(todayISO(), c.deadlineDate) - 1 : NaN;
-  const savedRows = phases.filter(p=>p.start).map(p=>{
-    const s = c[p.start], e = c[p.end];
-    const status = aisPhaseStatus(c,p);
-    return `<tr><td><b>${esc(p.name)}</b></td><td>${s?esc(fmtDate(s)):"—"}</td><td>${e?esc(fmtDate(e)):"—"}</td>
-      <td>${status==="done"?`<span class="adm-status good">Done</span>`:status==="active"?`<span class="adm-status warn">In progress</span>`:`<span class="adm-status" style="background:var(--card2)">Not started</span>`}</td></tr>`;
-  }).join("");
-  const done = c.stage==="COMPLETED";
-  let genBtn;
-  if(!aiScheduleConfigured){
-    genBtn = `<button class="btn" disabled>Generate AI Schedule</button>
-      <span class="ais-muted">AI scheduling isn't switched on yet — an administrator needs to paste the OpenAI API key as <b>LLM_API_KEY</b> in the Render environment settings.</span>`;
-  } else if(done){
-    genBtn = `<button class="btn" disabled>Generate AI Schedule</button><span class="ais-muted">This project is completed.</span>`;
-  } else {
-    genBtn = `<button class="btn" onclick="aisGenerate(${jsq(c.id)})" ${st.loading||st.saving?"disabled":""}>${st.loading?"Analysing the timeline…":(st.result?"&#8635; Regenerate":"&#10024; Generate AI Schedule")}</button>
-      ${st.loading?`<span class="ais-muted">Asking the AI — this usually takes 5–20 seconds.</span>`:""}`;
-  }
-  return `<div class="adm-panel">
-    <div class="adm-panel-head"><h3>AI Schedule Assistant</h3><span class="badge b-dim">Suggestion only until you accept</span></div>
-    <div class="adm-panel-body">
-      <div class="ais-facts">
-        <div><span class="adm-field-label">Client</span><p>${esc(c.name)}</p></div>
-        <div><span class="adm-field-label">Service</span><p>${esc(serviceLabel(c))}</p></div>
-        <div><span class="adm-field-label">Registration date</span><p>${esc(fmtDate(admClientRegDate(c)))}</p></div>
-        <div><span class="adm-field-label">Final deadline</span><p>${c.deadlineDate?esc(fmtDate(c.deadlineDate)):`<span style="color:var(--bad)">Not set</span>`}</p></div>
-        <div><span class="adm-field-label">Time left</span><p>${isNaN(daysLeft)?"—":(daysLeft<0?`<span style="color:var(--bad)">${-daysLeft} day(s) overdue</span>`:`${daysLeft} day${daysLeft===1?"":"s"}`)}</p></div>
-        <div><span class="adm-field-label">Current stage</span><p>${esc(STAGE_LABEL[c.stage]||c.stage)}</p></div>
-      </div>
-      <div class="ais-flow"><span class="adm-field-label" style="margin-right:4px">Workflow</span>${flow}</div>
-      <div style="margin-top:16px">
-        <label class="adm-field-label" for="aisNote-${esc(c.id)}">Instructions for the AI (optional)</label>
-        <textarea id="aisNote-${esc(c.id)}" class="ais-note" maxlength="500" placeholder="e.g. Client needs the proposal within 5 days; give implementation extra time; keep 3 days buffer" oninput="aisSetNote(${jsq(c.id)},this.value)">${esc(st.note)}</textarea>
-      </div>
-      <div class="ais-actions">${genBtn}</div>
-      ${st.error ? `<div class="ais-err">${esc(st.error)}</div>` : ""}
-      ${st.saved ? `<div class="ais-ok">${esc(st.saved)}</div>` : ""}
-    </div>
-  </div>
-  ${st.result ? aisResultHtml(c, st) : ""}
-  <div class="adm-panel" style="margin-top:16px">
-    <div class="adm-panel-head"><h3>Currently saved phase dates</h3></div>
-    <div class="adm-panel-body">
-      ${savedRows ? `<div class="ais-table-wrap"><table class="ais-table"><thead><tr><th>Phase</th><th>Start</th><th>Deadline</th><th>Status</th></tr></thead><tbody>${savedRows}</tbody></table></div>`
-        : `<div class="adm-empty">No phase dates yet.</div>`}
-      <p class="ais-muted" style="margin-top:10px">Final Review &amp; Journal Submission runs from the end of Paper Writing up to the final deadline.</p>
-    </div>
-  </div>`;
 }
 let admProjThreadMsgs = {};
 async function admLoadProjectThread(clientId){
@@ -11801,6 +11558,7 @@ function openSettings(){
     <div class="field"><label>New password</label><input id="s_newpwd" type="password" placeholder="New password"></div>
     <div class="field"><label>Confirm new password</label><input id="s_newpwd2" type="password" placeholder="Re-enter new password"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMyPassword()">Save password</button></div>
+    ${(role==="super_admin" || role==="md_admin") ? stageRemSettingsHtml() : ""}
     ${dbSection}`);
 }
 async function saveMyPassword(){
@@ -12110,6 +11868,7 @@ async function sendPing(empIdTarget, allOnline){
 function pingCanListen(){ return role === "employee" && !!empId; }
 function startPingListener(){
   stopPingListener();
+  startStageReminderListener();   // every staff login gets overdue-step pop-ups
   if(!pingCanListen()) return;
   updatePingPermBar();
   pollPings();
@@ -12117,6 +11876,7 @@ function startPingListener(){
 }
 function stopPingListener(){
   clearInterval(pingListenTimer); pingListenTimer = null;
+  stopStageReminderListener();
   stopPingTitleFlash();
   const bar = $("pingPermBar"); if(bar) bar.classList.remove("show");
 }
@@ -12195,6 +11955,182 @@ function pingBeep(){
 // again, check straight away so nothing that arrived meanwhile is missed.
 document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") pollPings(); });
 window.addEventListener("focus", pollPings);
+
+
+/* ================= STAGE REMINDERS (overdue hand-off pop-up) =================
+   Replaces the old AI Schedule Assistant. Every pipeline step has a time window
+   (Admin > Settings > Stage reminders; 1 minute per step for the demo). When a
+   client is still sitting at a step after that window, the person who must do
+   the NEXT hand-off gets this pop-up — right after they log in / open the page,
+   and within a few seconds if they are already signed in.
+     Telecaller -> Marketing TL -> Marketing Manager -> Accounts -> Technical team -> ...
+   "Cancel" hides it; the server brings it back after the repeat time (2 minutes
+   by default) for as long as the client still hasn't moved on. Which person gets
+   which step is decided on the server (STAGE_REMINDER_RULES in server.py). */
+let stageRemCfg = {enabled:true, stepMinutes:1, repeatMinutes:2};
+let stageRemTimer = null, stageRemBusy = false, stageRemItems = [], stageRemShownKeys = new Set();
+let stageRemTitleTimer = null;
+const STAGE_REM_POLL_MS = 15000;
+// The one-click hand-offs for the marketing/accounts steps; every other step opens the client.
+const STAGE_REM_QUICK = {
+  NEW:            {can:()=>isTelecaller(),                 label:"Send to Marketing TL &#8594;", fn:id=>sendToTL(id)},
+  TL_REVIEW:      {can:()=>role==="marketing_tl",          label:"Verify &amp; send to Manager &#8594;", fn:id=>tlVerify(id)},
+  MANAGER_REVIEW: {can:()=>role==="marketing_manager",     label:"Approve &amp; send to Accounts &#8594;", fn:id=>managerApprove(id)},
+  ACCOUNT_REVIEW: {can:()=>role==="account_team",          label:"Approve &amp; send to Technical &#8594;", fn:id=>accountApprove(id)},
+};
+function stageRemCanListen(){ return !!role && role!=="client" && role!=="validator"; }
+function stageRemKey(it){ return it.clientId + "|" + it.stage + "|" + it.enteredAt; }
+function startStageReminderListener(){
+  stopStageReminderListener();
+  if(!stageRemCanListen()) return;
+  pollStageReminders();
+  stageRemTimer = setInterval(pollStageReminders, STAGE_REM_POLL_MS);
+}
+function stopStageReminderListener(){
+  clearInterval(stageRemTimer); stageRemTimer = null;
+  stageRemItems = []; stageRemShownKeys = new Set();
+  stopStageRemTitleFlash();
+  const bg = $("stageRemBg"); if(bg) bg.classList.remove("open");
+}
+async function pollStageReminders(){
+  if(!stageRemCanListen() || stageRemBusy) return;
+  stageRemBusy = true;
+  try{
+    const out = await api("stage_reminders_poll", {});
+    stageRemCfg = Object.assign(stageRemCfg, {enabled:out.enabled, stepMinutes:out.stepMinutes, repeatMinutes:out.repeatMinutes});
+    showStageReminders(out.items || []);
+  }catch(e){ /* quiet — the session-expired path is handled inside api() */ }
+  finally{ stageRemBusy = false; }
+}
+function showStageReminders(items){
+  stageRemItems = items;
+  const bg = $("stageRemBg");
+  if(!items.length){ bg.classList.remove("open"); stopStageRemTitleFlash(); stageRemShownKeys = new Set(); return; }
+  const fresh = items.filter(it=>!stageRemShownKeys.has(stageRemKey(it)));
+  renderStageReminders();
+  bg.classList.add("open");
+  if(fresh.length){
+    fresh.forEach(it=>stageRemShownKeys.add(stageRemKey(it)));
+    try{ pingBeep(); }catch(e){}
+    startStageRemTitleFlash();
+    if(("Notification" in window) && Notification.permission === "granted"){
+      try{
+        const it = fresh[0];
+        const n = new Notification("Action needed: " + it.clientName, {
+          body: it.nextStep + " (waiting " + it.waitedMinutes + " min)", tag:"matiz-stage-" + stageRemKey(it), requireInteraction:true});
+        n.onclick = function(){ try{ window.focus(); }catch(e){} n.close(); };
+      }catch(e){}
+    }
+  }
+}
+function stageRemMins(n){ n = Math.max(0, n|0); return n + " min"; }
+function renderStageReminders(){
+  const items = stageRemItems;
+  const step = stageRemCfg.stepMinutes || 1, rep = stageRemCfg.repeatMinutes || 2;
+  const rows = items.map(it=>{
+    const q = STAGE_REM_QUICK[it.stage];
+    const quick = q && q.can() ? `<button class="btn gold small" onclick="stageRemQuick(${jsq(it.clientId)},${jsq(it.stage)})">${q.label}</button>` : "";
+    return `<div class="rem-item">
+      <div class="rem-top"><b>${esc(it.clientName)}</b>
+        <span class="badge b-dim">${esc(it.displayId)}</span>
+        ${it.projectId?`<span class="badge b-dim">${esc(it.projectId)}</span>`:""}
+        <span class="badge b-purp">${esc(it.service)}</span></div>
+      <div class="rem-meta">Waiting at <b>${esc(it.stageLabel)}</b> for ${stageRemMins(it.waitedMinutes)}
+        &mdash; <span class="rem-late">${stageRemMins(it.lateMinutes)} past the ${step}-min limit</span>
+        ${it.deadlineDate?`<br>Client deadline: <b>${fmtDate(it.deadlineDate)}</b>`:""}
+        ${it.timesReminded?` &middot; reminded ${it.timesReminded} time${it.timesReminded===1?"":"s"} already`:""}</div>
+      <div class="rem-next">&#10148; Your next step: ${esc(it.nextStep)}</div>
+      <div class="rem-acts">${quick}<button class="btn ghost small" onclick="stageRemOpen(${jsq(it.clientId)})">Open client</button></div>
+    </div>`;
+  }).join("");
+  $("stageRemBox").innerHTML = `
+    <div class="rem-head"><div class="rem-ic">&#9200;</div><div>
+      <h3 id="stageRemTitle">${items.length===1?"A client is waiting on you":items.length+" clients are waiting on you"}</h3>
+      <p>Each step must be passed on within ${step} minute${step===1?"":"s"}. Please send ${items.length===1?"it":"them"} to the next step now.</p></div></div>
+    <div class="rem-list">${rows}</div>
+    <div class="rem-foot"><small>Cancel hides this for ${rep} minute${rep===1?"":"s"} — it comes back if the step is still pending.</small>
+      <button class="btn ghost" onclick="stageRemCancel()">Cancel</button></div>`;
+}
+async function stageRemSnoozeAll(){
+  const items = stageRemItems.map(it=>({clientId:it.clientId, stage:it.stage, enteredAt:it.enteredAt}));
+  $("stageRemBg").classList.remove("open"); stopStageRemTitleFlash();
+  stageRemItems = [];
+  if(!items.length) return;
+  try{ await api("stage_reminders_snooze", {items}); }catch(e){ toast(e.message); }
+}
+async function stageRemCancel(){
+  const rep = stageRemCfg.repeatMinutes || 2;
+  await stageRemSnoozeAll();
+  toast(`Okay — reminding you again in ${rep} minute${rep===1?"":"s"} if it's still pending`);
+}
+async function stageRemOpen(id){
+  // Opening the client counts as "I'm on it": hide the pop-up (it returns after the
+  // repeat time if the step still hasn't been done), then open the client.
+  await stageRemSnoozeAll();
+  if(!findClient(id)){ toast("Open this client from your dashboard to continue."); return; }
+  if(role==="employee" || isModernRole()) admOpenProject(id); else openDrawer(id);
+}
+async function stageRemQuick(id, stage){
+  const q = STAGE_REM_QUICK[stage]; if(!q) return;
+  const item = stageRemItems.find(it=>it.clientId===id && it.stage===stage);
+  $("stageRemBg").classList.remove("open");
+  stageRemItems = stageRemItems.filter(it=>it!==item);
+  stopStageRemTitleFlash();
+  try{ await q.fn(id); }catch(e){ toast(e.message || String(e)); }
+  const c = findClient(id);
+  if(item && c && c.stage===stage){
+    // The hand-off didn't go through (e.g. no call logged yet): give them the
+    // repeat time to fix it instead of popping straight back up, and open the client.
+    try{ await api("stage_reminders_snooze", {items:[{clientId:item.clientId, stage:item.stage, enteredAt:item.enteredAt}]}); }catch(e){}
+    if(role==="employee" || isModernRole()) admOpenProject(id); else openDrawer(id);
+  }
+  pollStageReminders();
+}
+function startStageRemTitleFlash(){
+  if(stageRemTitleTimer) return;
+  let on = false;
+  stageRemTitleTimer = setInterval(()=>{ on = !on; document.title = on ? "\u23F0 Action needed" : pingBaseTitle; }, 1000);
+}
+function stopStageRemTitleFlash(){ if(!stageRemTitleTimer) return; clearInterval(stageRemTitleTimer); stageRemTitleTimer = null; document.title = pingBaseTitle; }
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") pollStageReminders(); });
+
+/* ----- Admin: timing settings + "who is late right now" ----- */
+function stageRemSettingsHtml(){
+  const c = stageRemCfg || {};
+  return `
+    <div style="height:1px;background:var(--line);margin:18px 0"></div>
+    <h3>Stage reminders</h3>
+    <p class="msub">If a client isn't sent to the next step in time, the person who must send it gets a pop-up. Cancel brings it back after the repeat time.</p>
+    <label class="check" style="margin-bottom:10px"><input type="checkbox" id="sr_enabled" ${c.enabled!==false?"checked":""}> Reminders switched on</label>
+    <div class="grid2">
+      <div class="field"><label>Time allowed per step (minutes)</label><input id="sr_step" type="number" min="1" step="1" value="${esc(c.stepMinutes||1)}"></div>
+      <div class="field"><label>Show again after Cancel (minutes)</label><input id="sr_repeat" type="number" min="1" step="1" value="${esc(c.repeatMinutes||2)}"></div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin-top:-4px">Demo: 1 and 2. For real use, e.g. 240 (4 hours) per step and 30 to repeat.</p>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal();openStageRemOverview()">See overdue steps now</button><button class="btn" onclick="saveStageRemSettings()">Save reminder settings</button></div>`;
+}
+async function saveStageRemSettings(){
+  const payload = {enabled:$("sr_enabled").checked, stepMinutes:parseInt($("sr_step").value,10), repeatMinutes:parseInt($("sr_repeat").value,10)};
+  let out;
+  try{ out = await api("stage_reminders_save_settings", payload); }catch(e){ toast(e.message); return; }
+  stageRemCfg = out.settings || stageRemCfg;
+  closeModal(); toast("Stage reminder settings saved");
+}
+async function openStageRemOverview(){
+  openModal(`<h2 style="margin-bottom:4px">&#9200; Overdue steps</h2>
+    <p class="msub">Clients that have waited longer than the allowed time at their current step, and who needs to act.</p>
+    <div id="stageRemOv"><div style="padding:14px;color:var(--muted);font-size:13px">Loading&hellip;</div></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="openStageRemOverview()">&#8635; Refresh</button><button class="btn" onclick="closeModal()">Close</button></div>`);
+  let out;
+  try{ out = await api("stage_reminders_overview", {}); }catch(e){ const el=$("stageRemOv"); if(el) el.innerHTML = `<div style="color:var(--bad);font-size:13px">${esc(e.message)}</div>`; return; }
+  const el = $("stageRemOv"); if(!el) return;
+  const items = out.items || [];
+  el.innerHTML = items.length ? `<div style="overflow-x:auto"><div style="min-width:520px">
+      <div class="rem-ov-row h"><span>Client</span><span>Waiting at</span><span>Waiting on</span><span>Late by</span></div>
+      ${items.map(it=>`<div class="rem-ov-row"><span><b>${esc(it.clientName)}</b><br><small style="color:var(--muted)">${esc(it.displayId)}</small></span>
+        <span>${esc(it.stageLabel)}</span><span>${esc(it.waitingOn||"—")}</span><span class="rem-late" style="color:var(--bad);font-weight:700">${stageRemMins(it.lateMinutes)}</span></div>`).join("")}
+    </div></div>` : `<div class="adm-empty">Nothing is overdue right now.</div>`;
+}
 
 /* ================= VALIDATION FOLDERS =================
    AI Check / Plagiarism Check / Test Paper.

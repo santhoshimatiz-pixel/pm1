@@ -1,0 +1,57 @@
+STAGE REMINDERS (replaces the AI Schedule Assistant)
+====================================================
+
+REMOVED
+  AI Schedule Assistant: ai_scheduler.py, AI_SCHEDULE_UPDATE.txt, the "AI Schedule"
+  project tab and buttons, ai_schedule_* server actions, the openai package, and the
+  LLM_* settings in render.yaml / .env.example. No OpenAI key is needed any more.
+
+HOW IT WORKS
+  Each pipeline step gets a time window (default 1 minute - demo setting).
+  The clock starts when a client is added, and restarts every time it moves on.
+  If the client is still at the same step when the window runs out, the person
+  who must do the next hand-off gets a pop-up:
+    - straight away when they log in / open the page, or within ~15 seconds
+      if they are already signed in
+    - with a beep, flashing tab title and a desktop notification (if allowed)
+
+    Telecaller        -> "Send to Marketing TL"          (1 min)
+    Marketing TL      -> "Verify & send to Manager"      (1 min)
+    Marketing Manager -> "Approve & send to Accounts"    (1 min)
+    Accounts          -> "Approve & send to Technical"   (1 min)
+    Technical Mgr/TL, assigned writer / programmer / coordinator,
+    Journal Manager/TL, proofreading / formatting / submission team ... every step.
+  Steps that wait on the CLIENT's approval are not timed.
+
+  Pop-up buttons
+    Quick send     - one-click hand-off for the 4 marketing/accounts steps
+    Open client    - opens the client; pop-up hides for the repeat time
+    Cancel         - hides it; it comes back after 2 minutes if still pending
+
+  Rejected and on-hold clients are not timed. When they are restored / resumed
+  the step gets a fresh window.
+  Clients that existed before this update are not timed until they next move.
+  Clients bulk-imported from a sheet are not timed until they next move.
+
+ADMIN (Super Admin / MD Admin) > Settings > Stage reminders
+  - switch on/off
+  - Time allowed per step (minutes)      default 1
+  - Show again after Cancel (minutes)    default 2
+  - "See overdue steps now": every late client and whose turn it is
+
+DEMO (1-day deadline, Scopus paid)
+  1. Telecaller adds the client (deadline = tomorrow), logs one call.
+  2. Wait 1 minute without sending -> Telecaller gets the pop-up.
+  3. Cancel -> it comes back after 2 minutes.
+  4. Send to Marketing TL -> 1 minute later the Marketing TL gets the pop-up, and so on.
+  Note: "Send to Marketing TL" still needs at least one logged call (existing rule).
+
+DATABASE
+  Automatic on start-up, no manual step:
+  new column clients.stage_entered_at, new tables stage_reminder_settings and
+  stage_reminder_snoozes.
+
+FILES
+  Changed: server.py, index.html, requirements.txt, render.yaml, .env.example
+  Removed: ai_scheduler.py, AI_SCHEDULE_UPDATE.txt
+  New:     STAGE_REMINDERS_UPDATE.txt

@@ -58,11 +58,6 @@ def _load_dotenv():
 
 _load_dotenv()
 
-# AI Schedule Assistant (LLM-backed deadline planning). Imported after .env is
-# loaded so LLM_* settings are visible. It never touches the database itself.
-import ai_scheduler  # noqa: E402
-
-
 def _env_bool(name, default=False):
     v = os.environ.get(name)
     if v is None:
@@ -778,13 +773,13 @@ ACTION_ROLES = {
     "format_manager_decision": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
     "proofread_decision": _R_ALL_STAFF,
     "proofread_request_correction": _R_ALL_STAFF,
-    # ---- AI Schedule Assistant: generate is read-only (LLM suggestion only);
-    #      accept writes the approved dates into the EXISTING phase-date columns.
-    #      Same people who already set those dates today: Technical Manager/TL
-    #      (assign_proposal_writer / reassign_work), plus the Marketing Manager who
-    #      registers clients and agrees the final deadline, plus Admin. ----
-    "ai_schedule_generate": _R_TECH_MGMT + ("marketing_manager",),
-    "ai_schedule_accept": _R_TECH_MGMT + ("marketing_manager",),
+    # ---- stage reminders: anyone signed in polls/cancels their OWN pop-ups
+    #      (the handler only ever returns items that person must act on);
+    #      only Admin changes the timing or sees everyone's overdue list. ----
+    "stage_reminders_poll": _R_ALL_STAFF,
+    "stage_reminders_snooze": _R_ALL_STAFF,
+    "stage_reminders_overview": _R_ADMIN,
+    "stage_reminders_save_settings": _R_ADMIN,
     "resolve_hold": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "resolve_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "reject_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
@@ -2090,6 +2085,36 @@ def init_db():
     con.execute("ALTER TABLE history ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''")
     con.commit()
 
+    # ----- STAGE REMINDERS (see the "STAGE REMINDERS" section further down).
+    #       stage_entered_at = when the client reached its CURRENT stage (set by
+    #       move_stage / add_client). Existing clients stay NULL, so they are not
+    #       timed until they next move — only work that moves from now on is tracked.
+    con.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS stage_entered_at TEXT")
+    con.executescript(f"""
+    CREATE TABLE IF NOT EXISTS stage_reminder_settings (
+        id INTEGER PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        step_minutes INTEGER NOT NULL DEFAULT 1,
+        repeat_minutes INTEGER NOT NULL DEFAULT 2,
+        updated_by TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE TABLE IF NOT EXISTS stage_reminder_snoozes (
+        id SERIAL PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        stage TEXT NOT NULL,
+        stage_entered_at TEXT NOT NULL,
+        recipient_key TEXT NOT NULL,
+        snoozed_until TEXT NOT NULL,
+        snooze_count INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (client_id, stage, stage_entered_at, recipient_key)
+    );
+    """)
+    con.execute("""INSERT INTO stage_reminder_settings (id, enabled, step_minutes, repeat_minutes)
+                   VALUES (1, 1, ?, ?) ON CONFLICT (id) DO NOTHING""",
+                (REMINDER_DEFAULT_STEP_MINUTES, REMINDER_DEFAULT_REPEAT_MINUTES))
+    con.commit()
+
     con.execute("""INSERT INTO settings (id, from_email, to_email) VALUES (1, ?, ?)
                    ON CONFLICT (id) DO NOTHING""", (DEFAULT_FROM_EMAIL, DEFAULT_TO_EMAIL))
     con.commit()
@@ -2385,9 +2410,187 @@ def get_client(con, cid):
 
 
 def move_stage(con, cid, stage, actor, note=""):
-    con.execute("UPDATE clients SET stage=? WHERE id=?", (stage, cid))
+    # stage_entered_at starts the per-step reminder clock for the new stage.
+    con.execute("UPDATE clients SET stage=?, stage_entered_at=? WHERE id=?", (stage, now_str(), cid))
     con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
                 (cid, stage, actor, note or ""))
+
+
+# =====================================================================
+# STAGE REMINDERS  (replaces the old AI Schedule Assistant)
+# ---------------------------------------------------------------------
+# Every pipeline step gets a fixed time window (settings: step_minutes,
+# default 1 minute for the demo). The clock starts when a client reaches
+# a stage (clients.stage_entered_at, stamped by move_stage/add_client).
+# If the client is still sitting at that stage when the window runs out,
+# the person responsible for the NEXT hand-off gets a pop-up the next
+# time their browser polls (i.e. straight away when they log in / open
+# the page). They can cancel it; it comes back after repeat_minutes
+# (default 2) for as long as the client has not moved on.
+#
+#   Telecaller  --1 min-->  Marketing TL  --1 min-->  Marketing Manager
+#   --1 min-->  Accounts  --1 min-->  Technical team  --1 min--> ... and
+#   so on for every step below. Stages that wait on the CLIENT (proposal /
+#   implementation / paper sent for client approval) are not timed.
+# =====================================================================
+REMINDER_DEFAULT_STEP_MINUTES = 1
+REMINDER_DEFAULT_REPEAT_MINUTES = 2
+REMINDER_MAX_MINUTES = 60 * 24 * 30          # sanity cap for the settings form (30 days)
+_TS_FMT = "%Y-%m-%d %H:%M:%S"
+
+_TM_TL = ("technical_manager", "technical_tl")
+_JM_TL = ("journal_manager", "journal_tl")
+
+# stage -> (department logins that must act, employee rule, what they must do next)
+# Mirrors "Your next step" (drawerActions) in index.html, so the pop-up always
+# goes to the same person who has the button for that step.
+STAGE_REMINDER_RULES = {
+    "NEW": (("telecaller",), "creator_telecaller", "Send this lead to the Marketing TL"),
+    "TL_REVIEW": (("marketing_tl",), None, "Verify and send to the Marketing Manager"),
+    "MANAGER_REVIEW": (("marketing_manager",), None, "Approve and send to Accounts"),
+    "ACCOUNT_REVIEW": (("account_team",), None, "Approve and send to the Technical Team"),
+    "TECH_ASSIGNED": (_TM_TL, None, "Assign the work to the technical team"),
+    "PROPOSAL_ASSIGNED": ((), "proposal_writer", "Write and submit the proposal"),
+    "PROPOSAL_SUBMITTED": (_TM_TL, None, "Verify the submitted proposal"),
+    "PROPOSAL_VERIFIED": (_TM_TL, None, "Deliver the proposal to the client"),
+    "PROPOSAL_APPROVED": (_TM_TL, None, "Assign programmers for implementation"),
+    "IMPLEMENTATION_ASSIGNED": ((), "programmers", "Finish the implementation and submit it"),
+    "IMPLEMENTATION_COMPLETE": (_TM_TL, None, "Send the implementation to the client"),
+    "IMPLEMENTATION_APPROVED": (_TM_TL, None, "Assign paper writers"),
+    "PAPERWRITER_ASSIGNED": ((), "writers", "Finish the paper writing and submit it"),
+    "COORDINATOR_REVIEW": ((), "coordinator", "Review the paper and send it on"),
+    "WRITER_FIXING": ((), "writers", "Fix the corrections and resubmit"),
+    "TECHTL_REVIEW": (("technical_tl",), None, "Review the paper and send it on"),
+    "TECHMGR_REVIEW": (("technical_manager",), None, "Review the paper and approve it"),
+    "WRITING_COMPLETE": (_TM_TL, None, "Deliver the paper to the client"),
+    "CLIENT_ACCEPTED": (_TM_TL, None, "Send the paper to the Journal team"),
+    "JOURNAL_MANAGER_REVIEW": (_JM_TL, None, "Assign a proofreading coordinator"),
+    "PROOFREAD_COORD_ASSIGNED": ((), "proofread_coordinator", "Assign proofreaders"),
+    "PROOFREADING": ((), "proofreaders", "Finish proofreading"),
+    "PROOFREAD_CORRECTION": ((), "writers", "Fix the proofreading corrections and resubmit"),
+    "PROOFREAD_RECHECK": ((), "proofread_coordinator", "Re-check the proofreading"),
+    "JOURNAL_MANAGER_FORMATTING": (_JM_TL, None, "Assign a formatting coordinator"),
+    "FORMATTING_ASSIGNED": ((), "format_coordinator", "Assign formatters"),
+    "FORMATTING_IN_PROGRESS": ((), "formatting_team", "Finish formatting"),
+    "FORMATTING_MANAGER_REVIEW": (_JM_TL, None, "Review the formatting"),
+    "SUBMISSION": ((), "submission_team", "Submit the paper to the journal"),
+}
+
+
+def now_str():
+    return datetime.now().strftime(_TS_FMT)
+
+
+def _parse_ts(v):
+    if not v:
+        return None
+    try:
+        return datetime.strptime(str(v)[:19], _TS_FMT)
+    except ValueError:
+        return None
+
+
+def restart_stage_clock(con, cid):
+    """A client that was paused (on hold / rejected) comes back: give the current
+    stage a fresh time window instead of popping up as overdue immediately. Only
+    clients that are already being timed are touched."""
+    con.execute("UPDATE clients SET stage_entered_at=? WHERE id=? AND stage_entered_at IS NOT NULL",
+                (now_str(), cid))
+
+
+def reminder_settings(con):
+    r = con.execute("SELECT * FROM stage_reminder_settings WHERE id=1").fetchone()
+    if not r:
+        return {"enabled": True, "stepMinutes": REMINDER_DEFAULT_STEP_MINUTES,
+                "repeatMinutes": REMINDER_DEFAULT_REPEAT_MINUTES}
+    return {"enabled": bool(r["enabled"]),
+            "stepMinutes": max(1, int(r["step_minutes"] or REMINDER_DEFAULT_STEP_MINUTES)),
+            "repeatMinutes": max(1, int(r["repeat_minutes"] or REMINDER_DEFAULT_REPEAT_MINUTES))}
+
+
+def _csv_names(v):
+    return {n.strip() for n in (v or "").split(",") if n.strip()}
+
+
+def _reminder_emp_match(con, rule, c, sess, creator_cache):
+    """Is this individually-added employee the one who must act on client c?"""
+    name = (sess.get("emp_name") or "").strip()
+    emp_role = sess.get("emp_role") or ""
+    team = sess.get("emp_team_type") or ""
+    if not name or not rule:
+        return False
+    if rule == "creator_telecaller":
+        if emp_role != "TELECALLER":
+            return False
+        if c["id"] not in creator_cache:
+            h = con.execute("""SELECT actor FROM history WHERE client_id=? AND stage='NEW'
+                               ORDER BY created_at ASC, id ASC LIMIT 1""", (c["id"],)).fetchone()
+            creator_cache[c["id"]] = (h["actor"] if h else "") or ""
+        return creator_cache[c["id"]].strip() == name
+    if rule == "proposal_writer":
+        who = c["proposal_coordinator"] if c["proposal_awaiting_team_pick"] else c["proposal_writer"]
+        return (who or "").strip() == name
+    if rule == "programmers":
+        return name in _csv_names(c["assigned_programmers"])
+    if rule == "writers":
+        return name in _csv_names(c["assigned_writers"])
+    if rule == "coordinator":
+        return (c["coordinator_name"] or "").strip() == name
+    if rule == "proofread_coordinator":
+        return (c["proofread_coordinator"] or "").strip() == name
+    if rule == "proofreaders":
+        people = _csv_names(c["assigned_proofreaders"]) or _csv_names(c["proofread_coordinator"])
+        return name in people
+    if rule == "format_coordinator":
+        return (c["format_coordinator"] or "").strip() == name
+    if rule == "formatting_team":
+        return name in (_csv_names(c["assigned_formatters"]) | _csv_names(c["format_coordinator"]))
+    if rule == "submission_team":
+        return emp_role == "JOURNAL_EMPLOYEE" and team == "SUBMISSION"
+    return False
+
+
+def _reminder_is_for(con, c, sess, creator_cache):
+    rule = STAGE_REMINDER_RULES.get(c["stage"])
+    if not rule:
+        return False
+    roles, emp_rule, _ = rule
+    if sess["kind"] == "employee":
+        return _reminder_emp_match(con, emp_rule, c, sess, creator_cache)
+    if sess["kind"] == "dept":
+        return (sess["role"] or "") in roles
+    return False
+
+
+def overdue_stage_items(con, cfg, now=None):
+    """Every timed client whose current step has run past its window."""
+    now = now or datetime.now()
+    step = timedelta(minutes=cfg["stepMinutes"])
+    out = []
+    rows = con.execute("""SELECT * FROM clients
+                          WHERE stage_entered_at IS NOT NULL AND stage_entered_at<>''
+                            AND COALESCE(rejected,0)=0 AND COALESCE(on_hold,0)=0""").fetchall()
+    for c in rows:
+        if c["stage"] not in STAGE_REMINDER_RULES:
+            continue
+        entered = _parse_ts(c["stage_entered_at"])
+        if not entered or now < entered + step:
+            continue
+        out.append((c, entered, entered + step))
+    return out
+
+
+def _reminder_item(c, entered, due, now, snooze_count):
+    waited = int((now - entered).total_seconds() // 60)
+    late = int((now - due).total_seconds() // 60)
+    return {"clientId": c["id"], "displayId": c["display_id"] or c["id"],
+            "projectId": c["project_id"] or "", "clientName": c["name"],
+            "service": service_conf(c["service_key"])["label"],
+            "stage": c["stage"], "stageLabel": STAGE_LABELS.get(c["stage"], c["stage"]),
+            "nextStep": STAGE_REMINDER_RULES[c["stage"]][2],
+            "enteredAt": c["stage_entered_at"], "dueAt": due.strftime(_TS_FMT),
+            "waitedMinutes": waited, "lateMinutes": late,
+            "deadlineDate": c["deadline_date"] or "", "timesReminded": snooze_count}
 
 
 def active_names(con, role, team_type=None):
@@ -3882,8 +4085,7 @@ def handle_action(action, d, ip=""):
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
                                       "amounts": v["amounts"]} for k, v in SERVICES.items()},
-                    # Only a yes/no — never the key or provider details.
-                    "aiSchedule": {"configured": ai_scheduler.is_configured()}}
+                    "stageReminders": reminder_settings(con) if (d.get("role") or "") != "client" else None}
 
         if action == "add_client":
             name = (d.get("name") or "").strip()
@@ -3998,6 +4200,9 @@ def handle_action(action, d, ip=""):
 
             actor = (d.get("actorLabel") or "").strip() or "Telecaller"
             con.execute("INSERT INTO history (client_id, stage, actor) VALUES (?,'NEW',?)", (cid, actor))
+            # Start the stage-reminder clock: the Telecaller now has one step-time
+            # to send this lead to the Marketing TL.
+            con.execute("UPDATE clients SET stage_entered_at=? WHERE id=?", (now_str(), cid))
             con.commit()
             return {"ok": True, "id": cid, "displayId": display_id, "projectId": project_id}
 
@@ -4117,6 +4322,7 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             con.execute("UPDATE clients SET rejected=0, reject_reason='', rejected_at=NULL WHERE id=?",
                         (c["id"],))
+            restart_stage_clock(con, c["id"])
             con.commit()
             return {"ok": True}
 
@@ -5233,98 +5439,111 @@ def handle_action(action, d, ip=""):
             return {"ok": True}
 
         # =============================================================
-        # AI SCHEDULE ASSISTANT
-        # -------------------------------------------------------------
-        # generate: builds the planning context from the client's EXISTING
-        #   fields (reg_date, deadline_date, service_key -> hasImplementation,
-        #   stage, phase start/deadline columns), asks the LLM, validates the
-        #   answer and returns it. Writes NOTHING.
-        # accept: the manager's approved (possibly edited) dates are validated
-        #   again from scratch against the current DB state and only then saved
-        #   into the existing columns proposal_/implementation_/writing_
-        #   start_date + deadline, any pre-assignment deadline, and the open
-        #   tracking tasks' dates. One history row records who accepted what.
+        # STAGE REMINDERS (see the section above STAGE_REMINDER_RULES)
         # =============================================================
-        if action == "ai_schedule_generate":
-            if _rate_limited(ip, "ai_schedule", limit=20, window_seconds=600):
-                raise ApiError("Too many AI schedule requests. Please wait a few minutes and try again.", 429)
-            c = get_client(con, d.get("clientId") or "")
-            note = (d.get("note") or "").strip()[:ai_scheduler.MAX_NOTE_CHARS]
-            try:
-                ctx = ai_scheduler.build_context(c, service_conf(c["service_key"]), STAGES, STAGE_LABELS)
-                # Release this request's DB transaction before the (slow) network
-                # call so no locks or idle-in-transaction connections are held.
-                con.rollback()
-                result = ai_scheduler.generate(ctx, note)
-            except ai_scheduler.SchedulingError as e:
-                raise ApiError(e.msg, e.code)
-            return {"ok": True, "clientId": c["id"], "fingerprint": ctx["fingerprint"],
-                    "context": {k: ctx[k] for k in (
-                        "service_label", "has_implementation", "current_stage_label",
-                        "registration_date", "final_deadline", "today", "schedule_start",
-                        "available_days", "workflow", "completed_phases")},
-                    "schedule": result}
+        if action == "stage_reminders_poll":
+            sess = get_principal()
+            cfg = reminder_settings(con)
+            if not sess or not cfg["enabled"] or sess["kind"] not in ("dept", "employee"):
+                return {"ok": True, "enabled": cfg["enabled"], "items": [],
+                        "repeatMinutes": cfg["repeatMinutes"], "stepMinutes": cfg["stepMinutes"]}
+            now = datetime.now()
+            me = session_identity(sess)["key"]
+            snoozes = {}
+            for r in con.execute("SELECT * FROM stage_reminder_snoozes WHERE recipient_key=?", (me,)):
+                snoozes[(r["client_id"], r["stage"], r["stage_entered_at"])] = r
+            items, creator_cache = [], {}
+            for c, entered, due in overdue_stage_items(con, cfg, now):
+                if not _reminder_is_for(con, c, sess, creator_cache):
+                    continue
+                sz = snoozes.get((c["id"], c["stage"], c["stage_entered_at"]))
+                count = sz["snooze_count"] if sz else 0
+                if sz and (_parse_ts(sz["snoozed_until"]) or now) > now:
+                    continue            # cancelled recently - comes back after repeat_minutes
+                items.append(_reminder_item(c, entered, due, now, count))
+            items.sort(key=lambda x: x["dueAt"])
+            return {"ok": True, "enabled": True, "items": items, "serverNow": now.strftime(_TS_FMT),
+                    "repeatMinutes": cfg["repeatMinutes"], "stepMinutes": cfg["stepMinutes"]}
 
-        if action == "ai_schedule_accept":
-            c = get_client(con, d.get("clientId") or "")
-            # Lock the row so a concurrent assignment can't slip in between the
-            # checks below and the UPDATE.
-            c = con.execute("SELECT * FROM clients WHERE id=? FOR UPDATE", (c["id"],)).fetchone()
-            try:
-                ctx = ai_scheduler.build_context(c, service_conf(c["service_key"]), STAGES, STAGE_LABELS)
-            except ai_scheduler.SchedulingError as e:
-                raise ApiError(e.msg, e.code)
-            if (d.get("fingerprint") or "") != ctx["fingerprint"]:
-                raise ApiError("This project changed after the schedule was generated (its stage, dates or "
-                               "service moved on). Nothing was saved — click Regenerate for a fresh plan.", 409)
-            stages_in = d.get("stages")
-            if not isinstance(stages_in, list) or len(stages_in) > 10:
-                raise ApiError("The schedule wasn't in the expected format.", 422)
-            proposed = {"stages": [{"key": str((x or {}).get("key") or ""),
-                                    "start_date": str((x or {}).get("start_date") or ""),
-                                    "end_date": str((x or {}).get("end_date") or "")}
-                                   for x in stages_in if isinstance(x, dict)],
-                        "risk": d.get("risk"), "reason": d.get("reason")}
-            try:
-                sched = ai_scheduler.validate_schedule(ctx, proposed, source="manager")
-            except ai_scheduler.SchedulingError as e:
-                raise ApiError(e.msg, e.code)
-
-            actor = (d.get("actorLabel") or "Manager").strip()
-            saved = []
-            for st in sched["stages"]:
-                ph = ai_scheduler.PHASE_BY_KEY[st["key"]]
-                if not ph["end_col"]:
-                    continue   # Journal phase: planned only; its end is the existing final deadline
-                # Column names come from the fixed PHASE_DEFS table, never from the request.
-                con.execute("UPDATE clients SET %s=?, %s=? WHERE id=?" % (ph["start_col"], ph["end_col"]),
-                            (st["start_date"], st["end_date"], c["id"]))
-                # A team pre-selected at intake carries its own deadline that is copied
-                # into the phase deadline when the phase starts — keep it in step.
-                if ph["pre_people_col"] and (c[ph["pre_people_col"]] or "").strip():
-                    con.execute("UPDATE clients SET %s=? WHERE id=?" % ph["pre_deadline_col"],
-                                (st["end_date"], c["id"]))
-                # Open tracking tasks for this work ("My assigned tasks") follow the plan too.
-                if ph["task_type"]:
-                    open_tasks = con.execute(
-                        "SELECT id FROM tasks WHERE client_id=? AND task_type=? AND status<>'COMPLETED'",
-                        (c["id"], ph["task_type"])).fetchall()
-                    for t in open_tasks:
-                        con.execute("UPDATE tasks SET start_date=?, finish_date=? WHERE id=?",
-                                    (st["start_date"], st["end_date"], t["id"]))
-                        con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
-                                    (t["id"], actor, "Dates updated from the accepted AI schedule: %s to %s."
-                                     % (st["start_date"], st["end_date"])))
-                saved.append(st["key"])
-            summary = "; ".join("%s %s to %s (%d day%s)" % (s_["name"], s_["start_date"], s_["end_date"],
-                                                             s_["duration_days"], "" if s_["duration_days"] == 1 else "s")
-                                for s_ in sched["stages"])
-            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                        (c["id"], c["stage"], actor,
-                         ("AI schedule accepted by %s. %s. Buffer %d day(s), risk %s. %s" % (
-                             actor, summary, sched["buffer_days"], sched["risk"], sched["reason"]))[:2000]))
+        if action == "stage_reminders_snooze":
+            # "Cancel" on the pop-up. Only snoozes items that really are this person's.
+            sess = get_principal()
+            cfg = reminder_settings(con)
+            me = session_identity(sess)["key"]
+            if not me:
+                raise ApiError("Not allowed.", 403)
+            until = (datetime.now() + timedelta(minutes=cfg["repeatMinutes"])).strftime(_TS_FMT)
+            wanted = d.get("items") or []
+            if not isinstance(wanted, list):
+                raise ApiError("Nothing to cancel.")
+            creator_cache, done = {}, 0
+            for it in wanted[:200]:
+                if not isinstance(it, dict):
+                    continue
+                c = con.execute("SELECT * FROM clients WHERE id=?", (str(it.get("clientId") or ""),)).fetchone()
+                if (not c or c["stage"] != it.get("stage") or not c["stage_entered_at"]
+                        or c["stage_entered_at"] != it.get("enteredAt")
+                        or not _reminder_is_for(con, c, sess, creator_cache)):
+                    continue            # moved on already, or not this person's step
+                con.execute("""INSERT INTO stage_reminder_snoozes
+                                 (client_id, stage, stage_entered_at, recipient_key, snoozed_until, snooze_count)
+                               VALUES (?,?,?,?,?,1)
+                               ON CONFLICT (client_id, stage, stage_entered_at, recipient_key)
+                               DO UPDATE SET snoozed_until=EXCLUDED.snoozed_until,
+                                             snooze_count=stage_reminder_snoozes.snooze_count+1""",
+                            (c["id"], c["stage"], c["stage_entered_at"], me, until))
+                done += 1
+            # Old snoozes for stages the client has already left are never needed again.
+            con.execute("""DELETE FROM stage_reminder_snoozes s USING clients c
+                           WHERE s.client_id=c.id AND (c.stage<>s.stage
+                                 OR COALESCE(c.stage_entered_at,'')<>s.stage_entered_at)""")
             con.commit()
-            return {"ok": True, "saved": saved, "schedule": sched}
+            return {"ok": True, "snoozed": done, "until": until, "repeatMinutes": cfg["repeatMinutes"]}
+
+        if action == "stage_reminders_overview":
+            # Admin view: every step that is late right now, and whose turn it is.
+            cfg = reminder_settings(con)
+            now = datetime.now()
+            rows = []
+            for c, entered, due in overdue_stage_items(con, cfg, now):
+                it = _reminder_item(c, entered, due, now, 0)
+                roles, emp_rule, _ = STAGE_REMINDER_RULES[c["stage"]]
+                who = [STAFF_ROLE_LABELS.get(r, r) for r in roles]
+                people = {"proposal_writer": c["proposal_writer"], "programmers": c["assigned_programmers"],
+                          "writers": c["assigned_writers"], "coordinator": c["coordinator_name"],
+                          "proofread_coordinator": c["proofread_coordinator"],
+                          "proofreaders": c["assigned_proofreaders"] or c["proofread_coordinator"],
+                          "format_coordinator": c["format_coordinator"],
+                          "formatting_team": c["assigned_formatters"] or c["format_coordinator"],
+                          "submission_team": "Submission team"}.get(emp_rule)
+                if people:
+                    who.append(people)
+                it["waitingOn"] = ", ".join(w for w in who if w)
+                rows.append(it)
+            rows.sort(key=lambda x: x["dueAt"])
+            return {"ok": True, "settings": cfg, "items": rows, "serverNow": now.strftime(_TS_FMT)}
+
+        if action == "stage_reminders_save_settings":
+            def _mins(key, label):
+                try:
+                    v = int(d.get(key))
+                except (TypeError, ValueError):
+                    raise ApiError("Enter a whole number of minutes for %s." % label)
+                if v < 1 or v > REMINDER_MAX_MINUTES:
+                    raise ApiError("%s must be between 1 and %d minutes." % (label, REMINDER_MAX_MINUTES))
+                return v
+            step = _mins("stepMinutes", "Time allowed per step")
+            repeat = _mins("repeatMinutes", "Show again after cancel")
+            enabled = 1 if d.get("enabled") else 0
+            actor = session_identity(get_principal())["label"] or "Admin"
+            con.execute("""INSERT INTO stage_reminder_settings (id, enabled, step_minutes, repeat_minutes, updated_by, updated_at)
+                           VALUES (1,?,?,?,?,?)
+                           ON CONFLICT (id) DO UPDATE SET enabled=EXCLUDED.enabled, step_minutes=EXCLUDED.step_minutes,
+                             repeat_minutes=EXCLUDED.repeat_minutes, updated_by=EXCLUDED.updated_by,
+                             updated_at=EXCLUDED.updated_at""",
+                        (enabled, step, repeat, actor, now_str()))
+            con.commit()
+            return {"ok": True, "settings": reminder_settings(con)}
 
         if action == "resolve_hold":
             c = get_client(con, d.get("clientId") or "")
@@ -5346,6 +5565,7 @@ def handle_action(action, d, ip=""):
                            WHERE id=?""", (c["id"],))
             con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,'HOLD_RESOLVED',?,?)",
                         (c["id"], actor, f"New deadline {new_deadline} set by {actor}. Work resumed."))
+            restart_stage_clock(con, c["id"])
             con.commit()
             return {"ok": True}
 
