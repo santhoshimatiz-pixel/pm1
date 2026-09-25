@@ -58,6 +58,10 @@ def _load_dotenv():
 
 _load_dotenv()
 
+# AI Schedule Assistant (LLM-backed deadline planning). Imported after .env is
+# loaded so LLM_* settings are visible. It never touches the database itself.
+import ai_scheduler  # noqa: E402
+
 
 def _env_bool(name, default=False):
     v = os.environ.get(name)
@@ -774,6 +778,13 @@ ACTION_ROLES = {
     "format_manager_decision": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
     "proofread_decision": _R_ALL_STAFF,
     "proofread_request_correction": _R_ALL_STAFF,
+    # ---- AI Schedule Assistant: generate is read-only (LLM suggestion only);
+    #      accept writes the approved dates into the EXISTING phase-date columns.
+    #      Same people who already set those dates today: Technical Manager/TL
+    #      (assign_proposal_writer / reassign_work), plus the Marketing Manager who
+    #      registers clients and agrees the final deadline, plus Admin. ----
+    "ai_schedule_generate": _R_TECH_MGMT + ("marketing_manager",),
+    "ai_schedule_accept": _R_TECH_MGMT + ("marketing_manager",),
     "resolve_hold": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "resolve_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "reject_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
@@ -3870,7 +3881,9 @@ def handle_action(action, d, ip=""):
                     "clientReferrals": client_refs, "workSends": sends_out,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
-                                      "amounts": v["amounts"]} for k, v in SERVICES.items()}}
+                                      "amounts": v["amounts"]} for k, v in SERVICES.items()},
+                    # Only a yes/no — never the key or provider details.
+                    "aiSchedule": {"configured": ai_scheduler.is_configured()}}
 
         if action == "add_client":
             name = (d.get("name") or "").strip()
@@ -5218,6 +5231,100 @@ def handle_action(action, d, ip=""):
                         (c["id"], actor, note_text))
             con.commit()
             return {"ok": True}
+
+        # =============================================================
+        # AI SCHEDULE ASSISTANT
+        # -------------------------------------------------------------
+        # generate: builds the planning context from the client's EXISTING
+        #   fields (reg_date, deadline_date, service_key -> hasImplementation,
+        #   stage, phase start/deadline columns), asks the LLM, validates the
+        #   answer and returns it. Writes NOTHING.
+        # accept: the manager's approved (possibly edited) dates are validated
+        #   again from scratch against the current DB state and only then saved
+        #   into the existing columns proposal_/implementation_/writing_
+        #   start_date + deadline, any pre-assignment deadline, and the open
+        #   tracking tasks' dates. One history row records who accepted what.
+        # =============================================================
+        if action == "ai_schedule_generate":
+            if _rate_limited(ip, "ai_schedule", limit=20, window_seconds=600):
+                raise ApiError("Too many AI schedule requests. Please wait a few minutes and try again.", 429)
+            c = get_client(con, d.get("clientId") or "")
+            note = (d.get("note") or "").strip()[:ai_scheduler.MAX_NOTE_CHARS]
+            try:
+                ctx = ai_scheduler.build_context(c, service_conf(c["service_key"]), STAGES, STAGE_LABELS)
+                # Release this request's DB transaction before the (slow) network
+                # call so no locks or idle-in-transaction connections are held.
+                con.rollback()
+                result = ai_scheduler.generate(ctx, note)
+            except ai_scheduler.SchedulingError as e:
+                raise ApiError(e.msg, e.code)
+            return {"ok": True, "clientId": c["id"], "fingerprint": ctx["fingerprint"],
+                    "context": {k: ctx[k] for k in (
+                        "service_label", "has_implementation", "current_stage_label",
+                        "registration_date", "final_deadline", "today", "schedule_start",
+                        "available_days", "workflow", "completed_phases")},
+                    "schedule": result}
+
+        if action == "ai_schedule_accept":
+            c = get_client(con, d.get("clientId") or "")
+            # Lock the row so a concurrent assignment can't slip in between the
+            # checks below and the UPDATE.
+            c = con.execute("SELECT * FROM clients WHERE id=? FOR UPDATE", (c["id"],)).fetchone()
+            try:
+                ctx = ai_scheduler.build_context(c, service_conf(c["service_key"]), STAGES, STAGE_LABELS)
+            except ai_scheduler.SchedulingError as e:
+                raise ApiError(e.msg, e.code)
+            if (d.get("fingerprint") or "") != ctx["fingerprint"]:
+                raise ApiError("This project changed after the schedule was generated (its stage, dates or "
+                               "service moved on). Nothing was saved — click Regenerate for a fresh plan.", 409)
+            stages_in = d.get("stages")
+            if not isinstance(stages_in, list) or len(stages_in) > 10:
+                raise ApiError("The schedule wasn't in the expected format.", 422)
+            proposed = {"stages": [{"key": str((x or {}).get("key") or ""),
+                                    "start_date": str((x or {}).get("start_date") or ""),
+                                    "end_date": str((x or {}).get("end_date") or "")}
+                                   for x in stages_in if isinstance(x, dict)],
+                        "risk": d.get("risk"), "reason": d.get("reason")}
+            try:
+                sched = ai_scheduler.validate_schedule(ctx, proposed, source="manager")
+            except ai_scheduler.SchedulingError as e:
+                raise ApiError(e.msg, e.code)
+
+            actor = (d.get("actorLabel") or "Manager").strip()
+            saved = []
+            for st in sched["stages"]:
+                ph = ai_scheduler.PHASE_BY_KEY[st["key"]]
+                if not ph["end_col"]:
+                    continue   # Journal phase: planned only; its end is the existing final deadline
+                # Column names come from the fixed PHASE_DEFS table, never from the request.
+                con.execute("UPDATE clients SET %s=?, %s=? WHERE id=?" % (ph["start_col"], ph["end_col"]),
+                            (st["start_date"], st["end_date"], c["id"]))
+                # A team pre-selected at intake carries its own deadline that is copied
+                # into the phase deadline when the phase starts — keep it in step.
+                if ph["pre_people_col"] and (c[ph["pre_people_col"]] or "").strip():
+                    con.execute("UPDATE clients SET %s=? WHERE id=?" % ph["pre_deadline_col"],
+                                (st["end_date"], c["id"]))
+                # Open tracking tasks for this work ("My assigned tasks") follow the plan too.
+                if ph["task_type"]:
+                    open_tasks = con.execute(
+                        "SELECT id FROM tasks WHERE client_id=? AND task_type=? AND status<>'COMPLETED'",
+                        (c["id"], ph["task_type"])).fetchall()
+                    for t in open_tasks:
+                        con.execute("UPDATE tasks SET start_date=?, finish_date=? WHERE id=?",
+                                    (st["start_date"], st["end_date"], t["id"]))
+                        con.execute("INSERT INTO task_comments (task_id, author, body) VALUES (?,?,?)",
+                                    (t["id"], actor, "Dates updated from the accepted AI schedule: %s to %s."
+                                     % (st["start_date"], st["end_date"])))
+                saved.append(st["key"])
+            summary = "; ".join("%s %s to %s (%d day%s)" % (s_["name"], s_["start_date"], s_["end_date"],
+                                                             s_["duration_days"], "" if s_["duration_days"] == 1 else "s")
+                                for s_ in sched["stages"])
+            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                        (c["id"], c["stage"], actor,
+                         ("AI schedule accepted by %s. %s. Buffer %d day(s), risk %s. %s" % (
+                             actor, summary, sched["buffer_days"], sched["risk"], sched["reason"]))[:2000]))
+            con.commit()
+            return {"ok": True, "saved": saved, "schedule": sched}
 
         if action == "resolve_hold":
             c = get_client(con, d.get("clientId") or "")

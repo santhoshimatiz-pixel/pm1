@@ -1,0 +1,65 @@
+AI SCHEDULE ASSISTANT
+=====================
+
+WHAT IT DOES
+Project page > "AI Schedule" tab (also: "Generate AI schedule" button on the
+project Dashboard tab, and "AI schedule" on Assign Work cards).
+The AI suggests start/end dates for each remaining phase between today (or the
+registration date) and the client's final deadline. Nothing is saved until the
+manager clicks "Accept Schedule".
+
+  Generate  -> server reads the client's existing dates/service/stage, asks the
+               LLM, validates the JSON, shows it. NO database writes.
+  Modify    -> edit dates on screen, or type instructions and Regenerate.
+  Accept    -> server re-validates everything and saves into the EXISTING
+               columns proposal_/implementation_/writing_ start_date + deadline,
+               any pre-assigned team deadline, and open task dates. One history
+               row records who accepted it.
+
+WHO CAN USE IT
+Technical Manager, Technical TL, Marketing Manager, MD Admin, Super Admin.
+
+WORKFLOW (taken from the existing service settings, not hard-coded)
+  SCI / Scopus paid (hasImplementation = True):
+      Proposal -> Code Implementation -> Paper Writing -> Final Review & Journal Submission
+  Scopus without implementation / Synopsis / Survey Synopsis / 100 Page Thesis:
+      Paper Writing -> Final Review & Journal Submission
+Phases already finished are skipped. A phase already in progress keeps its
+real start date.
+
+SETUP (OpenAI)
+  Render: Dashboard > your web service > Environment > Add Environment Variable
+            Key:   LLM_API_KEY
+            Value: <paste your OpenAI API key, starts with sk->
+          Save Changes (Render redeploys automatically).
+          render.yaml already sets LLM_MODEL=gpt-5-mini, LLM_REASONING_EFFORT=low,
+          LLM_TIMEOUT_SECONDS=45. The OpenAI account needs billing credit.
+  Local:  pip install -r requirements.txt
+          copy .env.example to .env, set DATABASE_URL and LLM_API_KEY
+          python server.py
+
+  LLM_API_KEY            required - OpenAI API key (server-side only, never sent to the browser)
+  LLM_MODEL              default gpt-5-mini (low cost; well under Rs 1 per schedule)
+  LLM_REASONING_EFFORT   default low
+  LLM_TIMEOUT_SECONDS    default 45 per OpenAI call
+
+Without LLM_API_KEY the tab says "not switched on yet"; nothing else changes.
+
+WHY IT STAYS CORRECT WITH A LOW-COST MODEL
+  - The AI only chooses HOW MANY DAYS each phase gets, plus risk and a reason.
+    The server converts those into exact back-to-back dates, so the AI cannot
+    produce a wrong date, a wrong day count or overlapping phases.
+  - OpenAI Structured Outputs force the exact JSON shape, and the phase names
+    are limited to this project's own workflow.
+  - If the AI's days add up to more than the time available (or break any
+    other rule), it is told exactly what was wrong and gets one automatic retry.
+  - Everything is validated again on the server before it is shown, and again
+    when the manager clicks Accept.
+
+FILES
+  New:     ai_scheduler.py, .env.example, AI_SCHEDULE_UPDATE.txt
+  Changed: server.py, index.html, requirements.txt (+openai), render.yaml
+  Database: no changes.
+
+TUNING
+Typical/minimum days per phase are hints only, in PHASE_DEFS in ai_scheduler.py.

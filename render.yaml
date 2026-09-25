@@ -43,3 +43,14 @@ services:
         sync: false
       - key: DEFAULT_TO_EMAIL
         sync: false
+      # ----- AI Schedule Assistant (ai_scheduler.py) - OpenAI. Paste your OpenAI API key
+      #       as LLM_API_KEY in the Render dashboard (never commit it here). Without it
+      #       the AI Schedule tab says "not set up" and nothing else changes.
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gpt-5-mini     # low-cost OpenAI model
+      - key: LLM_REASONING_EFFORT
+        value: low
+      - key: LLM_TIMEOUT_SECONDS
+        value: "45"           # per OpenAI call; the whole step stays under gunicorn's --timeout 120

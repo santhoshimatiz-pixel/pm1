@@ -664,6 +664,33 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-status.good{background:#E7F5EC;color:var(--ok)}
 .adm-status.warn{background:#FEF3E2;color:var(--warn)}
 .adm-status.bad{background:#FDECEC;color:#B42318}
+/* ---------- AI Schedule Assistant (project page > AI Schedule tab) ---------- */
+.ais-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px 20px}
+.ais-facts p{font-weight:700;margin-top:3px;font-size:14px}
+.ais-flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:14px;font-size:12.5px}
+.ais-flow .ais-step{padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong);background:var(--card2);font-weight:600}
+.ais-flow .ais-step.done{opacity:.55;text-decoration:line-through}
+.ais-flow .ais-arrow{color:var(--faint)}
+.ais-note{width:100%;min-height:62px;resize:vertical;margin-top:6px}
+.ais-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;align-items:center}
+.ais-err{margin-top:14px;padding:12px 14px;border-radius:10px;border:1px solid rgba(220,38,38,.3);background:rgba(220,38,38,.07);color:var(--bad);font-size:13px;line-height:1.5}
+.ais-ok{margin-top:14px;padding:12px 14px;border-radius:10px;border:1px solid rgba(21,128,61,.3);background:rgba(21,128,61,.07);color:var(--ok);font-size:13px}
+.ais-table-wrap{overflow-x:auto}
+table.ais-table{width:100%;border-collapse:collapse;min-width:560px}
+table.ais-table th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ais-table td{padding:10px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:middle}
+table.ais-table tr:last-child td{border-bottom:none}
+table.ais-table input[type=date]{min-width:140px}
+.ais-bar{height:8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);position:relative;min-width:90px;overflow:hidden}
+.ais-bar i{position:absolute;top:0;bottom:0;background:var(--purple);border-radius:999px}
+.ais-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:16px}
+.ais-metric{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card2)}
+.ais-metric b{display:block;font-size:18px;margin-top:3px}
+.ais-risk-LOW{color:var(--ok)} .ais-risk-MEDIUM{color:var(--warn)} .ais-risk-HIGH{color:var(--bad)}
+.ais-reason{margin-top:16px;font-size:13.5px;line-height:1.6}
+.ais-warn{margin-top:10px;padding-left:18px;font-size:12.5px;color:var(--warn);line-height:1.6}
+.ais-muted{font-size:12.5px;color:var(--muted);line-height:1.5}
+.ais-inline-err{color:var(--bad);font-size:12px;margin-top:4px}
 
 .adm-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:380px;margin:0 auto}
 .adm-cal .dow{font-size:10px;color:var(--faint);font-weight:700;text-align:center;padding-bottom:4px;text-transform:uppercase}
@@ -1293,6 +1320,7 @@ const PAY_KEYS = ["reg","start","code","writing","paper"];
 const PAY_LABELS = {reg:"Registration", start:"Start Work (proposal approval)", code:"Code Implementation",
   writing:"Writing Fee", paper:"Paper Delivery"};
 let services = {};
+let aiScheduleConfigured = false;   // server has an LLM key set (never the key itself)
 function serviceConf(c){ return services[c.serviceKey] || services["SCI"] || {amounts:{}}; }
 function activePayKeys(c){
   const conf = serviceConf(c);
@@ -1396,6 +1424,7 @@ async function loadData(){
       clientNotesV2 = out.clientNotes || [];
       clientReferrals = out.clientReferrals || [];
       workSends = out.workSends || [];
+      aiScheduleConfigured = !!(out.aiSchedule && out.aiSchedule.configured);
       $("memWarn").style.display = "none";
       lastLoadOk = true;
       return;
@@ -4223,6 +4252,15 @@ function tmAssignWorkHtml(){
     }
     const open = tmAwOpen.has(String(c.id));
     const clientDl = c.deadlineDate ? `<span class="aw-meta">Client deadline: <b>${fmtDate(c.deadlineDate)}</b></span>` : "";
+    // If a schedule was accepted for this phase (AI Schedule tab), start from those dates
+    // instead of blank. Past/expired plans are ignored. Still fully editable here.
+    const planPair = type==="PROPOSAL" ? [c.proposalStartDate, c.proposalDeadline]
+      : type==="IMPLEMENTATION" ? [c.implementationStartDate, c.implementationDeadline]
+      : [c.writingStartDate, c.writingDeadline];
+    const planDl = planPair[1] ? String(planPair[1]).slice(0,10) : "";
+    const planOk = !!planDl && planDl >= todayISO();
+    const planSd = planOk && planPair[0] && String(planPair[0]).slice(0,10) >= todayISO() ? String(planPair[0]).slice(0,10) : todayISO();
+    const planHint = planOk ? `<div class="ais-muted" style="margin-top:6px">Dates pre-filled from the accepted schedule — change them if needed.</div>` : "";
     return `<div class="aw-row ${open?'aw-open':''}" data-aw-row="${esc(String(c.id))}" data-aw-type="${type}" data-aw-search="${esc(tmAwSearchHay(c, task))}">
       <div class="aw-head" onclick="tmAwToggle(${jsq(c.id)})">
         <div class="aw-head-main">
@@ -4240,12 +4278,14 @@ function tmAssignWorkHtml(){
         ${workStepperHtml(c,type)}
         <div class="aw-grid">
           ${tmAwField("Assign to", who)}
-          ${tmAwField("Start date", `<input type="date" class="mini-date" id="${sdId}" value="${todayISO()}" title="Start date">`)}
-          ${tmAwField("Deadline", `<input type="date" class="mini-date" min="${todayISO()}" id="${dlId}" title="Deadline">`)}
+          ${tmAwField("Start date", `<input type="date" class="mini-date" id="${sdId}" value="${planSd}" title="Start date">`)}
+          ${tmAwField("Deadline", `<input type="date" class="mini-date" min="${todayISO()}" id="${dlId}" value="${planOk?planDl:""}" title="Deadline">`)}
         </div>
+        ${planHint}
         <div class="aw-actions">
           ${btn}
           <button class="btn ghost small" onclick="admOpenProjectTab(${jsq(c.id)},'dashboard')">Open project</button>
+          ${canUseAiSchedule() ? `<button class="btn ghost small" onclick="admOpenProjectTab(${jsq(c.id)},'aischedule')">&#10024; AI schedule</button>` : ""}
         </div>
         ${extra}
       </div>
@@ -6692,6 +6732,7 @@ const PROJ_TABS = [
   {key:"discussion", label:"Discussion"}, {key:"notes", label:"Notes"}, {key:"activity", label:"Activity"},
   {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"validation", label:"Work Validation"},
   {key:"extensions", label:"Date Extensions"}, {key:"payment", label:"Payment Information"}, {key:"query", label:"Client's Query"},
+  {key:"aischedule", label:"AI Schedule"},
 ];
 let adminProjectClientId = null, admProjTab = "dashboard";
 let admDetailReturnRole = null; // 'admin' | 'mkt' | 'tm' — which shell to return to from a shared detail page
@@ -6745,8 +6786,12 @@ function renderAdminProjectDetail(){
   // Employees (Programmers/Paper Writers/Journal team) get the same tabbed project view as
   // Admin/Technical Manager/TL, minus the Payment Information tab — that stays limited to
   // roles covered by canSeeMoney().
-  const projTabs = role==="employee" ? PROJ_TABS.filter(t=>t.key!=="payment") : PROJ_TABS;
+  // The AI Schedule tab only appears for roles allowed to plan/approve phase dates
+  // (the server enforces the same list — see ai_schedule_* in ACTION_ROLES).
+  const projTabs = (role==="employee" ? PROJ_TABS.filter(t=>t.key!=="payment") : PROJ_TABS)
+    .filter(t=>t.key!=="aischedule" || canUseAiSchedule());
   if(role==="employee" && admProjTab==="payment") admProjTab = "dashboard";
+  if(admProjTab==="aischedule" && !canUseAiSchedule()) admProjTab = "dashboard";
   const tabsHtml = projTabs.map(t=>`<button class="adm-tab ${admProjTab===t.key?'active':''}" onclick="admSetProjTab(${jsq(t.key)})">${esc(t.label)}</button>`).join("");
   let body = "";
   if(admProjTab==="dashboard") body = admProjDashboardTab(c);
@@ -6761,6 +6806,7 @@ function renderAdminProjectDetail(){
   else if(admProjTab==="extensions") body = admProjExtensionsTab(c);
   else if(admProjTab==="payment") body = admProjPaymentTab(c);
   else if(admProjTab==="query") body = admProjQueryTab(c);
+  else if(admProjTab==="aischedule") body = admProjAiScheduleTab(c);
 
   $("content").innerHTML = `
     <button class="btn ghost small" style="margin-bottom:14px" onclick="admBackFromProject()">&larr; Back to Projects</button>
@@ -6797,6 +6843,7 @@ function admProjDashboardTab(c){
             <div><label class="adm-field-label">Team Members</label><div style="margin-top:4px">${admMembersHtml(c)}</div></div>
           </div>
           ${demoScheduleSectionHtml(c)}
+          ${canUseAiSchedule() && c.stage!=="COMPLETED" ? `<div style="margin-top:14px"><button class="btn ghost small" onclick="admSetProjTab('aischedule')">&#10024; Generate AI schedule</button></div>` : ""}
         </div>
       </div>
     </div>
@@ -6834,6 +6881,236 @@ function admProjCalendarTab(c){
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Key dates</h3></div><div class="adm-panel-body">
     ${rows.length ? rows.map(r=>`<div class="adm-bar-row"><div class="lbl">${r[0]}</div><div style="font-weight:700">${fmtDate(r[1])}</div></div>`).join("") : `<div class="adm-empty">No dates recorded yet.</div>`}
   </div></div>`;
+}
+// =====================================================================
+// AI SCHEDULE ASSISTANT (project page > "AI Schedule" tab)
+// ---------------------------------------------------------------------
+// Flow: Generate (server asks the LLM, validates, returns a suggestion —
+// nothing is saved) -> manager reviews / edits dates / regenerates with
+// instructions -> Accept (server re-validates everything and saves into the
+// existing proposal/implementation/writing start-date + deadline fields).
+// The API key never reaches the browser; only a yes/no "configured" flag does.
+// =====================================================================
+const AI_SCHED_ROLES = ["md_admin","super_admin","technical_manager","technical_tl","marketing_manager"];
+function canUseAiSchedule(){ return AI_SCHED_ROLES.includes(role); }
+// Display-only mirror of ai_scheduler.PHASE_DEFS (the server is authoritative):
+// the phase order follows the existing pipeline, Proposal + Implementation only
+// for services with hasImplementation — same rule as clientWorkSteps().
+const AIS_PHASES = [
+  {key:"PROPOSAL", name:"Proposal", needsImpl:true, first:"PROPOSAL_ASSIGNED", last:"PROPOSAL_APPROVED", start:"proposalStartDate", end:"proposalDeadline"},
+  {key:"IMPLEMENTATION", name:"Code Implementation", needsImpl:true, first:"IMPLEMENTATION_ASSIGNED", last:"IMPLEMENTATION_APPROVED", start:"implementationStartDate", end:"implementationDeadline"},
+  {key:"PAPER_WRITING", name:"Paper Writing", needsImpl:false, first:"PAPERWRITER_ASSIGNED", last:"CLIENT_ACCEPTED", start:"writingStartDate", end:"writingDeadline"},
+  {key:"JOURNAL", name:"Final Review & Journal Submission", needsImpl:false, first:"JOURNAL_MANAGER_REVIEW", last:"JOURNAL_SUBMITTED", start:null, end:null},
+];
+let aiSched = {};   // clientId -> {note, loading, saving, result, edits, dirty, error, saved}
+function aisState(id){
+  return aiSched[id] || (aiSched[id] = {note:"", loading:false, saving:false, result:null, edits:null, dirty:false, error:"", saved:""});
+}
+function aisShort(iso){
+  if(!iso) return "—";
+  const d = new Date(String(iso).slice(0,10)+"T00:00:00");
+  return isNaN(d) ? "—" : d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+}
+function aisDays(a, b){
+  const x = new Date(String(a||"").slice(0,10)+"T00:00:00"), y = new Date(String(b||"").slice(0,10)+"T00:00:00");
+  if(isNaN(x) || isNaN(y)) return NaN;
+  return Math.round((y - x)/86400000) + 1;   // inclusive of both ends
+}
+function aisPhaseStatus(c, ph){
+  if(c.stage==="COMPLETED") return "done";
+  const i = stageIdx(c.stage), f = stageIdx(ph.first), l = stageIdx(ph.last);
+  return i > l ? "done" : (i >= f ? "active" : "pending");
+}
+// Recompute everything from the (possibly edited) dates, and catch obvious
+// problems before the manager clicks Accept. The server repeats all of this.
+function aisLive(st){
+  const sched = st.result.schedule, deadline = sched.final_deadline;
+  const errors = [];
+  let prevEnd = null;
+  const rows = st.edits.map((r, i)=>{
+    const days = aisDays(r.start_date, r.end_date);
+    let err = "";
+    if(!r.start_date || !r.end_date || isNaN(days)) err = "Pick both dates.";
+    else if(days < 1) err = "Ends before it starts.";
+    else if(i===0 && r.start_date !== st.edits[0].locked_start) err = "Must start on " + aisShort(st.edits[0].locked_start) + ".";
+    else if(prevEnd && r.start_date <= prevEnd) err = "Overlaps the previous phase.";
+    else if(r.end_date > deadline) err = "Goes past the final deadline.";
+    if(err) errors.push(r.name + ": " + err);
+    prevEnd = r.end_date || prevEnd;
+    return Object.assign({}, r, {days, err});
+  });
+  const start = st.edits[0].locked_start;
+  const available = aisDays(start, deadline);
+  const required = rows.reduce((s, r)=>s + (isNaN(r.days) ? 0 : Math.max(0, r.days)), 0);
+  const lastEnd = rows[rows.length-1].end_date;
+  const buffer = lastEnd ? aisDays(lastEnd, deadline) - 1 : NaN;
+  return {rows, errors, available, required, buffer, start, deadline};
+}
+function aisSetNote(id, v){ aisState(id).note = String(v||"").slice(0,500); }
+function aisEdit(id, idx, field, value){
+  const st = aisState(id);
+  if(!st.edits || !st.edits[idx]) return;
+  st.edits[idx][field] = value;
+  st.dirty = true; st.saved = "";
+  rerenderCurrent();
+}
+async function aisGenerate(id){
+  const st = aisState(id);
+  if(st.loading) return;
+  const noteEl = $("aisNote-"+id); if(noteEl) st.note = noteEl.value.slice(0,500);
+  st.loading = true; st.error = ""; st.saved = "";
+  rerenderCurrent();
+  try{
+    const out = await api("ai_schedule_generate", {clientId:id, note:st.note});
+    st.result = out;
+    const locked = out.schedule.stages[0].start_date;
+    st.edits = out.schedule.stages.map(s=>({key:s.key, name:s.name, start_date:s.start_date, end_date:s.end_date,
+      min_days:s.min_days, typical_days:s.typical_days, saves_dates:s.saves_dates, status:s.status, locked_start:locked}));
+    st.dirty = false;
+  }catch(e){
+    st.error = e.message || "Couldn't generate a schedule. Please try again.";
+  }finally{
+    st.loading = false;
+    rerenderCurrent();
+  }
+}
+function aisCancel(id){
+  const st = aisState(id);
+  st.result = null; st.edits = null; st.dirty = false; st.error = "";
+  rerenderCurrent();
+}
+async function aisAccept(id){
+  const st = aisState(id);
+  if(!st.result || st.saving) return;
+  const live = aisLive(st);
+  if(live.errors.length){ toast("Fix the highlighted dates first"); return; }
+  const c = clients.find(x=>x.id===id);
+  const list = live.rows.map(r=>`${r.name}: ${aisShort(r.start_date)} – ${aisShort(r.end_date)}`).join("\n");
+  if(!confirm(`Save this schedule for ${c ? c.name : "this project"}?\n\n${list}\n\nThis updates the project's phase start dates and deadlines (and any open tasks for those phases).`)) return;
+  st.saving = true; st.error = "";
+  rerenderCurrent();
+  const aiReason = st.result.schedule.reason || "";
+  try{
+    await api("ai_schedule_accept", {
+      clientId:id, fingerprint:st.result.fingerprint,
+      stages: st.edits.map(r=>({key:r.key, start_date:r.start_date, end_date:r.end_date})),
+      risk: st.result.schedule.risk,
+      reason: st.dirty ? ("Manager adjusted the AI recommendation. AI reasoning: " + aiReason) : aiReason,
+    });
+    st.result = null; st.edits = null; st.dirty = false;
+    st.saved = "Schedule saved. The phase dates below now drive the Assign Work form, deadlines and task dates.";
+    toast("AI schedule accepted and saved");
+    await refresh();
+  }catch(e){
+    st.error = e.message || "Couldn't save the schedule. Nothing was changed.";
+  }finally{
+    st.saving = false;
+    rerenderCurrent();
+  }
+}
+function aisResultHtml(c, st){
+  const sched = st.result.schedule, live = aisLive(st);
+  const id = c.id;
+  const span = Math.max(1, live.available || 1);
+  const rows = live.rows.map((r, i)=>{
+    const left = Math.max(0, (aisDays(live.start, r.start_date) - 1) / span * 100);
+    const width = isNaN(r.days) ? 0 : Math.max(2, Math.min(100 - left, r.days / span * 100));
+    const tight = !isNaN(r.days) && r.days < r.min_days;
+    const firstLocked = i===0;
+    return `<tr>
+      <td><b>${esc(r.name)}</b>${r.status==="active" ? ` <span class="badge b-purp">In progress</span>` : ""}
+        ${r.saves_dates ? "" : `<div class="ais-muted">Planned only — ends by the final deadline</div>`}
+        ${r.err ? `<div class="ais-inline-err">${esc(r.err)}</div>` : ""}</td>
+      <td><input type="date" class="mini-date" id="aisS-${esc(id)}-${i}" value="${esc(r.start_date)}" ${firstLocked?'disabled title="The first phase starts on this fixed date"':''}
+          onchange="aisEdit(${jsq(id)},${i},'start_date',this.value)"></td>
+      <td><input type="date" class="mini-date" id="aisE-${esc(id)}-${i}" value="${esc(r.end_date)}" max="${esc(live.deadline)}"
+          onchange="aisEdit(${jsq(id)},${i},'end_date',this.value)"></td>
+      <td style="white-space:nowrap"><b>${isNaN(r.days)?"—":r.days}</b> day${r.days===1?"":"s"}
+        ${tight ? `<div class="ais-inline-err">Usually ≥ ${r.min_days}</div>` : `<div class="ais-muted">Typical ~${r.typical_days}</div>`}</td>
+      <td style="width:28%"><div class="ais-bar" title="${esc(aisShort(r.start_date))} – ${esc(aisShort(r.end_date))}"><i style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></i></div></td>
+    </tr>`;
+  }).join("");
+  const warnings = (sched.warnings||[]).map(w=>`<li>${esc(w)}</li>`).join("");
+  const riskTxt = {LOW:"Low", MEDIUM:"Medium", HIGH:"High"}[sched.risk] || sched.risk;
+  return `<div class="adm-panel" style="margin-top:16px">
+    <div class="adm-panel-head"><h3>AI Recommended Schedule</h3>
+      ${st.dirty ? `<span class="badge b-wait">Edited — re-checked on save</span>` : `<span class="badge b-dim">Not saved yet</span>`}</div>
+    <div class="adm-panel-body">
+      <p class="ais-muted" style="margin-bottom:10px">Review the dates. You can change any end date (or later start dates) before accepting — each phase must start after the previous one ends and finish by ${esc(fmtDate(live.deadline))}.</p>
+      <div class="ais-table-wrap"><table class="ais-table">
+        <thead><tr><th>Phase</th><th>Start</th><th>End</th><th>Duration</th><th>Timeline</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="ais-metrics">
+        <div class="ais-metric"><span class="adm-field-label">Available time</span><b>${isNaN(live.available)?"—":live.available} days</b></div>
+        <div class="ais-metric"><span class="adm-field-label">Required time</span><b>${live.required} days</b></div>
+        <div class="ais-metric"><span class="adm-field-label">Buffer</span><b>${isNaN(live.buffer)?"—":Math.max(0,live.buffer)} day${live.buffer===1?"":"s"}</b></div>
+        <div class="ais-metric"><span class="adm-field-label">Deadline risk</span><b class="ais-risk-${esc(sched.risk)}">${esc(riskTxt)}</b></div>
+      </div>
+      <div class="ais-reason"><span class="adm-field-label">Why this plan</span><div style="margin-top:4px">${esc(sched.reason)}</div></div>
+      ${warnings ? `<ul class="ais-warn">${warnings}</ul>` : ""}
+      ${live.errors.length ? `<div class="ais-err">${live.errors.map(esc).join("<br>")}</div>` : ""}
+      <div class="ais-actions">
+        <button class="btn gold" onclick="aisAccept(${jsq(id)})" ${live.errors.length||st.saving||st.loading?"disabled":""}>${st.saving?"Saving…":"&#10003; Accept Schedule"}</button>
+        <button class="btn ghost" onclick="aisGenerate(${jsq(id)})" ${st.loading||st.saving?"disabled":""}>${st.loading?"Regenerating…":"&#8635; Regenerate"}</button>
+        <button class="btn ghost" onclick="aisCancel(${jsq(id)})" ${st.saving?"disabled":""}>Cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+function admProjAiScheduleTab(c){
+  const st = aisState(c.id);
+  const conf = serviceConf(c);
+  const phases = AIS_PHASES.filter(p=>conf.hasImplementation || !p.needsImpl);
+  const flow = phases.map(p=>`<span class="ais-step ${aisPhaseStatus(c,p)==="done"?"done":""}">${esc(p.name)}</span>`).join(`<span class="ais-arrow">&#8594;</span>`);
+  const daysLeft = c.deadlineDate ? aisDays(todayISO(), c.deadlineDate) - 1 : NaN;
+  const savedRows = phases.filter(p=>p.start).map(p=>{
+    const s = c[p.start], e = c[p.end];
+    const status = aisPhaseStatus(c,p);
+    return `<tr><td><b>${esc(p.name)}</b></td><td>${s?esc(fmtDate(s)):"—"}</td><td>${e?esc(fmtDate(e)):"—"}</td>
+      <td>${status==="done"?`<span class="adm-status good">Done</span>`:status==="active"?`<span class="adm-status warn">In progress</span>`:`<span class="adm-status" style="background:var(--card2)">Not started</span>`}</td></tr>`;
+  }).join("");
+  const done = c.stage==="COMPLETED";
+  let genBtn;
+  if(!aiScheduleConfigured){
+    genBtn = `<button class="btn" disabled>Generate AI Schedule</button>
+      <span class="ais-muted">AI scheduling isn't switched on yet — an administrator needs to paste the OpenAI API key as <b>LLM_API_KEY</b> in the Render environment settings.</span>`;
+  } else if(done){
+    genBtn = `<button class="btn" disabled>Generate AI Schedule</button><span class="ais-muted">This project is completed.</span>`;
+  } else {
+    genBtn = `<button class="btn" onclick="aisGenerate(${jsq(c.id)})" ${st.loading||st.saving?"disabled":""}>${st.loading?"Analysing the timeline…":(st.result?"&#8635; Regenerate":"&#10024; Generate AI Schedule")}</button>
+      ${st.loading?`<span class="ais-muted">Asking the AI — this usually takes 5–20 seconds.</span>`:""}`;
+  }
+  return `<div class="adm-panel">
+    <div class="adm-panel-head"><h3>AI Schedule Assistant</h3><span class="badge b-dim">Suggestion only until you accept</span></div>
+    <div class="adm-panel-body">
+      <div class="ais-facts">
+        <div><span class="adm-field-label">Client</span><p>${esc(c.name)}</p></div>
+        <div><span class="adm-field-label">Service</span><p>${esc(serviceLabel(c))}</p></div>
+        <div><span class="adm-field-label">Registration date</span><p>${esc(fmtDate(admClientRegDate(c)))}</p></div>
+        <div><span class="adm-field-label">Final deadline</span><p>${c.deadlineDate?esc(fmtDate(c.deadlineDate)):`<span style="color:var(--bad)">Not set</span>`}</p></div>
+        <div><span class="adm-field-label">Time left</span><p>${isNaN(daysLeft)?"—":(daysLeft<0?`<span style="color:var(--bad)">${-daysLeft} day(s) overdue</span>`:`${daysLeft} day${daysLeft===1?"":"s"}`)}</p></div>
+        <div><span class="adm-field-label">Current stage</span><p>${esc(STAGE_LABEL[c.stage]||c.stage)}</p></div>
+      </div>
+      <div class="ais-flow"><span class="adm-field-label" style="margin-right:4px">Workflow</span>${flow}</div>
+      <div style="margin-top:16px">
+        <label class="adm-field-label" for="aisNote-${esc(c.id)}">Instructions for the AI (optional)</label>
+        <textarea id="aisNote-${esc(c.id)}" class="ais-note" maxlength="500" placeholder="e.g. Client needs the proposal within 5 days; give implementation extra time; keep 3 days buffer" oninput="aisSetNote(${jsq(c.id)},this.value)">${esc(st.note)}</textarea>
+      </div>
+      <div class="ais-actions">${genBtn}</div>
+      ${st.error ? `<div class="ais-err">${esc(st.error)}</div>` : ""}
+      ${st.saved ? `<div class="ais-ok">${esc(st.saved)}</div>` : ""}
+    </div>
+  </div>
+  ${st.result ? aisResultHtml(c, st) : ""}
+  <div class="adm-panel" style="margin-top:16px">
+    <div class="adm-panel-head"><h3>Currently saved phase dates</h3></div>
+    <div class="adm-panel-body">
+      ${savedRows ? `<div class="ais-table-wrap"><table class="ais-table"><thead><tr><th>Phase</th><th>Start</th><th>Deadline</th><th>Status</th></tr></thead><tbody>${savedRows}</tbody></table></div>`
+        : `<div class="adm-empty">No phase dates yet.</div>`}
+      <p class="ais-muted" style="margin-top:10px">Final Review &amp; Journal Submission runs from the end of Paper Writing up to the final deadline.</p>
+    </div>
+  </div>`;
 }
 let admProjThreadMsgs = {};
 async function admLoadProjectThread(clientId){
