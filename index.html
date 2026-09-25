@@ -2432,27 +2432,6 @@ function applyDashSections(){
   boxGrid.style.display = active ? "none" : "";
   frag.appendChild(boxGrid);
 
-  // Employees get a small calendar (deadlines, demos, custom events) below their
-  // work overview boxes, same information as the Manager/Admin calendar.
-  if(role==="employee"){
-    const calDiv = document.createElement("div");
-    calDiv.className = "adm-panel";
-    calDiv.style.cssText = "margin-top:16px;max-width:380px";
-    calDiv.innerHTML = `<div class="adm-panel-head">
-        ${calendarMonthYearPickerHtml(adminCalYear, adminCalMonth)}
-        <button class="btn ghost small" onclick="admCalToday()">Today</button>
-      </div>
-      <div class="adm-panel-body">${adminCalendarHtml(adminCalYear, adminCalMonth)}</div>`;
-    frag.appendChild(calDiv);
-    const myDemos = upcomingDemoSchedules(c=>c.demoScheduledEmp===empName);
-    if(myDemos.length){
-      const demoDiv = document.createElement("div");
-      demoDiv.style.cssText = "margin-top:16px;max-width:380px";
-      demoDiv.innerHTML = upcomingDemosPanelHtml(c=>c.demoScheduledEmp===empName, {openFn:"admOpenProject"});
-      frag.appendChild(demoDiv);
-    }
-  }
-
   sections.forEach(s=>{
     const w = document.createElement("div");
     w.className = "dash-section";
@@ -2469,6 +2448,28 @@ function applyDashSections(){
     s.nodes.forEach(n=>w.appendChild(n));
     frag.appendChild(w);
   });
+
+  // Employees get a small calendar (deadlines, demos, custom events) BELOW their
+  // work (overview boxes or the opened section), so the work always shows first.
+  // Same information as the Manager/Admin calendar.
+  if(role==="employee"){
+    const calDiv = document.createElement("div");
+    calDiv.className = "adm-panel";
+    calDiv.style.cssText = "margin-top:24px;max-width:380px";
+    calDiv.innerHTML = `<div class="adm-panel-head">
+        ${calendarMonthYearPickerHtml(adminCalYear, adminCalMonth)}
+        <button class="btn ghost small" onclick="admCalToday()">Today</button>
+      </div>
+      <div class="adm-panel-body">${adminCalendarHtml(adminCalYear, adminCalMonth)}</div>`;
+    frag.appendChild(calDiv);
+    const myDemos = upcomingDemoSchedules(c=>c.demoScheduledEmp===empName);
+    if(myDemos.length){
+      const demoDiv = document.createElement("div");
+      demoDiv.style.cssText = "margin-top:16px;max-width:380px";
+      demoDiv.innerHTML = upcomingDemosPanelHtml(c=>c.demoScheduledEmp===empName, {openFn:"admOpenProject"});
+      frag.appendChild(demoDiv);
+    }
+  }
   postamble.forEach(n=>frag.appendChild(n));
   content.innerHTML = "";
   content.appendChild(frag);
