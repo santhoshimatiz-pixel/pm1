@@ -1351,6 +1351,26 @@ let tcDashSubTab = 'mine'; // telecaller dashboard: 'mine' = My leads, 'pipeline
 // injected script could read it.
 let csrfToken = "";
 
+// ----- TAB-SCOPED LOGIN. The per-tab session token lives in sessionStorage, which
+//       belongs to this one tab only: it survives a refresh of the tab, but is gone
+//       when the tab is closed, and a new tab / reopened URL starts without it — so
+//       the dashboard asks for a login again. The server also requires its HttpOnly
+//       browser cookie, so this token is useless on its own if it ever leaked.
+const TAB_SESSION_KEY = "matiz_tab_session";
+function getTabToken(){ try{ return sessionStorage.getItem(TAB_SESSION_KEY) || ""; }catch(e){ return ""; } }
+function setTabToken(t){ try{ if(t) sessionStorage.setItem(TAB_SESSION_KEY, t); else sessionStorage.removeItem(TAB_SESSION_KEY); }catch(e){} }
+// True only when this page load is a refresh of a tab that was already open.
+// A restored tab (Ctrl+Shift+T, "Continue where you left off", Back into the app
+// after it was unloaded) or a duplicated tab gets a copy of the old sessionStorage,
+// so those loads are treated like a fresh visit and must sign in again.
+function isPageRefresh(){
+  try{
+    const nav = performance.getEntriesByType("navigation")[0];
+    if(nav) return nav.type === "reload";
+    return performance.navigation && performance.navigation.type === 1; // legacy fallback
+  }catch(e){ return false; }
+}
+
 async function api(action, data){
   // SECURITY: every call is a POST and carries X-Requested-With. A cross-site
   // <form> cannot set a custom header, so this forces a CORS preflight that the
@@ -1358,6 +1378,8 @@ async function api(action, data){
   // per-session X-CSRF-Token below and the SameSite=Lax cookie.
   const headers = {"Content-Type":"application/json", "X-Requested-With":"matiz-app"};
   if(csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  const tabToken = getTabToken();
+  if(tabToken) headers["X-Session-Token"] = tabToken;
   const opts = {method:"POST", headers, body:JSON.stringify(data || {}), credentials:"same-origin"};
   let res, out;
   try{
@@ -1957,6 +1979,7 @@ async function doLogin(){
       clientKey:$("clientKey").value.trim(), empUid:$("empUid").value.trim(),
       captchaId:usedCaptchaId, captchaAnswer});
     csrfToken = out.csrfToken || "";
+    setTabToken(out.sessionToken || "");
     if(selectedRole === "client") clientSelf = out.clientId;
     if(selectedRole === "employee" || selectedRole === "validator"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
   }catch(e){
@@ -1976,20 +1999,25 @@ async function doLogin(){
   await refresh();
   startPingListener();
 }
-// ----- keeping the person signed in across a page refresh.
-//       This used to mirror the logged-in identity into sessionStorage and trust
-//       it on reload, which was fine only because the server trusted whatever the
-//       browser claimed. It doesn't any more: identity now lives in an HttpOnly
-//       session cookie that JavaScript cannot read, and the page simply asks the
-//       server "who am I?" on load. Nothing identifying is kept in web storage.
-function saveSession(){ /* nothing to persist — the cookie is the session */ }
+// ----- keeping the person signed in across a page refresh (and only that).
+//       Identity is never trusted from web storage: the page asks the server
+//       "who am I?" on load, and the server answers from the per-tab token plus
+//       its HttpOnly cookie. The tab token is only an opaque key, not an identity.
+function saveSession(){ /* the tab token is stored by doLogin() via setTabToken() */ }
 function clearSession(){
+  setTabToken("");
   // Clear the pre-hardening key so old browser tabs don't keep stale identity around.
   try{ sessionStorage.removeItem("matiz_session_v1"); }catch(e){}
 }
 // Returns true if a valid server-side session was restored.
 async function restoreSession(){
-  clearSession();
+  try{ sessionStorage.removeItem("matiz_session_v1"); }catch(e){}
+  // Only a refresh of an already-open tab may resume. Anything else (new tab,
+  // reopened URL, restored or duplicated tab) forgets the token and shows login.
+  // The token is dropped rather than reused so that logging in here can never
+  // affect the session of the tab it may have been copied from.
+  if(!isPageRefresh()) setTabToken("");
+  if(!getTabToken()) return false;
   // A page refresh fires this the instant the page loads — sometimes before the
   // connection is fully warmed up, over a slightly slower network than usual, or
   // (on free-tier hosting) while the server is still waking up from an idle
@@ -2011,7 +2039,7 @@ async function restoreSession(){
       await new Promise(r=>setTimeout(r, 600 + i*400));
     }
   }
-  if(!out || !out.authenticated) return false;
+  if(!out || !out.authenticated){ setTabToken(""); return false; }
   csrfToken = out.csrfToken || "";
   role = (out.kind === "employee") ? "employee" : (out.kind === "validator" ? "validator" : out.role);
   clientSelf = out.clientId || null;
@@ -2026,7 +2054,9 @@ function logout(){
   // Previously logout only cleared browser state, so the server-side session
   // stayed valid until it timed out — anyone recovering the cookie could carry
   // on using it after the user believed they had signed out.
-  try{ api("logout", {}); }catch(e){ /* best effort — still clear locally */ }
+  // api() builds its headers synchronously, so this request still carries the
+  // tab token even though clearSession() below removes it straight away.
+  api("logout", {}).catch(()=>{ /* best effort — still clear locally */ });
   stopPingListener(); pingUnseen = []; $("pingAlert").classList.remove("show");
   csrfToken = "";
   role = null; clientSelf = null; selectedRole = null; selectedEmpId = null; empName = empRole = empId = empTeamType = null; tmTab='work'; clientView='overview';

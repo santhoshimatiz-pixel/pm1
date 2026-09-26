@@ -1,0 +1,49 @@
+TAB-SCOPED LOGIN - closing the tab ends the dashboard session
+=============================================================
+
+Problem
+  The session lived only in an HttpOnly cookie with Max-Age = 12 hours, so it
+  outlived the tab (and even a browser restart). Reopening the dashboard URL
+  went straight back in.
+
+What changed
+  A signed-in dashboard now needs BOTH of these on every API call:
+    1. matiz_session cookie  - HttpOnly, SameSite=Lax, Secure in production, and
+       now a browser-session cookie (no Max-Age), so it is dropped when the
+       browser closes. It only binds sessions to this browser; alone it grants
+       nothing.
+    2. X-Session-Token header - a per-tab token returned by "login" and kept in
+       sessionStorage. sessionStorage belongs to one tab: it survives a refresh
+       of that tab and is discarded when the tab closes.
+
+  Behaviour
+    - Refresh (F5 / Ctrl+R)                      -> stays signed in
+    - Close the tab, open the URL again          -> login screen
+    - Open the URL in a new tab                  -> login screen for that tab
+    - Restored / duplicated tab (Ctrl+Shift+T,
+      "Continue where you left off", Back into
+      the app after it was unloaded)             -> login screen
+    - Several tabs, each logged in separately    -> all work independently
+    - Logout                                     -> ends that tab's server session;
+                                                    cookie cleared once no tab in
+                                                    the browser is still signed in
+
+  Security notes
+    - The tab token is useless without the HttpOnly cookie, and vice versa.
+      Both are stored server-side only as HMACs.
+    - Both values are always overwritten by the HTTP layer, so they can't be
+      supplied through the JSON body.
+    - Idle timeout (SESSION_TTL_HOURS) and absolute cap (SESSION_MAX_HOURS) are
+      still enforced server-side; a closed tab's orphaned row expires by them.
+
+Files
+  server.py  - sessions bound to the browser cookie, login returns sessionToken
+               in the JSON body, per-tab logout, cookie has no Max-Age,
+               sessions.browser_key column (auto-migrated).
+  index.html - api() sends X-Session-Token; token saved to sessionStorage on
+               login, cleared on logout/expiry; restoreSession() resumes only
+               on a genuine page refresh.
+
+Deploy note
+  On first start the migration ends all existing sessions (they have no browser
+  binding), so everyone signs in once after deploying.

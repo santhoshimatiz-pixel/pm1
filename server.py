@@ -122,7 +122,18 @@ if not SECRET_KEY:
     except OSError:
         SECRET_KEY = secrets.token_hex(32)  # in-memory fallback (sessions won't survive a restart)
 
+# TAB-SCOPED SESSIONS. A signed-in dashboard now needs two things on every request:
+#   * COOKIE_NAME   - an HttpOnly *browser-session* cookie (no Max-Age/Expires), so
+#                     JavaScript can never read it and the browser drops it when it
+#                     is fully closed. On its own it grants nothing.
+#   * TAB_TOKEN_HEADER - the per-tab session token. The page keeps it in
+#                     sessionStorage, which is private to one tab, survives a refresh
+#                     of that tab, and is thrown away when the tab is closed. A new
+#                     tab (or a reopened URL) has no token, so it must log in again.
+# A stolen tab token is useless without the HttpOnly cookie, and the cookie is
+# useless without a tab token.
 COOKIE_NAME = "matiz_session"
+TAB_TOKEN_HEADER = "X-Session-Token"
 CSRF_COOKIE_NAME = "matiz_csrf"
 
 # Basic RFC-ish address check, used to validate mail recipients.
@@ -954,24 +965,34 @@ def hash_session_token(token):
 
 
 def create_session(con, kind, role, ip="", emp_id=None, emp_uid=None, emp_name=None,
-                    emp_role=None, emp_team_type=None, client_id=None):
+                    emp_role=None, emp_team_type=None, client_id=None, browser_key=None):
+    # The session is bound to the browser's HttpOnly cookie; without one there is
+    # nothing to bind to, so refuse rather than create an unbound session.
+    if not browser_key:
+        raise ApiError("Your browser blocked the sign-in cookie. Please allow cookies for this site and try again.")
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
     con.execute("""INSERT INTO sessions (token, kind, role, emp_id, emp_uid, emp_name,
-                       emp_role, emp_team_type, client_id, ip, csrf)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                       emp_role, emp_team_type, client_id, ip, csrf, browser_key)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (hash_session_token(token), kind, role, emp_id, emp_uid, emp_name,
-                 emp_role, emp_team_type, client_id, ip, csrf))
+                 emp_role, emp_team_type, client_id, ip, csrf, hash_session_token(browser_key)))
     con.commit()
     return {"token": token, "csrf": csrf}
 
 
-def get_session(con, token):
-    if not token:
+def get_session(con, token, browser_key=None):
+    """`token` is the per-tab token (X-Session-Token header); `browser_key` is the
+    HttpOnly cookie. Both must be present and belong to the same session row."""
+    if not token or not browser_key:
         return None
     hashed = hash_session_token(token)
     row = con.execute("SELECT * FROM sessions WHERE token=?", (hashed,)).fetchone()
     if not row:
+        return None
+    # The tab token only works in the browser it was issued to. (Not deleted on a
+    # mismatch, so a leaked tab token can't be used to sign the real user out.)
+    if not hmac.compare_digest(row["browser_key"] or "", hash_session_token(browser_key)):
         return None
 
     def _parse(v):
@@ -1730,6 +1751,7 @@ def init_db():
         client_id TEXT,
         ip TEXT DEFAULT '',
         csrf TEXT DEFAULT '',
+        browser_key TEXT DEFAULT '',
         created_at TEXT DEFAULT ({_NOW_SQL}),
         last_seen TEXT DEFAULT ({_NOW_SQL})
     );
@@ -2143,6 +2165,11 @@ def init_db():
     #       get_session()'s own idle-timeout check above.
     _cutoff = (datetime.now() - timedelta(hours=SESSION_TTL_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
     con.execute("DELETE FROM sessions WHERE last_seen < ?", (_cutoff,))
+    # Tab-scoped sessions: every session must be bound to a browser cookie. Sessions
+    # created before this change have no binding and are ended (users sign in once).
+    con.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS browser_key TEXT DEFAULT ''")
+    con.execute("DELETE FROM sessions WHERE browser_key IS NULL OR browser_key = ''")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_sessions_browser_key ON sessions (browser_key)")
     con.commit()
     con.close()
 
@@ -3735,7 +3762,7 @@ def handle_action(action, d, ip=""):
         # "Who am I?" — lets the page restore the signed-in view after a refresh
         # from the HttpOnly cookie alone, instead of trusting sessionStorage.
         if action == "session":
-            sess = get_session(con, d.get("_session_token"))
+            sess = get_session(con, d.get("_session_token"), d.get("_browser_key"))
             if not sess:
                 return {"authenticated": False}
             out = {"authenticated": True, "kind": sess["kind"], "role": sess["role"],
@@ -3749,8 +3776,15 @@ def handle_action(action, d, ip=""):
             return out
 
         if action == "logout":
+            # Ends only THIS tab's session. The browser cookie is cleared as well once
+            # no other tab in this browser is still signed in with it.
             delete_session(con, d.get("_session_token"))
-            return {"ok": True, "_clear_cookie": True}
+            out = {"ok": True}
+            bk = d.get("_browser_key")
+            if not bk or not con.execute("SELECT 1 FROM sessions WHERE browser_key=? LIMIT 1",
+                                         (hash_session_token(bk),)).fetchone():
+                out["_clear_cookie"] = True
+            return out
 
         if action == "login_captcha":
             # A fresh, single-use captcha for the login screen (all dashboards).
@@ -3789,13 +3823,13 @@ def handle_action(action, d, ip=""):
                     raise ApiError("You don't have validation access yet. Ask your Technical Manager to give "
                                    "you access to a validation folder (AI Check, Plagiarism Check or Test Paper).")
                 delete_session(con, d.get("_session_token"))   # no session fixation
-                sess = create_session(con, "validator", "validator", ip=ip, emp_id=e["id"],
+                sess = create_session(con, "validator", "validator", ip=ip, browser_key=d.get("_browser_key"), emp_id=e["id"],
                                        emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
                                        emp_team_type=e["team_type"] or "")
                 return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
                         "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
                         "validationFolders": folders,
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             if role == "employee":
                 uid = (d.get("empUid") or "").strip()
                 if not uid:
@@ -3808,12 +3842,12 @@ def handle_action(action, d, ip=""):
                 if not verify_password(d.get("password") or "", e["password"] or ""):
                     raise ApiError("Incorrect password. Please try again.")
                 delete_session(con, d.get("_session_token"))   # no session fixation
-                sess = create_session(con, "employee", "employee", ip=ip, emp_id=e["id"],
+                sess = create_session(con, "employee", "employee", ip=ip, browser_key=d.get("_browser_key"), emp_id=e["id"],
                                        emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
                                        emp_team_type=e["team_type"] or "")
                 return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
                         "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             if role == "client":
                 key = (d.get("clientKey") or "").strip()
                 if not key:
@@ -3835,9 +3869,9 @@ def handle_action(action, d, ip=""):
                             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), c["id"]))
                 con.commit()
                 delete_session(con, d.get("_session_token"))
-                sess = create_session(con, "client", "client", ip=ip, client_id=c["id"])
+                sess = create_session(con, "client", "client", ip=ip, browser_key=d.get("_browser_key"), client_id=c["id"])
                 return {"ok": True, "clientId": c["id"],
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             u = con.execute("SELECT * FROM users WHERE role=?", (role,)).fetchone()
             if not u:
                 raise ApiError("Please select a role above.")
@@ -3846,8 +3880,8 @@ def handle_action(action, d, ip=""):
             if not verify_password(d.get("password") or "", u["password"] or ""):
                 raise ApiError("Incorrect password. Please try again.")
             delete_session(con, d.get("_session_token"))
-            sess = create_session(con, "dept", role, ip=ip)
-            return {"ok": True, "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+            sess = create_session(con, "dept", role, ip=ip, browser_key=d.get("_browser_key"))
+            return {"ok": True, "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
 
         if action == "create_invite_link":
             # Generates (or reuses) a pending setup code and hands back a shareable
@@ -7942,8 +7976,9 @@ class Handler(BaseHTTPRequestHandler):
         attrs = [f"{COOKIE_NAME}=" + ("" if clear else token), "Path=/", "HttpOnly", "SameSite=Lax"]
         if clear:
             attrs.append("Max-Age=0")
-        else:
-            attrs.append(f"Max-Age={int(SESSION_TTL_HOURS * 3600)}")
+        # No Max-Age/Expires otherwise: a browser-session cookie, discarded when the
+        # browser is closed. How long a login lasts is enforced server-side
+        # (SESSION_TTL_HOURS / SESSION_MAX_HOURS), not by the cookie.
         if COOKIE_SECURE:
             attrs.append("Secure")
         return "; ".join(attrs)
@@ -7991,13 +8026,21 @@ class Handler(BaseHTTPRequestHandler):
         #       simply trusted a "role"/"empId"/"clientId"/"empName" field sent by the
         #       browser. Only a small, explicit allow-list of actions may be called without
         #       a valid session at all (login, invite/reset flows, etc). -----
-        token = self._get_cookie(COOKIE_NAME)
+        token = (self.headers.get(TAB_TOKEN_HEADER) or "").strip() or None
+        browser_key = self._get_cookie(COOKIE_NAME) or None
+        new_browser_key = None
+        if action == "login" and not browser_key:
+            # First sign-in in this browser session: issue the HttpOnly binding cookie.
+            # It is reused by later logins in other tabs so they don't sign each other out.
+            browser_key = new_browser_key = secrets.token_urlsafe(32)
         con = db()
         try:
-            session = get_session(con, token)
+            session = get_session(con, token, browser_key)
         finally:
             con.close()
+        # Always overwritten here, so nothing in the request body can supply them.
         data["_session_token"] = token
+        data["_browser_key"] = browser_key
 
         # ----- AUTHORIZATION: deny-by-default role check before anything runs.
         #       Unmapped actions are rejected, so a new handler added without a
@@ -8070,9 +8113,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = handle_action(action, data, ip=ip)
             if isinstance(result, dict):
-                new_token = result.pop("_session_token", None)
-                if new_token:
-                    set_cookie = new_token
+                if new_browser_key and result.get("sessionToken"):
+                    set_cookie = new_browser_key
                 if result.pop("_clear_cookie", False):
                     clear_cookie = True
             extra = []
