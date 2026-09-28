@@ -166,12 +166,15 @@ The progress bar on a client is tappable - tap any step for details.
     _e(ALL, "How do I switch to dark mode?",
        ["dark mode", "light mode", "theme", "dark theme", "colour", "color"],
        "Use the \"Dark mode\" button at the bottom of the sidebar. Click it again to go back to light mode."),
-    _e(ALL, "What can this Help assistant do?",
-       ["help", "assistant", "ai", "chat", "guide", "what can you do"],
+    _e(ALL, "What can the AI assistant do?",
+       ["help", "assistant", "ai", "chat", "guide", "what can you do", "reminder", "reminders"],
        """
-Help (in the sidebar) has two tabs:
-- Guide - how the pipeline works plus tips for your role.
-- Ask AI - this chat. Ask how to do something in this PM tool and I'll explain where to go and what happens next. I only answer questions about this web app.
+The round AI button at the bottom-right of every dashboard opens the iMatiz AI chat. It can:
+- check your own dashboard - e.g. "Do I have any demo today?", "What's pending for me?", "Any overdue work?"
+- show a client's details - type the client's name or ID (you only see clients on your own dashboard)
+- set reminders - "remind me at 4 pm to call the client", or the clock button; the pop-up appears at that time with Done / Snooze
+- explain how to use the tool.
+It only answers questions about this web app. Help -> Guide has the seven phases and tips for your role.
 """),
 
     # ------------------------------------------------------------ all staff

@@ -28,6 +28,7 @@ import urllib.request
 from urllib.request import Request
 
 import help_assistant   # Help -> "Ask AI" chat (answers only questions about this PM tool)
+import ai_assistant     # floating AI assistant: answers from the caller's own dashboard data + reminders
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -637,6 +638,7 @@ CLIENT_ALLOWED_ACTIONS = {
     "get_client_document",
     "add_query",
     "help_chat",
+    "ai_reminder_save", "ai_reminder_list", "ai_reminder_delete", "ai_reminders_poll", "ai_reminder_ack",
     "client_approve_proposal", "client_approve_paper", "client_approve_implementation",
     "client_request_correction_proposal", "client_request_correction_paper",
     "client_request_correction_implementation",
@@ -682,6 +684,12 @@ ACTION_ROLES = {
     # Help -> Ask AI chat. Everyone signed in (staff + client portal); the Validation
     # Login has no Help menu and stays excluded.
     "help_chat": _R_ALL_STAFF,
+    # Floating AI assistant reminders - each login only ever sees / changes its own.
+    "ai_reminder_save": _R_ALL_STAFF,
+    "ai_reminder_list": _R_ALL_STAFF,
+    "ai_reminder_delete": _R_ALL_STAFF,
+    "ai_reminders_poll": _R_ALL_STAFF,
+    "ai_reminder_ack": _R_ALL_STAFF,
 
     # ---- marketing / intake ----
     "add_client": _R_MARKETING,
@@ -1445,6 +1453,7 @@ _SERIAL_ID_TABLES = {
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
     "task_stages", "validation_papers", "validation_events", "task_handoffs",
+    "ai_reminders",
 }
 
 
@@ -2127,6 +2136,20 @@ def init_db():
         updated_by TEXT DEFAULT '',
         updated_at TEXT DEFAULT ({_NOW_SQL})
     );
+    CREATE TABLE IF NOT EXISTS ai_reminders (
+        id SERIAL PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        owner_label TEXT DEFAULT '',
+        text TEXT NOT NULL,
+        client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
+        client_name TEXT DEFAULT '',
+        remind_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        snooze_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT ({_NOW_SQL}),
+        done_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS ai_reminders_owner ON ai_reminders (owner_key, status, remind_at);
     CREATE TABLE IF NOT EXISTS stage_reminder_snoozes (
         id SERIAL PRIMARY KEY,
         client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -3758,6 +3781,161 @@ def _dispatch_bulk_import(con, kind, rows, d):
     raise ApiError("Unknown import type.")
 
 
+# =====================================================================
+# FLOATING AI ASSISTANT (ai_assistant.py) - what each login may see.
+# ---------------------------------------------------------------------
+# The same rules as the dashboards themselves:
+#   * employees (programmers, writers, journal team, individual telecallers)
+#     -> only the clients they are attached to (employee_visible_client_ids,
+#        plus leads an individual telecaller added), no payment amounts;
+#   * Technical Manager / TL / Content Coordinator -> clients Accounts approved;
+#   * Journal Manager / TL -> clients handed to the Journal team;
+#   * Marketing, Accounts, Admins -> every client;
+#   * client portal -> their own CL-ID family only.
+# Team questions ("what is Ravi working on?") are limited to the manager's
+# own department (STAFF_MGMT_TEAM_ROLES); admins see everyone.
+# =====================================================================
+_AI_MONEY_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "account_team",
+                   "technical_manager", "technical_tl", "journal_manager", "md_admin", "super_admin")
+AI_REMINDER_MAX_PENDING = 200
+
+
+def ai_owner(sess):
+    """(owner key, label) for reminders - one reminder list per login."""
+    if sess["kind"] == "client":
+        return "CLIENT:%s" % sess["client_id"], "Client"
+    ident = session_identity(sess)
+    return ident["key"], ident["label"]
+
+
+def _ai_reminder_out(r):
+    return {"id": r["id"], "text": r["text"], "clientId": r["client_id"] or "",
+            "clientName": r["client_name"] or "", "remindAt": str(r["remind_at"])[:16],
+            "status": r["status"], "snoozeCount": r["snooze_count"] or 0}
+
+
+def ai_list_reminders(con, owner_key):
+    return [_ai_reminder_out(r) for r in con.execute(
+        """SELECT * FROM ai_reminders WHERE owner_key=? AND status='PENDING'
+           ORDER BY remind_at ASC, id ASC LIMIT 100""", (owner_key,))]
+
+
+def ai_save_reminder(con, sess, scope_ids, text, when, client_id):
+    owner_key, owner_label = ai_owner(sess)
+    if not owner_key:
+        raise ApiError("Reminders aren't available for this login.", 403)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", str(text or "")).strip()[:200]
+    if not text:
+        raise ApiError("Write what the reminder is about.")
+    now = datetime.now()
+    if when < now - timedelta(minutes=1):
+        raise ApiError("That time has already passed - pick a time in the future.")
+    if when > now + timedelta(days=366):
+        raise ApiError("Pick a time within the next year.")
+    client_id = (client_id or "").strip()
+    client_name = ""
+    if client_id:
+        if client_id not in scope_ids:
+            raise ApiError("You can only link a reminder to a client on your own dashboard.", 403)
+        r = con.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+        client_name = (r["name"] if r else "") or ""
+    n = con.execute("SELECT COUNT(*) AS n FROM ai_reminders WHERE owner_key=? AND status='PENDING'",
+                    (owner_key,)).fetchone()["n"]
+    if n >= AI_REMINDER_MAX_PENDING:
+        raise ApiError("You already have %d pending reminders - delete some first." % AI_REMINDER_MAX_PENDING)
+    cur = con.execute(
+        """INSERT INTO ai_reminders (owner_key, owner_label, text, client_id, client_name, remind_at)
+           VALUES (?,?,?,?,?,?)""",
+        (owner_key, owner_label, text, client_id or None, client_name, when.strftime(_TS_FMT)))
+    con.commit()
+    return {"id": cur.lastrowid, "text": text, "remindAt": when.strftime("%Y-%m-%d %H:%M"),
+            "clientId": client_id, "clientName": client_name}
+
+
+def build_ai_context(con, sess):
+    """Everything the assistant may use for THIS login, already filtered."""
+    kind = sess["kind"]
+    role = sess["role"] or ""
+    role_key = help_assistant.role_key_for(sess)
+    now = datetime.now()
+    clients = all_clients(con)
+    tasks = [dict(r) for r in con.execute(
+        """SELECT id, title, client_id, priority, start_date, finish_date, status, assigned_to, task_type
+           FROM tasks ORDER BY created_at DESC, id DESC""")]
+    queries = [dict(r) for r in con.execute(
+        """SELECT id, client_id, query_text, query_date, assigned_to, status FROM client_queries
+           ORDER BY query_date DESC, id DESC""")]
+    events = [dict(r) for r in con.execute(
+        "SELECT id, title, event_date, event_time, note, created_by_id, visibility FROM calendar_events")]
+    name, money, team_view, team = "", False, False, []
+
+    if kind == "client":
+        fam = client_family_ids(con, sess["client_id"])
+        clients = [scrub_client_for_client(c) for c in clients if c["id"] in fam]
+        tasks, queries = [], [q for q in queries if q["client_id"] in fam]
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"]
+        own = next((c for c in clients if c["id"] == sess["client_id"]), None)
+        name, money = (own["name"] if own else ""), True
+    elif kind == "employee":
+        name = (sess["emp_name"] or "").strip()
+        visible = employee_visible_client_ids(con, sess["emp_id"], name, tasks, queries)
+        if (sess["emp_role"] or "") == "TELECALLER" and name:
+            # leads this telecaller added themselves
+            for r in con.execute("""SELECT DISTINCT client_id FROM history
+                                    WHERE stage='NEW' AND actor=?""", (name,)):
+                visible.add(r["client_id"])
+        clients = [scrub_client_for_employee(c) for c in clients if c["id"] in visible]
+        tasks = [t for t in tasks if task_assigned_to(t, name)]
+        queries = [q for q in queries if q["client_id"] in visible]
+        my_id = "emp:" + name
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"
+                  or e.get("created_by_id") == my_id]
+    else:
+        if role in ("technical_manager", "technical_tl", "content_coordinator"):
+            clients = [c for c in clients if stageIdxServer(c["stage"]) >= stageIdxServer("TECH_ASSIGNED")]
+        elif role in ("journal_manager", "journal_tl"):
+            clients = [c for c in clients if stageIdxServer(c["stage"]) >= stageIdxServer("JOURNAL_MANAGER_REVIEW")]
+        ids = {c["id"] for c in clients}
+        tasks = [t for t in tasks if not t.get("client_id") or t["client_id"] in ids]
+        queries = [q for q in queries if q["client_id"] in ids]
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"
+                  or e.get("created_by_id") == role]
+        money = role in _AI_MONEY_ROLES
+        if role in ADMIN_ROLES:
+            team_view, team = True, all_employees(con)
+        elif role in STAFF_MGMT_TEAM_ROLES:
+            allowed_roles = STAFF_MGMT_TEAM_ROLES[role]
+            team_view, team = True, [e for e in all_employees(con) if e["role"] in allowed_roles]
+        if not money:
+            clients = [{k: v for k, v in c.items()
+                        if k not in ("payments", "installments", "totalAmount", "serviceItems")} for c in clients]
+    team = [{"id": e["id"], "name": e["name"], "role": e["role"], "teamType": e.get("teamType", "")} for e in team]
+
+    # What is waiting on THIS login right now (same rules as the stage-reminder pop-up).
+    waiting = []
+    if kind in ("dept", "employee"):
+        by_id = {c["id"]: c for c in clients}
+        sess_d = dict(sess)
+        cache = {}
+        for row in con.execute("""SELECT * FROM clients WHERE COALESCE(rejected,0)=0
+                                  AND COALESCE(on_hold,0)=0"""):
+            if row["id"] not in by_id or row["stage"] not in STAGE_REMINDER_RULES:
+                continue
+            if _reminder_is_for(con, row, sess_d, cache):
+                waiting.append((by_id[row["id"]], STAGE_REMINDER_RULES[row["stage"]][2]))
+
+    owner_key, _ = ai_owner(sess)
+    scope_ids = {c["id"] for c in clients}
+    ctx = ai_assistant.Ctx(
+        kind=kind, role_key=role_key, name=name, is_admin=role in ADMIN_ROLES, money=money,
+        team_view=team_view, team=team, clients=clients, tasks=tasks, queries=queries, events=events,
+        waiting=waiting, now=now,
+        services={k: {"label": v["label"], "amounts": v["amounts"]} for k, v in SERVICES.items()},
+        save_reminder=lambda text, when, cid: ai_save_reminder(con, sess, scope_ids, text, when, cid),
+        list_reminders=lambda: ai_list_reminders(con, owner_key))
+    return ctx, scope_ids
+
+
 def handle_action(action, d, ip=""):
     con = db()
     try:
@@ -4027,22 +4205,60 @@ def handle_action(action, d, ip=""):
         # =============================================================
         if action == "help_chat":
             sess = get_principal()
-            role_key = help_assistant.role_key_for(sess)
-            if sess["kind"] in ("employee", "validator"):
-                name = sess["emp_name"] or ""
-            elif sess["kind"] == "client":
-                r = con.execute("SELECT name FROM clients WHERE id=?", (sess["client_id"],)).fetchone()
-                name = (r["name"] if r else "") or ""
-            else:
-                name = ""          # shared department login - no personal name
+            ctx, _scope = build_ai_context(con, sess)
             if (d.get("mode") or "") == "welcome":
-                return help_assistant.welcome(role_key, name)
-            if _rate_limited(ip, "help_chat", limit=30, window_seconds=300):
+                return ai_assistant.welcome(ctx)
+            if _rate_limited(ip, "help_chat", limit=40, window_seconds=300):
                 raise ApiError("You're asking very quickly - please wait a minute and try again.", 429)
             history = d.get("history") if isinstance(d.get("history"), list) else []
             history = [h for h in history[-6:] if isinstance(h, dict)]
-            return help_assistant.answer(d.get("question") or "", role_key, name, history,
-                                         logger=lambda m: print(m, file=sys.stderr))
+            return ai_assistant.respond(d.get("question") or "", ctx, history,
+                                        logger=lambda m: print(m, file=sys.stderr))
+
+        # ---- AI assistant reminders (per login; never another person's) ----
+        if action in ("ai_reminder_save", "ai_reminder_list", "ai_reminder_delete",
+                      "ai_reminders_poll", "ai_reminder_ack"):
+            sess = get_principal()
+            owner_key, _label = ai_owner(sess)
+            if not owner_key:
+                raise ApiError("Not allowed.", 403)
+            if action == "ai_reminder_list":
+                return {"reminders": ai_list_reminders(con, owner_key)}
+            if action == "ai_reminder_save":
+                raw = str(d.get("remindAt") or "").strip().replace("T", " ")[:16]
+                try:
+                    when = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+                except ValueError:
+                    raise ApiError("Pick a date and time for the reminder.")
+                _ctx, scope_ids = build_ai_context(con, sess) if d.get("clientId") else (None, set())
+                r = ai_save_reminder(con, sess, scope_ids, d.get("text"), when, d.get("clientId"))
+                return {"ok": True, "reminder": r}
+            if action == "ai_reminder_delete":
+                cur = con.execute("UPDATE ai_reminders SET status='DELETED', done_at=? WHERE id=? AND owner_key=?",
+                                  (now_str(), int(d.get("id") or 0), owner_key))
+                con.commit()
+                return {"ok": True}
+            if action == "ai_reminders_poll":
+                due = [_ai_reminder_out(r) for r in con.execute(
+                    """SELECT * FROM ai_reminders WHERE owner_key=? AND status='PENDING' AND remind_at<=?
+                       ORDER BY remind_at ASC, id ASC LIMIT 20""", (owner_key, now_str()))]
+                return {"due": due, "serverNow": now_str()}
+            if action == "ai_reminder_ack":
+                rid = int(d.get("id") or 0)
+                try:
+                    snooze = int(d.get("snoozeMinutes") or 0)
+                except (TypeError, ValueError):
+                    snooze = 0
+                if snooze > 0:
+                    snooze = min(snooze, 24 * 60)
+                    con.execute("""UPDATE ai_reminders SET remind_at=?, snooze_count=snooze_count+1
+                                   WHERE id=? AND owner_key=? AND status='PENDING'""",
+                                ((datetime.now() + timedelta(minutes=snooze)).strftime(_TS_FMT), rid, owner_key))
+                else:
+                    con.execute("""UPDATE ai_reminders SET status='DONE', done_at=?
+                                   WHERE id=? AND owner_key=?""", (now_str(), rid, owner_key))
+                con.commit()
+                return {"ok": True}
 
         if action == "bootstrap":
             events = [dict(r) for r in con.execute(

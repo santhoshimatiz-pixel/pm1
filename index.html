@@ -382,27 +382,142 @@ tbody tr:last-child td{border-bottom:none}
 .am-section-head{font-family:var(--disp);font-size:13px;font-weight:600;color:var(--gold-deep);letter-spacing:.01em;margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
 .am-section-head:first-of-type{margin-top:14px;padding-top:0;border-top:none}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
-/* ---------- Help: Guide / Ask AI tabs + chat ---------- */
-.help-tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:4px;margin:0 0 16px}
-.help-tabs button{flex:1;border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:9px 10px;border-radius:9px;cursor:pointer}
-.help-tabs button.act{background:var(--card);color:var(--purple);box-shadow:var(--shadow-sm)}
-.hc-log{height:340px;max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--card2);border:1px solid var(--line);border-radius:14px}
-.hc-msg{max-width:88%;padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
-.hc-msg.bot{align-self:flex-start;background:var(--card);border:1px solid var(--line);color:var(--text);border-bottom-left-radius:4px}
-.hc-msg.me{align-self:flex-end;background:var(--purple);color:#fff;border-bottom-right-radius:4px}
-.hc-msg.off{border-color:rgba(184,134,11,.45);background:rgba(184,134,11,.08)}
-.hc-msg.err{border-color:rgba(220,38,38,.35);color:var(--bad)}
-.hc-who{display:block;font-size:11px;font-weight:700;color:var(--purple);margin-bottom:3px;letter-spacing:.02em}
-.hc-typing{display:inline-flex;gap:4px;align-items:center}
-.hc-typing i{width:6px;height:6px;border-radius:50%;background:var(--faint);animation:hcDot 1s infinite ease-in-out}
-.hc-typing i:nth-child(2){animation-delay:.15s}.hc-typing i:nth-child(3){animation-delay:.3s}
-@keyframes hcDot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
-.hc-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
-.hc-chip{border:1px solid var(--line-strong);background:var(--card);color:var(--text);font:500 12px var(--body);padding:6px 10px;border-radius:999px;cursor:pointer;text-align:left}
-.hc-chip:hover{border-color:var(--purple);color:var(--purple)}
-.hc-form{display:flex;gap:8px;margin-top:12px}
-.hc-form input{flex:1;min-width:0}
+/* ---------- Help modal: link to the AI assistant ---------- */
+.help-ai-cta{display:flex;align-items:center;gap:12px;padding:13px 14px;margin:0 0 16px;border-radius:14px;cursor:pointer;
+  background:linear-gradient(120deg,rgba(14,116,144,.10),rgba(20,184,166,.10) 55%,rgba(184,134,11,.10));border:1px solid rgba(14,116,144,.25)}
+.help-ai-cta b{display:block;font-size:14px;color:var(--text)}
+.help-ai-cta span{font-size:12.5px;color:var(--muted)}
+.help-ai-cta .orb{width:38px;height:38px;flex:0 0 38px;border-radius:50%;background:conic-gradient(from 0deg,#0E7490,#14B8A6,#E4C580,#0E7490);
+  display:flex;align-items:center;justify-content:center;color:#fff;animation:aiSpin 6s linear infinite}
+.help-ai-cta .orb svg{animation:aiSpin 6s linear infinite reverse}
 .hc-note{font-size:11.5px;color:var(--faint);margin-top:8px}
+
+/* =================== FLOATING AI ASSISTANT (bottom-right) =================== */
+#aiFabWrap{position:fixed;right:22px;bottom:22px;z-index:90;display:flex;align-items:center;gap:12px;pointer-events:none}
+#aiFabWrap.ai-hidden{display:none}
+#aiFab{pointer-events:auto;position:relative;width:60px;height:60px;border-radius:50%;border:0;cursor:pointer;padding:0;
+  background:conic-gradient(from var(--ai-a,0deg),#0E7490,#14B8A6,#E4C580,#0E7490);color:#fff;
+  box-shadow:0 14px 30px -10px rgba(14,116,144,.65),0 4px 10px rgba(0,0,0,.18);animation:aiBob 3.2s ease-in-out infinite,aiHue 6s linear infinite;
+  transition:transform .25s var(--ease)}
+@property --ai-a{syntax:'<angle>';inherits:false;initial-value:0deg}
+@keyframes aiHue{to{--ai-a:360deg}}
+@keyframes aiBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes aiSpin{to{transform:rotate(360deg)}}
+#aiFab:hover{transform:scale(1.07)}
+#aiFab .ai-fab-in{position:absolute;inset:4px;border-radius:50%;background:#0B2A33;display:flex;align-items:center;justify-content:center}
+#aiFab .ai-fab-ring{position:absolute;inset:-6px;border-radius:50%;border:2px solid rgba(20,184,166,.55);animation:aiRing 2.4s ease-out infinite}
+#aiFab .ai-fab-ring.r2{animation-delay:1.2s}
+@keyframes aiRing{0%{transform:scale(.85);opacity:.9}100%{transform:scale(1.35);opacity:0}}
+#aiFab svg{width:28px;height:28px}
+#aiFab .spark{transform-origin:center;animation:aiTwinkle 2.2s ease-in-out infinite}
+@keyframes aiTwinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.8)}}
+#aiFab .ai-badge{position:absolute;top:-2px;right:-2px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--bad);color:#fff;
+  font:700 11px var(--body);display:none;align-items:center;justify-content:center;border:2px solid var(--card)}
+#aiFab .ai-badge.show{display:flex}
+#aiFabWrap.open #aiFab{animation:none}
+#aiFabWrap.open .ai-fab-ring{display:none}
+.ai-hint{pointer-events:auto;background:var(--card);color:var(--text);border:1px solid var(--line-strong);box-shadow:var(--shadow-md);
+  font:600 13px var(--body);padding:9px 13px;border-radius:14px 14px 4px 14px;cursor:pointer;opacity:0;transform:translateX(12px) scale(.96);
+  transition:opacity .35s var(--ease),transform .35s var(--ease);white-space:nowrap}
+.ai-hint.show{opacity:1;transform:none}
+.ai-hint .wave{display:inline-block;animation:aiWave 1.6s ease-in-out 2}
+@keyframes aiWave{0%,100%{transform:rotate(0)}25%{transform:rotate(18deg)}75%{transform:rotate(-12deg)}}
+
+#aiPanel{position:fixed;right:22px;bottom:96px;z-index:95;width:400px;max-width:calc(100vw - 32px);height:min(620px,calc(100vh - 120px));
+  display:flex;flex-direction:column;background:var(--card);color:var(--text);border:1px solid var(--line-strong);border-radius:20px;
+  box-shadow:0 30px 70px -20px rgba(8,23,27,.55),0 10px 24px -12px rgba(8,23,27,.3);overflow:hidden;
+  transform-origin:bottom right;transform:translateY(16px) scale(.9);opacity:0;pointer-events:none;transition:transform .32s var(--ease),opacity .25s}
+#aiPanel.open{transform:none;opacity:1;pointer-events:auto}
+.ai-head{display:flex;align-items:center;gap:11px;padding:14px 14px 13px 16px;color:#fff;
+  background:linear-gradient(125deg,#08171B 0%,#0E3A45 55%,#0E7490 100%);position:relative;overflow:hidden}
+.ai-head::after{content:"";position:absolute;right:-40px;top:-60px;width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle,rgba(228,197,128,.35),transparent 65%);animation:aiGlow 5s ease-in-out infinite}
+@keyframes aiGlow{0%,100%{transform:translate(0,0)}50%{transform:translate(-30px,20px)}}
+.ai-orb{width:38px;height:38px;flex:0 0 38px;border-radius:50%;position:relative;
+  background:conic-gradient(from var(--ai-a,0deg),#14B8A6,#E4C580,#0E7490,#14B8A6);animation:aiHue 5s linear infinite;
+  display:flex;align-items:center;justify-content:center}
+.ai-orb::before{content:"";position:absolute;inset:3px;border-radius:50%;background:#0B2A33}
+.ai-orb svg{position:relative;width:20px;height:20px}
+.ai-head-t{flex:1;min-width:0;position:relative;z-index:1}
+.ai-head-t b{display:block;font-size:15px;letter-spacing:.01em}
+.ai-head-t small{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(236,247,246,.75)}
+.ai-head-t small i{width:7px;height:7px;border-radius:50%;background:#34D399;box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:aiLive 2s infinite}
+@keyframes aiLive{0%{box-shadow:0 0 0 0 rgba(52,211,153,.6)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+.ai-hbtn{position:relative;z-index:1;width:32px;height:32px;border-radius:9px;border:0;background:rgba(255,255,255,.1);color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:15px}
+.ai-hbtn:hover{background:rgba(255,255,255,.2)}
+#aiLog{flex:1;overflow-y:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
+.ai-msg{max-width:92%;font-size:13.5px;line-height:1.55;animation:aiIn .28s var(--ease)}
+@keyframes aiIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.ai-msg.me{align-self:flex-end;background:linear-gradient(135deg,#0E7490,#0B5E73);color:#fff;padding:9px 13px;border-radius:16px 16px 4px 16px;white-space:pre-wrap;word-break:break-word}
+.ai-msg.bot{align-self:flex-start;width:92%}
+.ai-bub{background:var(--card);border:1px solid var(--line);padding:10px 13px;border-radius:16px 16px 16px 4px;white-space:pre-wrap;word-break:break-word;box-shadow:var(--shadow-sm)}
+.ai-msg.off .ai-bub{border-color:rgba(184,134,11,.45);background:rgba(184,134,11,.07)}
+.ai-msg.err .ai-bub{border-color:rgba(220,38,38,.35);color:var(--bad)}
+.ai-card{margin-top:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-sm)}
+.ai-card-h{font:700 11px var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--purple);padding:9px 12px 7px;border-bottom:1px solid var(--line);background:var(--card2)}
+.ai-it{padding:10px 12px;border-bottom:1px dashed var(--line)}
+.ai-it:last-child{border-bottom:0}
+.ai-it.click{cursor:pointer}.ai-it.click:hover{background:var(--card2)}
+.ai-it-top{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.ai-it-top b{font-size:13.5px;margin-right:2px}
+.ai-it-l{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45;word-break:break-word}
+.ai-tag{font:700 10.5px var(--body);padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line-strong);color:var(--muted)}
+.ai-tag.bad{background:rgba(220,38,38,.1);border-color:rgba(220,38,38,.3);color:var(--bad)}
+.ai-tag.ok{background:rgba(21,128,61,.1);border-color:rgba(21,128,61,.3);color:var(--ok)}
+.ai-tag.gold{background:rgba(184,134,11,.1);border-color:rgba(184,134,11,.3);color:var(--gold-deep)}
+.ai-tag.purp{background:rgba(14,116,144,.1);border-color:rgba(14,116,144,.3);color:var(--purple)}
+.ai-it-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ai-mini{border:1px solid var(--line-strong);background:var(--card);color:var(--text);font:600 11.5px var(--body);padding:5px 9px;border-radius:8px;cursor:pointer}
+.ai-mini:hover{border-color:var(--purple);color:var(--purple)}
+.ai-mini.pri{background:var(--purple);border-color:var(--purple);color:#fff}
+.ai-mini.pri:hover{color:#fff;filter:brightness(1.08)}
+.ai-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ai-chip{border:1px solid var(--line-strong);background:var(--card);color:var(--text);font:500 12px var(--body);padding:6px 11px;border-radius:999px;cursor:pointer;
+  transition:border-color .15s,color .15s,transform .15s}
+.ai-chip:hover{border-color:var(--purple);color:var(--purple);transform:translateY(-1px)}
+.ai-typing{display:inline-flex;gap:4px;align-items:center;padding:12px 14px}
+.ai-typing i{width:7px;height:7px;border-radius:50%;background:var(--purple);opacity:.35;animation:aiDot 1.1s infinite ease-in-out}
+.ai-typing i:nth-child(2){animation-delay:.15s}.ai-typing i:nth-child(3){animation-delay:.3s}
+@keyframes aiDot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+.ai-rform{margin-top:8px;background:var(--card);border:1px solid rgba(14,116,144,.3);border-radius:14px;padding:12px;box-shadow:var(--shadow-sm)}
+.ai-rform label{display:block;font:700 11px var(--body);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 4px}
+.ai-rform input{width:100%;margin-bottom:9px;font-size:13px}
+.ai-rform .ai-chips{margin-bottom:10px}
+.ai-rform .ai-chip.sel{background:var(--purple);border-color:var(--purple);color:#fff}
+.ai-foot{padding:10px 12px 12px;border-top:1px solid var(--line);background:var(--card)}
+#aiForm{display:flex;gap:8px;align-items:center}
+#aiInput{flex:1;min-width:0;border-radius:12px;padding:11px 13px;font-size:13.5px}
+.ai-send{width:42px;height:42px;flex:0 0 42px;border-radius:12px;border:0;cursor:pointer;color:#fff;
+  background:linear-gradient(135deg,#0E7490,#14B8A6);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+.ai-send:hover{transform:scale(1.05)}.ai-send:disabled{opacity:.5;cursor:default;transform:none}
+.ai-send svg{width:19px;height:19px}
+.ai-remb{width:42px;height:42px;flex:0 0 42px;border-radius:12px;border:1px solid var(--line-strong);background:var(--card);cursor:pointer;font-size:17px}
+.ai-remb:hover{border-color:var(--purple)}
+.ai-foot small{display:block;text-align:center;color:var(--faint);font-size:10.5px;margin-top:7px}
+
+/* due-reminder pop-ups (stack above the button) */
+#aiRemStack{position:fixed;right:22px;bottom:96px;z-index:118;display:flex;flex-direction:column;gap:10px;width:min(360px,calc(100vw - 32px));pointer-events:none}
+.ai-rem{pointer-events:auto;background:var(--card);color:var(--text);border:1px solid var(--line-strong);border-left:5px solid var(--gold);border-radius:16px;
+  padding:13px 14px;box-shadow:0 24px 50px -18px rgba(8,23,27,.55);animation:aiRemIn .45s cubic-bezier(.2,1.3,.4,1)}
+@keyframes aiRemIn{from{opacity:0;transform:translateX(40px) scale(.95)}to{opacity:1;transform:none}}
+.ai-rem .t{display:flex;gap:10px;align-items:flex-start}
+.ai-rem .bell{font-size:22px;line-height:1;animation:aiBell 1s ease-in-out 3}
+@keyframes aiBell{0%,100%{transform:rotate(0)}20%{transform:rotate(18deg)}40%{transform:rotate(-16deg)}60%{transform:rotate(10deg)}80%{transform:rotate(-6deg)}}
+.ai-rem b{display:block;font-size:14px;word-break:break-word}
+.ai-rem small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.ai-rem .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+@media (max-width:600px){
+  #aiFabWrap{right:14px;bottom:14px}
+  #aiPanel{right:0;left:0;bottom:0;width:100%;max-width:none;height:100%;max-height:none;border-radius:0}
+  #aiFabWrap.open{display:none}
+  #aiRemStack{right:14px;bottom:86px}
+  .ai-hint{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  #aiFab,#aiFab .ai-fab-ring,#aiFab .spark,.ai-orb,.ai-head::after,.help-ai-cta .orb{animation:none}
+}
 .mailbox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:15px;margin-bottom:12px}
 .mailbox .mrow{font-size:13px;margin-bottom:6px;color:var(--muted)}
 .mailbox .mrow b{color:var(--text);font-family:var(--mono)}
@@ -11587,102 +11702,305 @@ function helpGuideHtml(){
     ${role ? "" : `<p class="hc-note">Sign in to chat with the AI help assistant.</p>`}`;
 }
 
-/* ================= HELP -> ASK AI =================
-   A chat that answers ONLY questions about this PM tool (server: help_chat action,
-   help_assistant.py). Off-topic questions get a fixed "I can only help with the
-   PM tool" reply from the server. The conversation is kept while the Help window is
-   closed and reopened, and cleared when a different person signs in. */
-let helpTab = "ai";
-let helpChat = {owner:"", log:[], welcome:null, busy:false};
-function helpChatOwner(){ return [role||"", empId||"", clientSelf||""].join("|"); }
+/* ================= HELP (guide) — the chat itself is the floating AI assistant ================= */
 function openHelp(tab){
-  if(tab) helpTab = tab;
-  if(!role) helpTab = "guide";                         // login page: guide only
-  if(helpChat.owner !== helpChatOwner()) helpChat = {owner:helpChatOwner(), log:[], welcome:null, busy:false};
-  const tabs = role ? `
-    <div class="help-tabs" role="tablist">
-      <button type="button" class="${helpTab==='ai'?'act':''}" onclick="openHelp('ai')">&#10024; Ask AI</button>
-      <button type="button" class="${helpTab==='guide'?'act':''}" onclick="openHelp('guide')">&#128214; Guide</button>
+  if(tab === 'ai' && role && role !== 'validator'){ aiOpen(); return; }
+  const cta = (role && role !== 'validator') ? `
+    <div class="help-ai-cta" role="button" tabindex="0" onclick="closeModal();aiOpen()">
+      <div class="orb"><svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9L12 3Z" fill="#fff"/></svg></div>
+      <div><b>Chat with the AI assistant &#8594;</b><span>Ask about your clients, demos, tasks, payments or set a reminder. It's also the round button at the bottom-right.</span></div>
     </div>` : "";
-  const body = helpTab==='ai' ? `
-      <div id="hcLog" class="hc-log" aria-live="polite"></div>
-      <form class="hc-form" onsubmit="event.preventDefault();helpChatSend()">
-        <input id="hcInput" maxlength="500" autocomplete="off" placeholder="Ask how to do something in the PM tool...">
-        <button class="btn" id="hcSendBtn" type="submit">Send</button>
-      </form>
-      <p class="hc-note">Answers only questions about using this PM tool. <a href="javascript:void(0)" style="color:var(--muted)" onclick="helpChatClear()">Clear chat</a></p>`
-    : helpGuideHtml();
   openModal(`
-    <h3>${helpTab==='ai' ? "Help &mdash; Ask AI" : "How iMatiz Technology works"}</h3>
-    <p class="msub">${helpTab==='ai' ? "Ask anything about your dashboard, clients, tasks, payments or settings." : "One workspace, one client record, from first call to a completed, journal-submitted paper."}</p>
-    ${tabs}
-    ${body}
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
-  if(helpTab==='ai'){
-    renderHelpChat();
-    if(!helpChat.welcome) helpChatLoadWelcome();
-    setTimeout(()=>{ const i=$("hcInput"); if(i) i.focus(); }, 50);
-  }
+    <h3>How iMatiz Technology works</h3>
+    <p class="msub">One workspace, one client record, from first call to a completed, journal-submitted paper.</p>
+    ${cta}
+    ${helpGuideHtml()}
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">Got it</button></div>`);
 }
-async function helpChatLoadWelcome(){
-  const owner = helpChat.owner;
+
+/* =================== FLOATING AI ASSISTANT ===================
+   Bottom-right on every dashboard (not the Validation Login). Server: help_chat
+   (ai_assistant.py) answers from the signed-in person's OWN dashboard data —
+   employees see only their own work, managers/TLs their department + team,
+   admins everything, clients their own project. Reminders are stored per login
+   (ai_reminder_* actions) and pop up here at the chosen time. */
+let aiChat = {owner:"", log:[], welcome:null, busy:false};
+let aiReg = [];                 // clickable items / actions, referenced by index from onclick
+let aiRemTimer = null, aiRemBusy = false, aiRemShown = {}, aiRemTitleTimer = null;
+const AI_REM_POLL_MS = 20000;
+function aiCanUse(){ return !!role && role !== "validator"; }
+function aiOwner(){ return [role||"", empId||"", clientSelf||""].join("|"); }
+function aiStart(){
+  const wrap = $("aiFabWrap"); if(!wrap) return;
+  if(!aiCanUse()){ aiStop(); return; }
+  if(aiChat.owner !== aiOwner()) aiChat = {owner:aiOwner(), log:[], welcome:null, busy:false};
+  wrap.classList.remove("ai-hidden");
+  let seen = false;
+  try{ seen = sessionStorage.getItem("aiHintSeen") === "1"; }catch(e){}
+  if(!seen){
+    setTimeout(()=>{ const h=$("aiHint"); if(h && !$("aiPanel").classList.contains("open")) h.classList.add("show"); }, 1200);
+    setTimeout(()=>{ const h=$("aiHint"); if(h) h.classList.remove("show"); }, 9000);
+    try{ sessionStorage.setItem("aiHintSeen","1"); }catch(e){}
+  }
+  clearInterval(aiRemTimer);
+  aiPollReminders();
+  aiRemTimer = setInterval(aiPollReminders, AI_REM_POLL_MS);
+}
+function aiStop(){
+  clearInterval(aiRemTimer); aiRemTimer = null;
+  aiStopTitleFlash();
+  const wrap = $("aiFabWrap"); if(wrap){ wrap.classList.add("ai-hidden"); wrap.classList.remove("open"); }
+  const p = $("aiPanel"); if(p){ p.classList.remove("open"); p.setAttribute("aria-hidden","true"); }
+  const st = $("aiRemStack"); if(st) st.innerHTML = "";
+  aiRemShown = {};
+  aiChat = {owner:"", log:[], welcome:null, busy:false};
+}
+function aiToggle(){ $("aiPanel").classList.contains("open") ? aiClose() : aiOpen(); }
+function aiOpen(){
+  if(!aiCanUse()) return;
+  if(aiChat.owner !== aiOwner()) aiChat = {owner:aiOwner(), log:[], welcome:null, busy:false};
+  const p = $("aiPanel"); p.classList.add("open"); p.setAttribute("aria-hidden","false");
+  $("aiFabWrap").classList.add("open");
+  const h = $("aiHint"); if(h) h.classList.remove("show");
+  aiRender();
+  if(!aiChat.welcome) aiLoadWelcome();
+  setTimeout(()=>{ const i=$("aiInput"); if(i && window.innerWidth > 600) i.focus(); }, 120);
+}
+function aiClose(){
+  const p = $("aiPanel"); p.classList.remove("open"); p.setAttribute("aria-hidden","true");
+  $("aiFabWrap").classList.remove("open");
+}
+async function aiLoadWelcome(){
+  const owner = aiChat.owner;
   try{
     const out = await api("help_chat", {mode:"welcome"});
-    if(helpChat.owner !== owner) return;
-    helpChat.welcome = out;
-  }catch(e){
-    helpChat.welcome = {welcome:"Hi! Ask me anything about using this PM tool.", suggestions:[]};
-  }
-  renderHelpChat();
+    if(aiChat.owner !== owner) return;
+    aiChat.welcome = out;
+  }catch(e){ aiChat.welcome = {welcome:"Hi! Ask me anything about your dashboard.", suggestions:[]}; }
+  aiRender();
 }
-function helpChatBubble(m){
-  const cls = m.role==='user' ? 'me' : ('bot' + (m.offTopic?' off':'') + (m.error?' err':''));
-  const who = m.role==='user' ? '' : `<span class="hc-who">&#10024; ${esc((helpChat.welcome&&helpChat.welcome.assistant)||"Help Assistant")}</span>`;
-  const chips = (m.related && m.related.length)
-    ? `<div class="hc-chips" style="margin-top:8px">${m.related.map(r=>`<button type="button" class="hc-chip" onclick="helpChatAsk(${jsq(r)})">${esc(r)}</button>`).join("")}</div>` : "";
-  return `<div class="hc-msg ${cls}">${who}${esc(m.text)}${chips}</div>`;
+function aiRegister(obj){ aiReg.push(obj); return aiReg.length - 1; }
+function aiTags(tags){ return (tags||[]).map(t=>`<span class="ai-tag ${esc(t.tone||"")}">${esc(t.text)}</span>`).join(""); }
+function aiBlocksHtml(blocks){
+  return (blocks||[]).map(b=>`
+    <div class="ai-card">${b.title?`<div class="ai-card-h">${esc(b.title)}</div>`:""}
+      ${(b.items||[]).map(it=>{
+        const idx = aiRegister(it);
+        const click = it.ask ? `onclick="aiItem(${idx},'ask')"` : (it.clientId ? `onclick="aiItem(${idx},'open')"` : "");
+        const acts = [];
+        if(it.remind) acts.push(`<button type="button" class="ai-mini pri" onclick="event.stopPropagation();aiItem(${idx},'remind')">&#9200; Remind me</button>`);
+        if(it.clientId && !it.ask) acts.push(`<button type="button" class="ai-mini" onclick="event.stopPropagation();aiItem(${idx},'open')">Open</button>`);
+        if(it.reminderId) acts.push(`<button type="button" class="ai-mini" onclick="event.stopPropagation();aiItem(${idx},'delrem')">Delete</button>`);
+        return `<div class="ai-it ${click?'click':''}" ${click}>
+          <div class="ai-it-top"><b>${esc(it.title)}</b>${aiTags(it.tags)}</div>
+          ${(it.lines||[]).map(l=>`<div class="ai-it-l">${esc(l)}</div>`).join("")}
+          ${acts.length?`<div class="ai-it-acts">${acts.join("")}</div>`:""}
+        </div>`;}).join("")}
+    </div>`).join("");
 }
-function renderHelpChat(){
-  const box = $("hcLog"); if(!box) return;
-  const w = helpChat.welcome;
+function aiMsgHtml(m, i){
+  if(m.role === "user") return `<div class="ai-msg me">${esc(m.text)}</div>`;
+  const cls = "bot" + (m.offTopic?" off":"") + (m.error?" err":"");
+  let extra = aiBlocksHtml(m.blocks);
+  const chips = [];
+  (m.actions||[]).forEach(a=>{
+    const idx = aiRegister(a);
+    chips.push(`<button type="button" class="ai-chip" onclick="aiAction(${idx})">${a.reminder?"&#9200; ":""}${esc(a.label)}</button>`);
+  });
+  (m.related||[]).forEach(r=>chips.push(`<button type="button" class="ai-chip" onclick="aiAsk(${jsq(r)})">${esc(r)}</button>`));
+  if(chips.length) extra += `<div class="ai-chips" style="margin-top:8px">${chips.join("")}</div>`;
+  if(m.form && !m.form.done) extra += aiReminderFormHtml(m.form, i);
+  return `<div class="ai-msg ${cls}"><div class="ai-bub">${esc(m.text)}</div>${extra}</div>`;
+}
+function aiRender(){
+  const box = $("aiLog"); if(!box) return;
+  aiReg = [];
+  const w = aiChat.welcome;
   let html = "";
   if(w){
-    html += helpChatBubble({role:"assistant", text:w.welcome});
-    if(!helpChat.log.length && (w.suggestions||[]).length){
-      html += `<div class="hc-chips">${w.suggestions.map(q=>`<button type="button" class="hc-chip" onclick="helpChatAsk(${jsq(q)})">${esc(q)}</button>`).join("")}</div>`;
-    }
+    html += `<div class="ai-msg bot"><div class="ai-bub">${esc(w.welcome)}</div></div>`;
+    if(!aiChat.log.length && (w.suggestions||[]).length)
+      html += `<div class="ai-chips">${w.suggestions.map(q=>`<button type="button" class="ai-chip" onclick="aiAsk(${jsq(q)})">${esc(q)}</button>`).join("")}</div>`;
   }
-  html += helpChat.log.map(helpChatBubble).join("");
-  if(helpChat.busy || !w) html += `<div class="hc-msg bot"><span class="hc-typing"><i></i><i></i><i></i></span></div>`;
+  html += aiChat.log.map(aiMsgHtml).join("");
+  if(aiChat.busy || !w) html += `<div class="ai-msg bot"><div class="ai-bub" style="padding:0"><span class="ai-typing"><i></i><i></i><i></i></span></div></div>`;
   box.innerHTML = html;
   box.scrollTop = box.scrollHeight;
-  const btn = $("hcSendBtn"); if(btn) btn.disabled = helpChat.busy;
+  const b = $("aiSendBtn"); if(b) b.disabled = aiChat.busy;
 }
-function helpChatAsk(q){ const i=$("hcInput"); if(i) i.value = q; helpChatSend(); }
-function helpChatClear(){ helpChat.log = []; renderHelpChat(); const i=$("hcInput"); if(i) i.focus(); }
-async function helpChatSend(){
-  const input = $("hcInput");
+function aiAsk(q){ const i=$("aiInput"); if(i) i.value = q; aiSend(); }
+function aiClear(){ aiChat.log = []; aiRender(); }
+async function aiSend(){
+  const input = $("aiInput");
   const q = (input ? input.value : "").trim();
-  if(!q || helpChat.busy) return;
+  if(!q || aiChat.busy) return;
   if(input) input.value = "";
-  const owner = helpChat.owner;
-  const history = helpChat.log.filter(m=>!m.error).slice(-6).map(m=>({role:m.role, text:m.text}));
-  helpChat.log.push({role:"user", text:q});
-  helpChat.busy = true; renderHelpChat();
+  const owner = aiChat.owner;
+  const history = aiChat.log.filter(m=>!m.error).slice(-6).map(m=>({role:m.role, text:m.text}));
+  aiChat.log.push({role:"user", text:q});
+  aiChat.busy = true; aiRender();
   let reply;
   try{
     const out = await api("help_chat", {mode:"ask", question:q, history});
-    reply = {role:"assistant", text:out.answer||"", offTopic:out.onTopic===false, related:out.related||[]};
-  }catch(e){
-    reply = {role:"assistant", text:e.message || "Something went wrong - please try again.", error:true};
-  }
-  if(helpChat.owner !== owner) return;                  // signed out / switched user meanwhile
-  helpChat.busy = false;
-  helpChat.log.push(reply);
-  if(helpChat.log.length > 60) helpChat.log = helpChat.log.slice(-60);
-  renderHelpChat();
-  const i=$("hcInput"); if(i) i.focus();
+    reply = {role:"assistant", text:out.answer||"", offTopic:out.onTopic===false, blocks:out.blocks||[],
+             actions:out.actions||[], related:out.related||[], form:out.reminderForm||null};
+    if(out.reminderSaved) toast("Reminder saved");
+  }catch(e){ reply = {role:"assistant", text:e.message || "Something went wrong - please try again.", error:true}; }
+  if(aiChat.owner !== owner) return;
+  aiChat.busy = false;
+  aiChat.log.push(reply);
+  if(aiChat.log.length > 80) aiChat.log = aiChat.log.slice(-80);
+  aiRender();
+  const i=$("aiInput"); if(i && window.innerWidth > 600) i.focus();
 }
+function aiOpenClient(id){
+  if(!id) return;
+  if(role === "client"){
+    if(findClient(id)){ clientSelf = id; clientView = 'status'; aiClose(); refresh(); }
+    return;
+  }
+  if(!findClient(id)){ toast("That client isn't on your dashboard."); return; }
+  aiClose();
+  if(role==="employee" || isModernRole()) admOpenProject(id); else openDrawer(id);
+}
+async function aiItem(idx, what){
+  const it = aiReg[idx]; if(!it) return;
+  if(what === "open") return aiOpenClient(it.clientId);
+  if(what === "ask") return aiAsk(it.ask);
+  if(what === "remind") return aiShowReminderForm({text:it.remind.text, clientId:it.remind.clientId||"", eventAt:it.remind.eventAt||""});
+  if(what === "delrem"){
+    try{ await api("ai_reminder_delete", {id:it.reminderId}); }catch(e){ toast(e.message); return; }
+    toast("Reminder deleted");
+    aiChat.log.push({role:"assistant", text:"Deleted the reminder \"" + it.title + "\"."});
+    aiRender();
+  }
+}
+function aiAction(idx){
+  const a = aiReg[idx]; if(!a) return;
+  if(a.reminder) return aiShowReminderForm(a.reminder);
+  if(a.ask) return aiAsk(a.ask);
+}
+/* ---- reminder form (inside the chat) ---- */
+function aiPad(n){ return String(n).padStart(2,"0"); }
+function aiLocalInput(d){ return d.getFullYear()+"-"+aiPad(d.getMonth()+1)+"-"+aiPad(d.getDate())+"T"+aiPad(d.getHours())+":"+aiPad(d.getMinutes()); }
+function aiParseLocal(s){ const m = String(s||"").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); return m ? new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]) : null; }
+function aiPresets(form){
+  const now = new Date(), out = [];
+  const ev = aiParseLocal(form.eventAt);
+  if(ev && ev > now){
+    [[10,"10 min before"],[30,"30 min before"],[60,"1 hour before"]].forEach(([m,l])=>{
+      const d = new Date(ev.getTime() - m*60000); if(d > now) out.push([l, d]); });
+    out.push(["At the time", ev]);
+  }
+  out.push(["In 15 min", new Date(now.getTime()+15*60000)]);
+  out.push(["In 1 hour", new Date(now.getTime()+60*60000)]);
+  const t = new Date(now); t.setDate(t.getDate()+1); t.setHours(10,0,0,0);
+  out.push(["Tomorrow 10 AM", t]);
+  return out.slice(0, 6);
+}
+function aiShowReminderForm(form){
+  aiOpen();
+  aiChat.log.push({role:"assistant", text: form.eventAt ? "When should I remind you about this?" : "Sure - what should I remind you about, and when?",
+                   form: Object.assign({text:"", clientId:"", eventAt:"", at:""}, form)});
+  aiRender();
+}
+function aiReminderFormHtml(f, i){
+  const presets = aiPresets(f);
+  const def = f.at || (presets[0] ? aiLocalInput(presets[0][1]) : "");
+  return `<div class="ai-rform">
+    <label>Remind me about</label><input id="aiRfText${i}" maxlength="200" value="${esc(f.text||"")}" placeholder="e.g. Call the client about payment">
+    <label>When</label>
+    <div class="ai-chips">${presets.map(([l,d])=>`<button type="button" class="ai-chip" onclick="aiRfPick(${i},${jsq(aiLocalInput(d))},this)">${esc(l)}</button>`).join("")}</div>
+    <input id="aiRfAt${i}" type="datetime-local" value="${esc(def)}">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button type="button" class="ai-mini" onclick="aiRfCancel(${i})">Cancel</button>
+      <button type="button" class="ai-mini pri" onclick="aiRfSave(${i})">&#9200; Save reminder</button>
+    </div></div>`;
+}
+function aiRfPick(i, val, btn){
+  const el = $("aiRfAt"+i); if(el) el.value = val;
+  btn.parentNode.querySelectorAll(".ai-chip").forEach(x=>x.classList.remove("sel")); btn.classList.add("sel");
+}
+function aiRfCancel(i){ const m = aiChat.log[i]; if(m && m.form){ m.form.done = true; m.text = "Okay, no reminder set."; } aiRender(); }
+async function aiRfSave(i){
+  const m = aiChat.log[i]; if(!m || !m.form) return;
+  const text = ($("aiRfText"+i)||{}).value.trim();
+  const at = ($("aiRfAt"+i)||{}).value;
+  if(!text){ toast("Write what the reminder is about"); return; }
+  if(!at){ toast("Pick a date and time"); return; }
+  m.form.text = text; m.form.at = at;
+  let out;
+  try{ out = await api("ai_reminder_save", {text, remindAt:at, clientId:m.form.clientId||""}); }
+  catch(e){ toast(e.message); return; }
+  m.form.done = true;
+  const d = aiParseLocal(at);
+  m.text = "Done! I'll remind you on " + (d ? d.toLocaleString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}) : at) + ": \"" + text + "\"" +
+           (out.reminder && out.reminder.clientName ? " (" + out.reminder.clientName + ")" : "") + ".";
+  toast("Reminder saved");
+  aiRender();
+}
+/* ---- due reminders: pop-up above the button + beep + desktop notification ---- */
+async function aiPollReminders(){
+  if(!aiCanUse() || aiRemBusy) return;
+  aiRemBusy = true;
+  try{
+    const out = await api("ai_reminders_poll", {});
+    (out.due||[]).forEach(r=>{
+      const key = r.id + "|" + r.remindAt;
+      if(aiRemShown[key]) return;
+      aiRemShown[key] = true;
+      aiShowDue(r);
+    });
+  }catch(e){ /* quiet - api() handles an expired session */ }
+  finally{ aiRemBusy = false; }
+}
+function aiShowDue(r){
+  const st = $("aiRemStack"); if(!st) return;
+  const el = document.createElement("div");
+  el.className = "ai-rem"; el.id = "aiRem" + r.id;
+  const d = aiParseLocal(r.remindAt);
+  el.innerHTML = `<div class="t"><span class="bell">&#9200;</span><div style="flex:1;min-width:0">
+      <b>${esc(r.text)}</b>
+      <small>Reminder${r.clientName?" &middot; "+esc(r.clientName):""} &middot; ${d?esc(d.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"})):""}</small></div></div>
+    <div class="acts">
+      <button type="button" class="ai-mini pri" onclick="aiAckRem(${r.id},0)">Done</button>
+      <button type="button" class="ai-mini" onclick="aiAckRem(${r.id},10)">Snooze 10 min</button>
+      <button type="button" class="ai-mini" onclick="aiAckRem(${r.id},60)">1 hour</button>
+      ${r.clientId?`<button type="button" class="ai-mini" onclick="aiOpenClient(${jsq(r.clientId)})">Open client</button>`:""}
+    </div>`;
+  st.appendChild(el);
+  aiUpdateBadge();
+  try{ pingBeep(); }catch(e){}
+  aiStartTitleFlash(r.text);
+  if(("Notification" in window) && Notification.permission === "granted"){
+    try{
+      const n = new Notification("Reminder: " + r.text, {body: (r.clientName ? r.clientName + " - " : "") + "iMatiz PM Tool",
+        tag:"matiz-ai-rem-" + r.id, requireInteraction:true});
+      n.onclick = function(){ try{ window.focus(); }catch(e){} n.close(); };
+    }catch(e){}
+  }
+}
+async function aiAckRem(id, snooze){
+  const el = $("aiRem" + id); if(el) el.remove();
+  aiUpdateBadge();
+  if(!$("aiRemStack").children.length) aiStopTitleFlash();
+  try{ await api("ai_reminder_ack", {id, snoozeMinutes:snooze}); }catch(e){ toast(e.message); return; }
+  Object.keys(aiRemShown).forEach(k=>{ if(k.split("|")[0] === String(id)) delete aiRemShown[k]; });
+  toast(snooze ? `Okay - reminding you again in ${snooze>=60?(snooze/60)+" hour":snooze+" min"}` : "Reminder done");
+}
+function aiUpdateBadge(){
+  const n = ($("aiRemStack")||{children:[]}).children.length, b = $("aiBadge"); if(!b) return;
+  b.textContent = n; b.classList.toggle("show", n > 0);
+}
+function aiStartTitleFlash(text){
+  if(aiRemTitleTimer) return;
+  let on = false;
+  aiRemTitleTimer = setInterval(()=>{ on = !on; document.title = on ? "⏰ " + text : pingBaseTitle; }, 1000);
+}
+function aiStopTitleFlash(){ if(!aiRemTitleTimer) return; clearInterval(aiRemTitleTimer); aiRemTitleTimer = null; document.title = pingBaseTitle; }
+document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible" && aiRemTimer) aiPollReminders(); });
+document.addEventListener("keydown", function(e){ if(e.key === "Escape" && $("aiPanel") && $("aiPanel").classList.contains("open") && !$("modalBg").classList.contains("open")) aiClose(); });
+
 function openSettings(){
   const emailSection = role==="client" ? "" : `
     <h3>Email settings</h3><p class="msub">Every handoff step opens a ready email with these addresses</p>
@@ -12015,6 +12333,7 @@ function pingCanListen(){ return role === "employee" && !!empId; }
 function startPingListener(){
   stopPingListener();
   startStageReminderListener();   // every staff login gets overdue-step pop-ups
+  aiStart();                      // floating AI assistant + its reminders (every login but Validation)
   if(!pingCanListen()) return;
   updatePingPermBar();
   pollPings();
@@ -12023,6 +12342,7 @@ function startPingListener(){
 function stopPingListener(){
   clearInterval(pingListenTimer); pingListenTimer = null;
   stopStageReminderListener();
+  try{ aiStop(); }catch(e){}
   stopPingTitleFlash();
   const bar = $("pingPermBar"); if(bar) bar.classList.remove("show");
 }
@@ -12993,5 +13313,40 @@ window.addEventListener('focus', pollActiveChatNow);
 window.addEventListener('pageshow', pollActiveChatNow);
 
 </script>
+
+<!-- ============ FLOATING AI ASSISTANT (every dashboard) ============ -->
+<div id="aiFabWrap" class="ai-hidden">
+  <div id="aiHint" class="ai-hint" onclick="aiOpen()"><span class="wave">&#128075;</span> Ask AI about your dashboard</div>
+  <button id="aiFab" type="button" aria-label="Chat with the AI assistant" title="Chat with AI" onclick="aiToggle()">
+    <span class="ai-fab-ring"></span><span class="ai-fab-ring r2"></span>
+    <span class="ai-fab-in">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h8A2.5 2.5 0 0 1 17 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.6 2.7c-.5.4-1.4.1-1.4-.6V5.5Z" fill="#E7F6F5"/>
+        <path class="spark" d="M18.5 12.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9Z" fill="#E4C580"/>
+        <circle cx="7.8" cy="8" r="1" fill="#0E7490"/><circle cx="10.5" cy="8" r="1" fill="#0E7490"/><circle cx="13.2" cy="8" r="1" fill="#0E7490"/>
+      </svg>
+    </span>
+    <span class="ai-badge" id="aiBadge"></span>
+  </button>
+</div>
+<section id="aiPanel" role="dialog" aria-label="iMatiz AI assistant" aria-hidden="true">
+  <div class="ai-head">
+    <div class="ai-orb"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l1.8 4.6L18.5 9.5l-4.7 1.9L12 16l-1.8-4.6L5.5 9.5l4.7-1.9L12 3Z" fill="#E4C580"/><path d="M18 15l.7 1.7 1.8.8-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.8L18 15Z" fill="#9FE7DD"/></svg></div>
+    <div class="ai-head-t"><b>iMatiz AI</b><small><i></i><span id="aiSub">Knows your dashboard</span></small></div>
+    <button class="ai-hbtn" type="button" title="My reminders" onclick="aiAsk('My reminders')">&#9200;</button>
+    <button class="ai-hbtn" type="button" title="Clear chat" onclick="aiClear()">&#8635;</button>
+    <button class="ai-hbtn" type="button" title="Close" onclick="aiClose()">&#10005;</button>
+  </div>
+  <div id="aiLog" aria-live="polite"></div>
+  <div class="ai-foot">
+    <form id="aiForm" onsubmit="event.preventDefault();aiSend()">
+      <button class="ai-remb" type="button" title="Set a reminder" onclick="aiShowReminderForm({})">&#9200;</button>
+      <input id="aiInput" maxlength="500" autocomplete="off" placeholder="Ask about your clients, demos, tasks...">
+      <button class="ai-send" id="aiSendBtn" type="submit" title="Send"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 16-2.5-6.5L4 12Z" fill="currentColor"/></svg></button>
+    </form>
+    <small>Answers only about this PM tool &amp; your own dashboard</small>
+  </div>
+</section>
+<div id="aiRemStack" aria-live="assertive"></div>
 </body>
 </html>
