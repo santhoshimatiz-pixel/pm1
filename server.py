@@ -27,6 +27,8 @@ from urllib.parse import urlparse, parse_qs
 import urllib.request
 from urllib.request import Request
 
+import help_assistant   # Help -> "Ask AI" chat (answers only questions about this PM tool)
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -634,6 +636,7 @@ CLIENT_ALLOWED_ACTIONS = {
     "get_thread", "send_message", "chat_typing",
     "get_client_document",
     "add_query",
+    "help_chat",
     "client_approve_proposal", "client_approve_paper", "client_approve_implementation",
     "client_request_correction_proposal", "client_request_correction_paper",
     "client_request_correction_implementation",
@@ -676,6 +679,9 @@ ACTION_ROLES = {
     "delete_calendar_event": _R_ALL_STAFF,
     "request_hold": _R_ALL_STAFF,
     "request_deadline_extension": _R_ALL_STAFF,
+    # Help -> Ask AI chat. Everyone signed in (staff + client portal); the Validation
+    # Login has no Help menu and stays excluded.
+    "help_chat": _R_ALL_STAFF,
 
     # ---- marketing / intake ----
     "add_client": _R_MARKETING,
@@ -4013,6 +4019,30 @@ def handle_action(action, d, ip=""):
                         (hash_password(new_password), c["id"]))
             con.commit()
             return {"ok": True}
+
+        # =============================================================
+        # HELP -> ASK AI  (help_assistant.py). Answers only questions about
+        # this PM tool; the role used to pick answers comes from the server-side
+        # session, never from the request body.
+        # =============================================================
+        if action == "help_chat":
+            sess = get_principal()
+            role_key = help_assistant.role_key_for(sess)
+            if sess["kind"] in ("employee", "validator"):
+                name = sess["emp_name"] or ""
+            elif sess["kind"] == "client":
+                r = con.execute("SELECT name FROM clients WHERE id=?", (sess["client_id"],)).fetchone()
+                name = (r["name"] if r else "") or ""
+            else:
+                name = ""          # shared department login - no personal name
+            if (d.get("mode") or "") == "welcome":
+                return help_assistant.welcome(role_key, name)
+            if _rate_limited(ip, "help_chat", limit=30, window_seconds=300):
+                raise ApiError("You're asking very quickly - please wait a minute and try again.", 429)
+            history = d.get("history") if isinstance(d.get("history"), list) else []
+            history = [h for h in history[-6:] if isinstance(h, dict)]
+            return help_assistant.answer(d.get("question") or "", role_key, name, history,
+                                         logger=lambda m: print(m, file=sys.stderr))
 
         if action == "bootstrap":
             events = [dict(r) for r in con.execute(

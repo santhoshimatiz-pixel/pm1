@@ -1,0 +1,95 @@
+============================================================
+ HELP -> "ASK AI" CHAT (every dashboard)
+============================================================
+
+WHAT IT DOES
+------------------------------------------------------------
+Sidebar -> Help now opens with two tabs:
+    Ask AI  - a chat assistant for this PM tool (opens first)
+    Guide   - the existing "How iMatiz Technology works" page
+              with the seven phases and the tips for your role
+              (unchanged)
+
+Works for every login that has the Help button: Super Admin,
+MD / Admin, Telecaller (shared + individual), Marketing TL,
+Marketing Manager, Accounts, Technical Manager, Technical TL,
+Programmers, Paper Writers, Coordinators, Journal Manager / TL,
+Journal team and the Client Status Portal.
+(The Validation Login has no Help button, same as before. On the
+login page "Need help?" shows only the Guide - sign in to chat.)
+
+ONLY QUESTIONS ABOUT THIS WEB APP
+------------------------------------------------------------
+- Questions about the PM tool (where is X, how do I do Y, what
+  happens next, why is this button disabled ...) get an answer
+  written for the person's OWN dashboard / role.
+- Anything else - general knowledge, maths, coding, writing an
+  essay / abstract / email, jokes, news, weather, "ignore your
+  rules" ... - gets only this fixed reply:
+     "Sorry, I can only help with questions about the iMatiz PM
+      tool - your dashboard, clients, the project pipeline,
+      tasks, payments, logins and settings. Please ask me
+      something about using this web app."
+- Clients only ever get client-portal answers; programmers /
+  writers never get payment amounts (same rule as the screens).
+- The role is taken from the server-side login, not from the
+  browser, so nobody can ask "as" another role.
+
+CUSTOMISED MESSAGES
+------------------------------------------------------------
+All texts the assistant uses live in help_assistant.py:
+  OFF_TOPIC_REPLY, NO_MATCH_REPLY, GREETING_REPLY, THANKS_REPLY,
+  WELCOME_TEXT, ASSISTANT_NAME  - the fixed messages
+  KNOWLEDGE                     - ~60 customised answers, each
+                                  tagged with the roles that may
+                                  see it (+ keywords to match)
+Edit a text there and restart the server - nothing else to change.
+The 4 suggested-question chips under the welcome message come
+from the first answers written for that role.
+
+TWO MODES
+------------------------------------------------------------
+1. Without an API key (default, free)
+   Questions are matched against the customised answers in
+   KNOWLEDGE. About the tool but not covered -> "I couldn't find
+   that in the PM tool guide ..." Not about the tool -> the fixed
+   off-topic reply.
+
+2. With an API key (optional, more natural answers)
+   Render -> your web service -> Environment -> Add:
+       HELP_AI_API_KEY   = your OpenAI key (sk-...)
+   Optional:
+       HELP_AI_MODEL     default gpt-4o-mini
+       HELP_AI_BASE_URL  default https://api.openai.com/v1
+   DeepSeek instead of OpenAI:
+       HELP_AI_API_KEY   = your DeepSeek key
+       HELP_AI_BASE_URL  = https://api.deepseek.com
+       HELP_AI_MODEL     = deepseek-chat
+   (Setting only DEEPSEEK_API_KEY also works - it picks DeepSeek
+    automatically.)
+   HELP_AI_ENABLED=false switches back to mode 1 without removing
+   the key.
+   The model is given ONLY the answers this role may see and must
+   reply {"on_topic": true/false, "answer": ...}. If it says
+   off-topic, the user gets OUR fixed off-topic text. If the AI
+   call fails (no credit, timeout, network), the built-in answers
+   are used automatically - the chat never breaks.
+   The key stays on the server; it is never sent to the browser.
+
+LIMITS
+------------------------------------------------------------
+- Questions up to 500 characters; the last 6 messages are sent
+  as context so follow-ups like "and after that?" work (AI mode).
+- 30 questions per 5 minutes per IP address.
+- Nothing is stored in the database. The chat stays while the
+  Help window is closed/reopened and is cleared on logout or when
+  someone else signs in. "Clear chat" empties it.
+
+FILES
+------------------------------------------------------------
+New:      help_assistant.py, HELP_AI_UPDATE.txt
+Changed:  server.py   - new "help_chat" action (all staff + client
+                        portal in the authorization matrix)
+          index.html  - Help modal: Ask AI / Guide tabs, chat UI
+          render.yaml - optional HELP_AI_API_KEY entry
+No new Python packages, no database changes.

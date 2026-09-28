@@ -382,6 +382,27 @@ tbody tr:last-child td{border-bottom:none}
 .am-section-head{font-family:var(--disp);font-size:13px;font-weight:600;color:var(--gold-deep);letter-spacing:.01em;margin:20px 0 10px;padding-top:14px;border-top:1px solid var(--line)}
 .am-section-head:first-of-type{margin-top:14px;padding-top:0;border-top:none}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+/* ---------- Help: Guide / Ask AI tabs + chat ---------- */
+.help-tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:4px;margin:0 0 16px}
+.help-tabs button{flex:1;border:0;background:transparent;color:var(--muted);font:600 13px var(--body);padding:9px 10px;border-radius:9px;cursor:pointer}
+.help-tabs button.act{background:var(--card);color:var(--purple);box-shadow:var(--shadow-sm)}
+.hc-log{height:340px;max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--card2);border:1px solid var(--line);border-radius:14px}
+.hc-msg{max-width:88%;padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.hc-msg.bot{align-self:flex-start;background:var(--card);border:1px solid var(--line);color:var(--text);border-bottom-left-radius:4px}
+.hc-msg.me{align-self:flex-end;background:var(--purple);color:#fff;border-bottom-right-radius:4px}
+.hc-msg.off{border-color:rgba(184,134,11,.45);background:rgba(184,134,11,.08)}
+.hc-msg.err{border-color:rgba(220,38,38,.35);color:var(--bad)}
+.hc-who{display:block;font-size:11px;font-weight:700;color:var(--purple);margin-bottom:3px;letter-spacing:.02em}
+.hc-typing{display:inline-flex;gap:4px;align-items:center}
+.hc-typing i{width:6px;height:6px;border-radius:50%;background:var(--faint);animation:hcDot 1s infinite ease-in-out}
+.hc-typing i:nth-child(2){animation-delay:.15s}.hc-typing i:nth-child(3){animation-delay:.3s}
+@keyframes hcDot{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.hc-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.hc-chip{border:1px solid var(--line-strong);background:var(--card);color:var(--text);font:500 12px var(--body);padding:6px 10px;border-radius:999px;cursor:pointer;text-align:left}
+.hc-chip:hover{border-color:var(--purple);color:var(--purple)}
+.hc-form{display:flex;gap:8px;margin-top:12px}
+.hc-form input{flex:1;min-width:0}
+.hc-note{font-size:11.5px;color:var(--faint);margin-top:8px}
 .mailbox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:15px;margin-bottom:12px}
 .mailbox .mrow{font-size:13px;margin-bottom:6px;color:var(--muted)}
 .mailbox .mrow b{color:var(--text);font-family:var(--mono)}
@@ -11549,14 +11570,12 @@ const HELP_TOPICS_EMPLOYEE = {
   TELECALLER: ["Add clients and log calls the same way the shared Telecaller login does &mdash; your name is recorded on everything you do."],
   JOURNAL_EMPLOYEE: ["Check your dashboard for whatever's currently assigned to you &mdash; a coordinator role also lets you assign work to your own team."],
 };
-function openHelp(){
+function helpGuideHtml(){
   const roleKey = role==='employee' ? (empRole==='JOURNAL_EMPLOYEE'?'JOURNAL_EMPLOYEE':empRole) : role;
   const tips = role==='employee' ? (HELP_TOPICS_EMPLOYEE[roleKey]||[]) : (HELP_TOPICS[roleKey]||[]);
   const phaseRows = PHASES.map((p,i)=>`<div class="hist-item"><b>${i+1}. ${p.label}</b><p style="margin-top:2px">${(PHASE_INFO[p.key]||{}).desc||""}</p></div>`).join("");
   const tipsHtml = tips.length ? `<div class="sec" style="margin-top:14px"><h4>Tips for your role</h4>${tips.map(t=>`<div class="hist-item">${t}</div>`).join("")}</div>` : "";
-  openModal(`
-    <h3>How iMatiz Technology works</h3>
-    <p class="msub">One workspace, one client record, from first call to a completed, journal-submitted paper.</p>
+  return `
     <p style="font-size:13.5px;color:var(--muted);line-height:1.6;margin-bottom:14px">
       Every client moves through the same seven phases below, though some services skip the technical-implementation
       phase entirely. Each dashboard only shows the work relevant to your role. The progress bar shown on any client
@@ -11565,7 +11584,104 @@ function openHelp(){
     </p>
     <div class="sec"><h4>The seven phases</h4>${phaseRows}</div>
     ${tipsHtml}
-    <div class="modal-actions"><button class="btn" onclick="closeModal()">Got it</button></div>`);
+    ${role ? "" : `<p class="hc-note">Sign in to chat with the AI help assistant.</p>`}`;
+}
+
+/* ================= HELP -> ASK AI =================
+   A chat that answers ONLY questions about this PM tool (server: help_chat action,
+   help_assistant.py). Off-topic questions get a fixed "I can only help with the
+   PM tool" reply from the server. The conversation is kept while the Help window is
+   closed and reopened, and cleared when a different person signs in. */
+let helpTab = "ai";
+let helpChat = {owner:"", log:[], welcome:null, busy:false};
+function helpChatOwner(){ return [role||"", empId||"", clientSelf||""].join("|"); }
+function openHelp(tab){
+  if(tab) helpTab = tab;
+  if(!role) helpTab = "guide";                         // login page: guide only
+  if(helpChat.owner !== helpChatOwner()) helpChat = {owner:helpChatOwner(), log:[], welcome:null, busy:false};
+  const tabs = role ? `
+    <div class="help-tabs" role="tablist">
+      <button type="button" class="${helpTab==='ai'?'act':''}" onclick="openHelp('ai')">&#10024; Ask AI</button>
+      <button type="button" class="${helpTab==='guide'?'act':''}" onclick="openHelp('guide')">&#128214; Guide</button>
+    </div>` : "";
+  const body = helpTab==='ai' ? `
+      <div id="hcLog" class="hc-log" aria-live="polite"></div>
+      <form class="hc-form" onsubmit="event.preventDefault();helpChatSend()">
+        <input id="hcInput" maxlength="500" autocomplete="off" placeholder="Ask how to do something in the PM tool...">
+        <button class="btn" id="hcSendBtn" type="submit">Send</button>
+      </form>
+      <p class="hc-note">Answers only questions about using this PM tool. <a href="javascript:void(0)" style="color:var(--muted)" onclick="helpChatClear()">Clear chat</a></p>`
+    : helpGuideHtml();
+  openModal(`
+    <h3>${helpTab==='ai' ? "Help &mdash; Ask AI" : "How iMatiz Technology works"}</h3>
+    <p class="msub">${helpTab==='ai' ? "Ask anything about your dashboard, clients, tasks, payments or settings." : "One workspace, one client record, from first call to a completed, journal-submitted paper."}</p>
+    ${tabs}
+    ${body}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+  if(helpTab==='ai'){
+    renderHelpChat();
+    if(!helpChat.welcome) helpChatLoadWelcome();
+    setTimeout(()=>{ const i=$("hcInput"); if(i) i.focus(); }, 50);
+  }
+}
+async function helpChatLoadWelcome(){
+  const owner = helpChat.owner;
+  try{
+    const out = await api("help_chat", {mode:"welcome"});
+    if(helpChat.owner !== owner) return;
+    helpChat.welcome = out;
+  }catch(e){
+    helpChat.welcome = {welcome:"Hi! Ask me anything about using this PM tool.", suggestions:[]};
+  }
+  renderHelpChat();
+}
+function helpChatBubble(m){
+  const cls = m.role==='user' ? 'me' : ('bot' + (m.offTopic?' off':'') + (m.error?' err':''));
+  const who = m.role==='user' ? '' : `<span class="hc-who">&#10024; ${esc((helpChat.welcome&&helpChat.welcome.assistant)||"Help Assistant")}</span>`;
+  const chips = (m.related && m.related.length)
+    ? `<div class="hc-chips" style="margin-top:8px">${m.related.map(r=>`<button type="button" class="hc-chip" onclick="helpChatAsk(${jsq(r)})">${esc(r)}</button>`).join("")}</div>` : "";
+  return `<div class="hc-msg ${cls}">${who}${esc(m.text)}${chips}</div>`;
+}
+function renderHelpChat(){
+  const box = $("hcLog"); if(!box) return;
+  const w = helpChat.welcome;
+  let html = "";
+  if(w){
+    html += helpChatBubble({role:"assistant", text:w.welcome});
+    if(!helpChat.log.length && (w.suggestions||[]).length){
+      html += `<div class="hc-chips">${w.suggestions.map(q=>`<button type="button" class="hc-chip" onclick="helpChatAsk(${jsq(q)})">${esc(q)}</button>`).join("")}</div>`;
+    }
+  }
+  html += helpChat.log.map(helpChatBubble).join("");
+  if(helpChat.busy || !w) html += `<div class="hc-msg bot"><span class="hc-typing"><i></i><i></i><i></i></span></div>`;
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+  const btn = $("hcSendBtn"); if(btn) btn.disabled = helpChat.busy;
+}
+function helpChatAsk(q){ const i=$("hcInput"); if(i) i.value = q; helpChatSend(); }
+function helpChatClear(){ helpChat.log = []; renderHelpChat(); const i=$("hcInput"); if(i) i.focus(); }
+async function helpChatSend(){
+  const input = $("hcInput");
+  const q = (input ? input.value : "").trim();
+  if(!q || helpChat.busy) return;
+  if(input) input.value = "";
+  const owner = helpChat.owner;
+  const history = helpChat.log.filter(m=>!m.error).slice(-6).map(m=>({role:m.role, text:m.text}));
+  helpChat.log.push({role:"user", text:q});
+  helpChat.busy = true; renderHelpChat();
+  let reply;
+  try{
+    const out = await api("help_chat", {mode:"ask", question:q, history});
+    reply = {role:"assistant", text:out.answer||"", offTopic:out.onTopic===false, related:out.related||[]};
+  }catch(e){
+    reply = {role:"assistant", text:e.message || "Something went wrong - please try again.", error:true};
+  }
+  if(helpChat.owner !== owner) return;                  // signed out / switched user meanwhile
+  helpChat.busy = false;
+  helpChat.log.push(reply);
+  if(helpChat.log.length > 60) helpChat.log = helpChat.log.slice(-60);
+  renderHelpChat();
+  const i=$("hcInput"); if(i) i.focus();
 }
 function openSettings(){
   const emailSection = role==="client" ? "" : `
