@@ -454,6 +454,7 @@ tbody tr:last-child td{border-bottom:none}
 .ai-bub{background:var(--card);border:1px solid var(--line);padding:10px 13px;border-radius:16px 16px 16px 4px;white-space:pre-wrap;word-break:break-word;box-shadow:var(--shadow-sm)}
 .ai-msg.off .ai-bub{border-color:rgba(184,134,11,.45);background:rgba(184,134,11,.07)}
 .ai-msg.err .ai-bub{border-color:rgba(220,38,38,.35);color:var(--bad)}
+.ai-und{font-size:11.5px;color:var(--muted);font-style:italic;margin:0 0 4px 4px}
 .ai-card{margin-top:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-sm)}
 .ai-card-h{font:700 11px var(--body);letter-spacing:.05em;text-transform:uppercase;color:var(--purple);padding:9px 12px 7px;border-bottom:1px solid var(--line);background:var(--card2)}
 .ai-it{padding:10px 12px;border-bottom:1px dashed var(--line)}
@@ -509,6 +510,7 @@ tbody tr:last-child td{border-bottom:none}
 @media (max-width:600px){.tone-list{grid-template-columns:1fr}}
 /* due-reminder pop-ups (stack above the button) */
 #aiRemStack{position:fixed;right:22px;bottom:96px;z-index:130;display:flex;flex-direction:column;gap:10px;width:min(360px,calc(100vw - 32px));pointer-events:none}
+#aiPanel.open ~ #aiRemStack{right:436px}          /* chat open: show reminders beside it, never over it */
 .ai-rem{pointer-events:auto;background:var(--card);color:var(--text);border:1px solid var(--line-strong);border-left:5px solid var(--gold);border-radius:16px;
   padding:13px 14px;box-shadow:0 24px 50px -18px rgba(8,23,27,.55);animation:aiRemIn .45s cubic-bezier(.2,1.3,.4,1)}
 @keyframes aiRemIn{from{opacity:0;transform:translateX(40px) scale(.95)}to{opacity:1;transform:none}}
@@ -524,6 +526,7 @@ tbody tr:last-child td{border-bottom:none}
   #aiPanel{right:0;left:0;bottom:0;width:100%;max-width:none;height:100%;max-height:none;border-radius:0}
   #aiFabWrap.open{display:none}
   #aiRemStack{right:14px;bottom:86px}
+  #aiPanel.open ~ #aiRemStack{left:14px;right:14px;top:12px;bottom:auto;width:auto}
   .ai-hint{display:none}
 }
 @media (prefers-reduced-motion:reduce){
@@ -11859,7 +11862,8 @@ function aiMsgHtml(m, i){
   (m.related||[]).forEach(r=>chips.push(`<button type="button" class="ai-chip" onclick="aiAsk(${jsq(r)})">${esc(r)}</button>`));
   if(chips.length) extra += `<div class="ai-chips" style="margin-top:8px">${chips.join("")}</div>`;
   if(m.form && !m.form.done) extra += aiReminderFormHtml(m.form, i);
-  return `<div class="ai-msg ${cls}"><div class="ai-bub">${esc(m.text)}</div>${extra}</div>`;
+  const und = m.understood ? `<div class="ai-und">&#10003; Understood as: &ldquo;${esc(m.understood)}&rdquo;</div>` : "";
+  return `<div class="ai-msg ${cls}">${und}<div class="ai-bub">${esc(m.text)}</div>${extra}</div>`;
 }
 function aiRender(){
   const box = $("aiLog"); if(!box) return;
@@ -11892,7 +11896,7 @@ async function aiSend(){
   try{
     const out = await api("help_chat", {mode:"ask", question:q, history});
     reply = {role:"assistant", text:out.answer||"", offTopic:out.onTopic===false, blocks:out.blocks||[],
-             actions:out.actions||[], related:out.related||[], form:out.reminderForm||null};
+             actions:out.actions||[], related:out.related||[], form:out.reminderForm||null, understood:out.understood||""};
     if(out.reminderSaved) toast("Reminder saved");
   }catch(e){ reply = {role:"assistant", text:e.message || "Something went wrong - please try again.", error:true}; }
   if(aiChat.owner !== owner) return;

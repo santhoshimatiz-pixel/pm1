@@ -1094,6 +1094,186 @@ def _reminder_create(ctx, question, q_norm):
 
 
 # =====================================================================
+# "Tell me about this dashboard" - what each role's dashboard is for,
+# what is on it, plus a live snapshot of the person's own numbers.
+# =====================================================================
+_TECH_SECTIONS = ["Dashboard - Assigned Work / Completed Work, Call and Ping team buttons, New work to assign, "
+                  "Delivery, Work Updates, Upcoming demos",
+                  "Clients, Projects (Task Board for every project), Journals",
+                  "Work Log - Tasks: Assign Work, Work Updates (approve / rework / reassign), Work Validation",
+                  "Validation - AI Check / Plagiarism Check / Test Paper folders"]
+DASHBOARD_INFO = {
+    "super_admin": ("Organisation-wide view of the full pipeline - every client, team and payment.",
+                    ["Dashboard - Registrations, Collection, Tasks, Journals, Task assignment, Pending client queries, "
+                     "Calendar, Upcoming demos, Team & Access",
+                     "Clients, Projects, Journals, Work Log, Team",
+                     "Settings - email, password, stage reminders, reminder tone, Database Management"],
+                    ["Enable / disable any login and change passwords (Team & Access)",
+                     "Back up, restore or clear data", "Delete a client", "See every team's work and payments"]),
+    "telecaller": ("Add leads, log calls, record payments and send leads to the Marketing TL.",
+                   ["Dashboard", "Registered Clients", "Technical Team (clients already with the technical team)",
+                    "Accounts Pending, 2nd Payment Pending, 3rd Payment Pending", "Client Messages",
+                    "Add Client (single or bulk import)", "Rejected Clients"],
+                   ["Add a client with the registration payment", "Log a call (needed before sending on)",
+                    "Send to Marketing TL", "Send the client a portal invite"]),
+    "marketing_tl": ("First verification of new leads before they go to the Marketing Manager.",
+                     ["Awaiting TL review", "Employees board", "Team tab (your telecallers)", "+ Add client"],
+                     ["Verify & send to Manager", "Add clients", "Add telecallers", "Schedule demos"]),
+    "marketing_manager": ("Final marketing approval - approve leads and send them to Accounts.",
+                          ["Dashboard", "Clients, Projects, Journals", "Work Log", "Team (your telecallers)",
+                           "+ Add client"],
+                          ["Approve & send to Accounts", "Add clients", "Add telecallers", "Schedule demos"]),
+    "account_team": ("Confirm payments and send approved clients to the Technical Team.",
+                     ["Accounts review queue", "Client drawer - Payments / Installments / service items"],
+                     ["Mark payments paid (with a proof image)", "Approve & send to Technical Team",
+                      "Approve the SCI Writing Fee", "Add installments and itemised breakdowns"]),
+    "technical_manager": ("Run the technical team - assign proposal, code and paper-writing work, approve it "
+                          "and deliver it to clients.", _TECH_SECTIONS + ["Team - add Programmers and Paper Writers"],
+                          ["Assign / reassign work with start date and deadline", "Approve or send back submitted work",
+                           "Deliver to client or continue without client approval", "Send papers to the Journal Team",
+                           "Give validation access, call or ping your team"]),
+    "technical_tl": ("Assign and review the technical team's work (same as the Technical Manager, without the Team page).",
+                     _TECH_SECTIONS,
+                     ["Assign / reassign work", "Approve or send back submitted work", "Deliver to client",
+                      "Call or ping your team"]),
+    "content_coordinator": ("Review paper drafts before they go to the Technical TL / Manager.",
+                            ["Review queue - work sent to you"], ["Approve", "Send back for correction"]),
+    "journal_manager": ("Take finished papers through proofreading, formatting and journal submission.",
+                        ["Dashboard - Publications, Pending Actions, Journals cards", "Clients, Projects, Journals",
+                         "Work Log", "Team - proofreaders, formatters, submission staff"],
+                        ["Assign a Proofreading Coordinator", "Assign a Formatting Coordinator",
+                         "Track journal status until Accepted / Published"]),
+    "journal_tl": ("An overview of every client currently with the Journal Team - visibility only, no actions.",
+                   ["Dashboard", "Clients, Projects, Journals"], ["Watch progress of journal work"]),
+    "PROGRAMMER": ("Your own implementation work - proposals to verify, code to build, demos to give.",
+                   ["Dashboard - Work Validation Request, Implementation Holds, Pending Client Queries, Most Prior Task "
+                    "(click a card to jump to it), Task Status, Demo Pending, calendar",
+                    "My work - My assigned tasks, My client queries", "Validation - send papers for AI / plagiarism check"],
+                   ["Submit implementation to the Technical TL / Manager", "Mark demo given / postpone a demo",
+                    "Hold work or request a deadline extension", "Answer client queries"]),
+    "PAPER_WRITER": ("Your own writing work - proposals and papers assigned to you and their reviews.",
+                     ["Dashboard - your stat cards, Assigned to me, calendar", "My work - My assigned tasks, My client queries",
+                      "Validation - send papers for AI / plagiarism check"],
+                     ["Mark writing completed", "Send to Coordinator / Validation / Technical TL / Manager",
+                      "Fix corrections and resubmit", "Mark paper demo given"]),
+    "TELECALLER": ("Your own leads - add clients, log calls and send them to the Marketing TL (your name is on everything you do).",
+                   ["Dashboard", "Registered Clients", "Accounts / 2nd / 3rd Payment Pending", "Client Messages",
+                    "Add Client", "Rejected Clients"],
+                   ["Add a client", "Log a call", "Send to Marketing TL"]),
+    "JOURNAL_EMPLOYEE": ("Your own journal work - proofreading, formatting or submission assigned to you.",
+                         ["Dashboard - what's currently assigned to you"],
+                         ["Finish your assigned step", "Coordinators: assign work to your team"]),
+    "client": ("Track your own project - progress, approvals, payments and questions.",
+               ["Overview", "Project Status (tap any step of the progress bar)", "Payments", "Calendar", "My Queries"],
+               ["Approve or ask for corrections when work is delivered", "See payment due",
+                "Ask the team a question (+ New Query)"]),
+}
+DASHBOARD_INFO["md_admin"] = DASHBOARD_INFO["super_admin"]
+
+_ABOUT_TOOL = ("iMatiz PM tool is iMatiz Technology's one workspace for every client project - from the first call "
+               "to a completed, journal-submitted paper (Marketing -> Accounts -> Technical -> Journal).")
+
+
+def _dashboard_overview(ctx, about_tool=False):
+    purpose, sections, actions = DASHBOARD_INFO.get(ctx.role_key) or (
+        "Your part of the iMatiz pipeline.", [], [])
+    snap = []
+    if ctx.is_client:
+        fams = len({c.get("displayId") or c["id"] for c in ctx.clients})
+        snap.append("Your projects: %d" % len(ctx.clients))
+        for c in sorted(ctx.clients, key=lambda x: x.get("createdAt") or ""):
+            snap.append("%s - %s" % (_svc_label(ctx, c), STAGE_LABEL.get(c.get("stage"), c.get("stage") or "")))
+    else:
+        fams = len({c.get("displayId") or c["id"] for c in ctx.clients})
+        active = [c for c in ctx.clients if _active(c)]
+        snap.append("%s: %d work%s for %d client%s (%d active)" % (
+            "Clients you work on" if ctx.is_employee else "Clients in your view", len(ctx.clients),
+            "" if len(ctx.clients) == 1 else "s", fams, "" if fams == 1 else "s", len(active)))
+        if ctx.waiting:
+            snap.append("Waiting on you now: %d" % len(ctx.waiting))
+    demos_today = [c for c in ctx.clients if c.get("demoScheduleStatus") == "SCHEDULED"
+                   and _d(c.get("demoScheduledDate")) == ctx.today
+                   and (not ctx.is_employee or c.get("demoScheduledEmp") == ctx.name)]
+    if demos_today:
+        snap.append("Demos today: %d" % len(demos_today))
+    if not ctx.is_client:
+        overdue = [r for r in _deadline_rows(ctx) if r[0] < ctx.today]
+        if overdue:
+            snap.append("Overdue: %d" % len(overdue))
+        open_tasks = [t for t in ctx.tasks if (t.get("status") or "") in TASK_OPEN
+                      and (not ctx.is_employee or ctx.name in _names(t.get("assigned_to")))]
+        if open_tasks:
+            snap.append("Open tasks: %d" % len(open_tasks))
+        q_open = [x for x in ctx.queries if (x.get("status") or "OPEN") in QUERY_OPEN
+                  and (not ctx.is_employee or (x.get("assigned_to") or "").strip() == ctx.name)]
+        if q_open:
+            snap.append("Open client queries: %d" % len(q_open))
+        if ctx.money:
+            pend = _pending_payments(ctx)
+            if pend and pend.get("blocks"):
+                snap.append("Clients with pending payments: %d" % len(pend["blocks"][0]["items"]))
+        if ctx.team_view and ctx.team:
+            snap.append("Team members: %d" % len(ctx.team))
+    if ctx.list_reminders:
+        rems = ctx.list_reminders()
+        if rems:
+            snap.append("Upcoming reminders: %d" % len(rems))
+    text = ("%s\n\n" % _ABOUT_TOOL if about_tool else "") + \
+        "This is your %s dashboard - %s" % (ctx.role_label, purpose[0].lower() + purpose[1:])
+    blocks = [{"title": "Right now", "items": [{"title": ctx.role_label + " dashboard", "clientId": "",
+                                                 "lines": snap, "tags": []}]}]
+    if sections:
+        blocks.append({"title": "On your dashboard", "items": [{"title": "Sections", "clientId": "",
+                                                                  "lines": ["• " + x for x in sections], "tags": []}]})
+    if actions:
+        blocks.append({"title": "What you can do here", "items": [{"title": "Main actions", "clientId": "",
+                                                                     "lines": ["• " + x for x in actions], "tags": []}]})
+    if ctx.is_client:
+        chips = ["What is my project status?", "Is my payment done?", "Any demo scheduled?"]
+    elif ctx.is_employee:
+        chips = ["What's pending for me?", "Do I have any demo today?", "Any overdue work?"]
+    else:
+        chips = ["What's waiting on me?", "What's on today?", "Overdue work"]
+        if ctx.team_view:
+            chips.append("Team workload")
+    return _reply(text, blocks, [{"label": c, "ask": c} for c in chips])
+
+
+_OVERVIEW_PHRASES = (
+    "this dashboard", "my dashboard", "the dashboard", "about dashboard", "dashboard overview", "explain dashboard",
+    "explain my dashboard", "explain this dashboard", "dashboard details", "about this page", "this page", "this portal",
+    "my portal", "this screen", "about imatiz", "what is imatiz", "tell me about imatiz", "imatiz", "matiz",
+    "this tool", "this app", "this application", "this website", "this web", "this site", "this software",
+    "about the tool", "about this tool", "about this app", "pm tool", "what is this", "what can i do",
+    "what can you do", "what do you do", "how does this work", "how this works", "where do i start", "get started",
+    "getting started", "guide me", "overview", "features", "my role", "what is my role", "what do i do here",
+    "what i can do", "help me", "i am new", "im new", "new here", "dashboard", "report", "status report",
+    "daily report", "full report", "my report", "summary of my dashboard")
+
+
+_OVERVIEW_FILLER = {"tell", "about", "explain", "give", "show", "details", "detail", "describe", "info",
+                    "information", "overview", "please", "pls", "can", "you", "me", "us", "all", "everything",
+                    "here", "there", "whole", "full", "complete", "brief", "briefly", "short", "summary",
+                    "quick", "little", "bit", "more", "something", "anything", "know", "want", "like", "use",
+                    "using", "work", "works", "doe", "dashboard", "imatiz", "matiz", "tool", "app", "page",
+                    "portal", "website", "web", "site", "software", "application", "screen", "role", "new",
+                    "start", "started", "getting", "guide", "help", "feature", "features", "thing", "things",
+                    "report", "status", "daily", "my", "the", "of"}
+
+
+def _is_overview_question(q):
+    """True for general questions about iMatiz / this tool / my dashboard - not when the
+    question is really about something specific (a client, a demo, how to assign work ...)."""
+    if not _has(q, *_OVERVIEW_PHRASES):
+        return False
+    rest = q
+    for ph in sorted(_OVERVIEW_PHRASES, key=len, reverse=True):
+        rest = rest.replace(" " + ph + " ", " ")
+    left = [t for t in help_assistant._tokens(rest) if t not in _OVERVIEW_FILLER and not t.isdigit()]
+    return len(left) == 0
+
+
+# =====================================================================
 # Main entry
 # =====================================================================
 _HOWTO_RE = re.compile(r"^\s*(how\s+(do|can|to|should|does)|where\s+(do|can|is|are)|what\s+(does|is\s+the\s+use|is\s+meant)|"
@@ -1102,7 +1282,7 @@ _DATA_CUE = ("any", "my", "today", "tomorrow", "list", "show", "how many", "whic
              "this week", "i have", "do i have", "are there", "is there", "status of")
 
 
-def respond(question, ctx, history=None, logger=None):
+def _respond_inner(question, ctx, history=None, logger=None):
     question = re.sub(r"\s+", " ", str(question or "")).strip()[:500]
     q = _norm(question)
     if not question:
@@ -1123,6 +1303,10 @@ def respond(question, ctx, history=None, logger=None):
         if not _HOWTO_RE.match(question):
             return _reminder_create(ctx, question, q)
 
+    if _is_overview_question(q) and not find_clients(ctx, q, partial=False):
+        return _dashboard_overview(ctx, about_tool=_has(q, "imatiz", "matiz", "tool", "app", "application",
+                                                            "website", "web", "site", "software"))
+
     howto = bool(_HOWTO_RE.match(question)) and not any(_has(q, c) for c in _DATA_CUE)
     data = None if howto else route_rules(ctx, question, q)
     if data:
@@ -1140,6 +1324,12 @@ def respond(question, ctx, history=None, logger=None):
         # the help module does its own AI call / built-in answer for how-to questions
     out = help_assistant.answer(question, ctx.role_key, ctx.name, history, logger=logger) \
         if not help_assistant.ai_enabled() else _help_builtin(question, ctx)
+    if out.get("onTopic") and out.get("answer") == help_assistant.NO_MATCH_REPLY:
+        # about the tool but not in the guide: point to what this dashboard CAN answer
+        out = _reply("I'm not sure about that one. Here's what I can tell you on your %s dashboard - tap a "
+                     "question, or ask it in your own words." % ctx.role_label,
+                     actions=[{"label": c, "ask": c} for c in welcome(ctx)["suggestions"]] +
+                     [{"label": "About this dashboard", "ask": "Tell me about this dashboard"}])
     if out.get("onTopic") is False and not help_assistant.clearly_off_topic(question) \
             and len(question.split()) <= 4 and not _HOWTO_RE.match(question):
         # Probably a name that isn't on this person's dashboard.
@@ -1148,6 +1338,153 @@ def respond(question, ctx, history=None, logger=None):
             if ctx.is_employee else "Type a client's name or ID, or ask about demos, deadlines, payments or reminders."))
     out.setdefault("blocks", [])
     out.setdefault("actions", [])
+    return out
+
+
+# =====================================================================
+# UNDERSTANDING FREE-TYPED QUESTIONS: spelling mistakes + other words
+# ---------------------------------------------------------------------
+# Before a question is answered, every word that isn't known is compared
+# with the words this assistant understands (its own guide, the pipeline,
+# plus the names of the clients / team members this login can see). A word
+# one or two letters off ("demmo", "todya", "pendng paymnts", "remaind",
+# "clint", "nandini") is corrected; common everyday words are never touched.
+# Other ways of saying the same thing ("presentation", "money", "jobs") are
+# mapped to the words the rules use. The reply shows "Understood as: ..."
+# when something was corrected.
+# =====================================================================
+_INTENT_WORDS = """
+any demo demos today tomorrow yesterday week month pending payment payments paid unpaid dues due balance
+overdue late deadline deadlines schedule scheduled agenda reminder reminders remind alarm notify alert
+client clients work works task tasks team workload busy free query queries hold summary overview count
+collection collected revenue registrations registered new approve approval approved waiting status stage
+project projects dashboard page portal details detail show tell list open help imatiz tool app website
+proposal implementation paper writing writer programmer coordinator validation plagiarism journal journals
+proofreading formatting submission accounts marketing telecaller manager technical admin calendar event
+events meeting call ping message messages settings password login logout captcha tone sound delivery deliver
+assign assigned reassign rework correction corrections submit submitted completed complete finished pipeline
+morning afternoon evening night noon minutes minute hours hour before after next this last every
+monday tuesday wednesday thursday friday saturday sunday january february march april june july august
+september october november december invoice fee fees installment installments amount money payment
+""".split()
+_COMMON_WORDS = set("""
+a an the i me my mine we our us you your he she his her they them their it its is are was were be been being
+am do does did doing done have has had having get got give gave given go goes going went come came coming
+make made take took want wants need needs know knows think see saw seen look looking find found show showed
+tell told say said ask asked can could will would shall should may might must let lets please pls ok okay
+yes no not and or but if then than so because what which who whom whose when where why how all any some
+each every both few more most other such only own same too very just also still even again ever never now
+here there about above after again against below between into through during before under over up down in
+out on off at by for from of to with without within upon via per like as much many lot lots thing things
+someone something anything everything nothing one two three four five six seven eight nine ten first second
+third last next day days time times year years good bad great nice fine sure right wrong new old big small
+long short high low early today tonight hello hi hey thanks thank sorry name names number people person
+check update updates send sent start started stop end ended keep kept put set call called use used work
+working worked still already yet soon later please kindly want wanna gonna tell me about their them this
+that these those its it's im i'm dont don't cant can't wont won't isnt isn't whats what's hows how's
+moon sun weather joke jokes story poem song movie cricket football news price stock recipe capital country
+""".split())
+_SYNONYMS = {
+    "presentation": "demo", "presentations": "demo", "demonstration": "demo", "walkthrough": "demo",
+    "money": "payment", "cash": "payment", "payable": "payment", "receivable": "payment", "remittance": "payment",
+    "jobs": "tasks", "job": "task", "todos": "tasks", "assignments": "tasks",
+    "delayed": "overdue", "delay": "overdue", "crossed": "overdue", "missed": "overdue",
+    "todays": "today", "2day": "today", "tday": "today", "tmr": "tomorrow", "tmrw": "tomorrow", "2moro": "tomorrow",
+    "tomo": "tomorrow", "tommorow": "tomorrow", "tomorow": "tomorrow", "tommorrow": "tomorrow",
+    "remainder": "reminder", "remainders": "reminders", "remaind": "remind", "reminde": "remind",
+    "customer": "client", "customers": "clients", "student": "client", "students": "clients",
+    "staff": "team", "employees": "team", "employee": "team", "colleagues": "team",
+    "dues": "dues", "pymt": "payment", "pmt": "payment", "amt": "amount", "dshbrd": "dashboard", "dash": "dashboard",
+    "wat": "what", "wht": "what", "hw": "how", "abt": "about", "plz": "please", "u": "you", "ur": "your",
+    "shw": "show", "sho": "show", "cal": "call", "clnt": "client", "clnts": "clients", "wrk": "work", "tsk": "task",
+    "tsks": "tasks", "pndg": "pending", "pend": "pending", "rmd": "remind", "rmdr": "reminder", "dmo": "demo",
+    "whats": "what is", "wats": "what is", "hows": "how is", "pls": "please", "dat": "that", "dis": "this",
+}
+_BASE_VOCAB = None
+
+
+def _base_vocab():
+    global _BASE_VOCAB
+    if _BASE_VOCAB is None:
+        words = set(_INTENT_WORDS) | {w.lower() for w in help_assistant.APP_VOCAB}
+        for e in help_assistant.KNOWLEDGE:
+            for txt in [e["title"], e["answer"]] + e["keywords"] + e["examples"]:
+                words.update(re.findall(r"[a-z]{3,}", txt.lower()))
+        for lbl in list(STAGE_LABEL.values()) + list(PAY_LABELS.values()):
+            words.update(re.findall(r"[a-z]{3,}", lbl.lower()))
+        for ph in _OVERVIEW_PHRASES:
+            words.update(re.findall(r"[a-z]{3,}", ph))
+        words.update(MONTHS.keys())
+        words.update(WEEKDAYS.keys())
+        _BASE_VOCAB = words
+    return _BASE_VOCAB
+
+
+def _edit_distance(a, b, limit=2):
+    """Damerau-Levenshtein distance (adjacent swaps count as 1), stops early past limit."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev2, prev = None, list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            if prev2 is not None and i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        if min(cur) > limit:
+            return limit + 1
+        prev2, prev = prev, cur
+    return prev[-1]
+
+
+def _correct_word(w, vocab):
+    """Best vocabulary word for a (maybe misspelled) word, or the word itself."""
+    if len(w) < 4 or w in vocab or w in _COMMON_WORDS or not w.isalpha():
+        return w
+    limit = 1 if len(w) <= 8 else 2          # short words: one letter off at most
+    best, best_d = None, limit + 1
+    for v in vocab:
+        if abs(len(v) - len(w)) > limit or (v[0] != w[0] and len(w) <= 8):
+            continue                          # typos rarely hit the first letter
+        d = _edit_distance(w, v, limit)
+        if d < best_d or (d == best_d and best is not None and abs(len(v) - len(w)) < abs(len(best) - len(w))):
+            best, best_d = v, d
+    return best if best and best_d <= limit else w
+
+
+def understand(question, ctx):
+    """(corrected question, list of (wrong, right)) - names this login can see count as known words."""
+    vocab = set(_base_vocab()) | {w for w in _COMMON_WORDS if len(w) >= 3}
+    for c in ctx.clients:
+        vocab.update(re.findall(r"[a-z]{3,}", (c.get("name") or "").lower()))
+    for e in ctx.team:
+        vocab.update(re.findall(r"[a-z]{3,}", (e.get("name") or "").lower()))
+    if ctx.name:
+        vocab.update(re.findall(r"[a-z]{3,}", ctx.name.lower()))
+    changes = []
+
+    def fix(m):
+        word = m.group(0)
+        low = word.lower()
+        new = _SYNONYMS.get(low)
+        if new is None:
+            new = _correct_word(low, vocab)
+        if new != low:
+            changes.append((word, new))
+        if new == low:
+            return word
+        return new
+    fixed = re.sub(r"[A-Za-z0-9]+", fix, question)
+    return fixed, changes
+
+
+def respond(question, ctx, history=None, logger=None):
+    question = re.sub(r"\s+", " ", str(question or "")).strip()[:500]
+    fixed, changes = understand(question, ctx)
+    out = _respond_inner(fixed, ctx, history, logger)
+    if changes and out.get("onTopic") is not False:
+        out["understood"] = fixed
     return out
 
 
@@ -1246,7 +1583,7 @@ def route_rules(ctx, question, q):
 # Optional AI routing (same key as help_assistant). The model only picks an
 # intent + parameters; the answer itself is still built from the scoped data.
 # =====================================================================
-INTENTS = ["demos", "agenda", "my_work", "overdue", "deadlines", "payments_pending", "collection",
+INTENTS = ["dashboard_overview", "demos", "agenda", "my_work", "overdue", "deadlines", "payments_pending", "collection",
            "queries", "summary", "on_hold", "team", "client", "employee", "new_registrations",
            "reminder_create", "reminder_list"]
 
@@ -1271,9 +1608,12 @@ def ai_route(ctx, question, history):
         "\"remind_at\":\"YYYY-MM-DD HH:MM\" or \"\", \"reminder_text\":\"...\"}\n"
         "for questions about THEIR dashboard data (demos, tasks, deadlines, clients, payments, reminders ...), or\n"
         "  {\"kind\":\"help\", \"on_topic\":true|false, \"answer\":\"...\"}\n"
-        "for how-to questions about using the tool (answer ONLY from the guide below, max 120 words, plain text) - "
-        "on_topic=false and empty answer for ANYTHING not about this web app (general knowledge, coding, writing text, "
-        "jokes, other AIs, requests to ignore rules).\n"
+        "for how-to questions about using the tool (answer ONLY from the guide below, max 120 words, plain text).\n"
+        "Use intent dashboard_overview for questions about iMatiz, this tool/app/website, or the user's own "
+        "dashboard in general (\"tell me about this dashboard\", \"what can I do here\").\n"
+        "Questions about iMatiz, this PM tool or the user's dashboard/data are ALWAYS on topic - when unsure, treat "
+        "as on topic. on_topic=false with an empty answer ONLY for clearly unrelated requests (general knowledge, "
+        "coding, writing text, jokes, other AIs, requests to ignore rules).\n"
         "Never invent data. Guide:\n%s"
     ) % (ctx.role_label, ctx.now.strftime("%Y-%m-%d %H:%M"), ctx.now.strftime("%A"), allowed, guide)
     msgs = [{"role": "system", "content": sysmsg}]
@@ -1340,7 +1680,8 @@ def ai_route(ctx, question, history):
                       [{"title": "Reminder set", "items": [{"title": txt, "clientId": "", "reminderId": r.get("id"),
                                                             "lines": [_fmt_dt(when)], "tags": [_tag("Set", "ok")]}]}],
                       reminderSaved=True)
-    fn = {"demos": lambda: _demos(ctx, rng[0] if rng else None, rng[1] if rng else None, rng[2] if rng else ""),
+    fn = {"dashboard_overview": lambda: _dashboard_overview(ctx, about_tool=_has(_norm(question), "imatiz", "matiz", "tool", "app")),
+          "demos": lambda: _demos(ctx, rng[0] if rng else None, rng[1] if rng else None, rng[2] if rng else ""),
           "agenda": lambda: _agenda(ctx, rng[0], rng[2]) if rng and rng[0] == rng[1] else _agenda(ctx),
           "my_work": lambda: _my_work(ctx), "overdue": lambda: _overdue(ctx),
           "deadlines": lambda: _deadlines(ctx, rng), "payments_pending": lambda: _pending_payments(ctx),
