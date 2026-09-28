@@ -39,3 +39,8 @@ AI ASSISTANT (optional key)
       HELP_AI_MODEL=deepseek-chat
   The key stays on the server. The data shown always comes from the database,
   limited to what that login can see on its own dashboard.
+
+REMINDER TONE
+  Reminder pop-ups (AI reminders + overdue steps) play a loud tone for 3 seconds.
+  Everyone picks their own in Settings -> Reminder tone: Bell chime (default), Ding-dong,
+  Marimba, Phone ring, Alarm clock, Beep beep or Siren. The tones are built into the app.

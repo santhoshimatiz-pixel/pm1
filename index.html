@@ -496,6 +496,17 @@ tbody tr:last-child td{border-bottom:none}
 .ai-remb:hover{border-color:var(--purple)}
 .ai-foot small{display:block;text-align:center;color:var(--faint);font-size:10.5px;margin-top:7px}
 
+/* Settings -> Reminder tone */
+.tone-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tone-opt{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:12px;cursor:pointer;background:var(--card);
+  margin:0;font-size:13px;font-weight:400;color:var(--text);letter-spacing:0;text-transform:none}
+.tone-opt:hover{border-color:var(--purple)}
+.tone-opt.sel{border-color:var(--purple);background:rgba(14,116,144,.08);box-shadow:0 0 0 1px var(--purple) inset}
+.tone-opt input[type=radio]{accent-color:var(--purple);margin:0;width:16px;height:16px;flex:0 0 16px;padding:0;border:0;box-shadow:none;background:none}
+.tone-txt{flex:1;min-width:0;text-align:left}.tone-txt b{display:block;font-size:13.5px;color:var(--text)}.tone-txt small{display:block;font-size:11.5px;color:var(--muted)}
+.tone-play{width:32px;height:32px;flex:0 0 32px;border-radius:50%;border:0;cursor:pointer;color:#fff;font-size:12px;background:linear-gradient(135deg,#0E7490,#14B8A6)}
+.tone-play:hover{filter:brightness(1.1)}
+@media (max-width:600px){.tone-list{grid-template-columns:1fr}}
 /* due-reminder pop-ups (stack above the button) */
 #aiRemStack{position:fixed;right:22px;bottom:96px;z-index:130;display:flex;flex-direction:column;gap:10px;width:min(360px,calc(100vw - 32px));pointer-events:none}
 .ai-rem{pointer-events:auto;background:var(--card);color:var(--text);border:1px solid var(--line-strong);border-left:5px solid var(--gold);border-radius:16px;
@@ -11742,6 +11753,7 @@ function aiStart(){
     setTimeout(()=>{ const h=$("aiHint"); if(h) h.classList.remove("show"); }, 9000);
     try{ sessionStorage.setItem("aiHintSeen","1"); }catch(e){}
   }
+  loadAlertTone();
   clearInterval(aiRemTimer);
   aiPollReminders();
   aiRemTimer = setInterval(aiPollReminders, AI_REM_POLL_MS);
@@ -12022,6 +12034,7 @@ function openSettings(){
     <div class="field"><label>New password</label><input id="s_newpwd" type="password" placeholder="New password"></div>
     <div class="field"><label>Confirm new password</label><input id="s_newpwd2" type="password" placeholder="Re-enter new password"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMyPassword()">Save password</button></div>
+    ${role !== "validator" ? alertToneSettingsHtml() : ""}
     ${(role==="super_admin" || role==="md_admin") ? stageRemSettingsHtml() : ""}
     ${dbSection}`);
 }
@@ -12417,9 +12430,9 @@ function pingBeep(){
     });
   }catch(e){}
 }
-/* ---------- LOUD 3-SECOND ALERT CHIME (AI reminders + stage-reminder pop-ups) ----------
-   A full-volume bell chime lasting 3 seconds - as loud as the browser/computer
-   volume allows.
+/* ---------- LOUD 3-SECOND ALERT TONE (AI reminders + stage-reminder pop-ups) ----------
+   The person's chosen tone (Settings -> Reminder tone), 3 seconds at full volume -
+   as loud as the browser/computer volume allows.
    Browsers block sound until the person has clicked/typed on the page once (after a
    refresh the page starts "locked"), so the audio is unlocked on the first click or
    key press, and a beep that was blocked plays the moment the page is unlocked -
@@ -12436,36 +12449,119 @@ function loudBeepStop(){
   loudBeepNodes.forEach(n=>{ try{ n.stop(); }catch(e){} try{ n.disconnect(); }catch(e){} });
   loudBeepNodes = [];
 }
-// The alert sound: a bright bell chime (C - E - G - high C) rung three times over 3 seconds,
-// at full volume. Each note is a bell-like tone (sine + soft overtones, fast strike, ringing
-// tail) instead of a harsh buzzer.
-const LOUD_CHIME_NOTES = [1046.5, 1318.5, 1568.0, 2093.0];   // C6 E6 G6 C7
-function loudBeepPlay(ctx){
+/* Built-in reminder tones. Each login picks one in Settings -> Reminder tone (saved on
+   the server per login); default "Bell chime". Every tone lasts 3 seconds and is played
+   through a compressor at full volume. */
+const ALERT_TONES = {
+  chime:       {label:"Bell chime",   desc:"Bright rising bells, rung three times"},
+  ding_dong:   {label:"Ding-dong",    desc:"Doorbell, twice"},
+  marimba:     {label:"Marimba",      desc:"Quick wooden melody"},
+  phone_ring:  {label:"Phone ring",   desc:"Classic telephone ring"},
+  alarm_clock: {label:"Alarm clock",  desc:"Fast digital alarm beeps"},
+  beep_beep:   {label:"Beep beep",    desc:"Clear triple beeps"},
+  siren:       {label:"Siren",        desc:"Rising and falling alert"},
+};
+let alertTone = "chime";
+// one bell / mallet / beep note: sine partials with a strike and a decay
+function toneNote(ctx, dest, freq, start, ring, partials, attack, type){
+  (partials || [[1, 1]]).forEach(([mult, level])=>{
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || "sine"; o.frequency.value = freq * mult;
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(level, start + (attack || 0.006));
+    g.gain.exponentialRampToValueAtTime(0.0001, start + ring / (type ? 1 : Math.sqrt(mult)));
+    o.connect(g).connect(dest);
+    o.start(start); o.stop(start + ring + 0.05);
+    loudBeepNodes.push(o, g);
+  });
+}
+// a flat beep (sustained, short fade in/out) - for alarm/beep tones
+function toneBeep(ctx, dest, freq, start, len, level, type){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type || "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(level, start + 0.008);
+  g.gain.setValueAtTime(level, start + len - 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + len);
+  o.connect(g).connect(dest); o.start(start); o.stop(start + len + 0.02);
+  loudBeepNodes.push(o, g);
+}
+const TONE_PLAYERS = {
+  chime(ctx, d, t0){
+    const notes = [1046.5, 1318.5, 1568.0, 2093.0];                      // C6 E6 G6 C7
+    for(let r = 0; r < 3; r++) notes.forEach((f, i)=>
+      toneNote(ctx, d, f, t0 + r + i * 0.16, i === 3 ? 0.8 : 0.55, [[1,1],[2,0.35],[3,0.12]]));
+  },
+  ding_dong(ctx, d, t0){
+    [[659.3, 0], [523.3, 0.62], [659.3, 1.5], [523.3, 2.12]].forEach(([f, at])=>
+      toneNote(ctx, d, f, t0 + at, 0.85, [[1,1],[2.01,0.45],[3,0.18],[4.2,0.08]], 0.004));
+  },
+  marimba(ctx, d, t0){
+    const mel = [784, 880, 1046.5, 1174.7, 1318.5, 1174.7, 1046.5, 880,   // G5 A5 C6 D6 E6 D6 C6 A5
+                 784, 1046.5, 1318.5, 1568, 1318.5, 1046.5, 1174.7, 1568]; // ... G6 finish
+    mel.forEach((f, i)=> toneNote(ctx, d, f, t0 + i * 0.17, i === mel.length - 1 ? 0.7 : 0.32, [[1,1],[4,0.22],[10,0.04]], 0.003));
+  },
+  phone_ring(ctx, d, t0){
+    [[0, 1.1], [1.6, 1.1]].forEach(([at, len])=>{
+      const g = ctx.createGain(); g.gain.value = 0; g.connect(d);
+      // 20 Hz trill: the bell "brrrring"
+      for(let k = 0; k < len * 20; k++){
+        const s = t0 + at + k / 20;
+        g.gain.setValueAtTime(0.0001, s); g.gain.linearRampToValueAtTime(0.9, s + 0.006);
+        g.gain.setValueAtTime(0.9, s + 0.03); g.gain.linearRampToValueAtTime(0.0001, s + 0.045);
+      }
+      [[440, 0.55], [480, 0.55], [880, 0.12]].forEach(([f, lv])=>{
+        const o = ctx.createOscillator(), og = ctx.createGain();
+        o.type = "sine"; o.frequency.value = f; og.gain.value = lv;
+        o.connect(og).connect(g); o.start(t0 + at); o.stop(t0 + at + len + 0.05);
+        loudBeepNodes.push(o, og);
+      });
+      loudBeepNodes.push(g);
+    });
+  },
+  alarm_clock(ctx, d, t0){
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3800; lp.connect(d); loudBeepNodes.push(lp);
+    for(let r = 0; r < 3; r++) for(let i = 0; i < 4; i++)
+      toneBeep(ctx, lp, 2048, t0 + r + i * 0.13, 0.08, 0.6, "square");
+  },
+  beep_beep(ctx, d, t0){
+    for(let r = 0; r < 3; r++) for(let i = 0; i < 3; i++){
+      toneBeep(ctx, d, 1318.5, t0 + r + i * 0.2, 0.13, 0.9);
+      toneBeep(ctx, d, 2637, t0 + r + i * 0.2, 0.13, 0.15);
+    }
+  },
+  siren(ctx, d, t0){
+    const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), g2 = ctx.createGain();
+    o.type = "triangle"; o2.type = "sine";
+    for(let c = 0; c < 3; c++){
+      const s = t0 + c;
+      o.frequency.setValueAtTime(650, s); o.frequency.linearRampToValueAtTime(1450, s + 0.5); o.frequency.linearRampToValueAtTime(650, s + 1);
+      o2.frequency.setValueAtTime(1300, s); o2.frequency.linearRampToValueAtTime(2900, s + 0.5); o2.frequency.linearRampToValueAtTime(1300, s + 1);
+    }
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.9, t0 + 0.05);
+    g.gain.setValueAtTime(0.9, t0 + 2.9); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 3);
+    g2.gain.value = 0.18;
+    o.connect(g); o2.connect(g2).connect(g); g.connect(d);
+    o.start(t0); o2.start(t0); o.stop(t0 + 3.05); o2.stop(t0 + 3.05);
+    loudBeepNodes.push(o, o2, g, g2);
+  },
+};
+// per-tone loudness trim, measured so every tone peaks just under full scale
+const TONE_GAIN = {chime:1.3, ding_dong:1.3, marimba:1.3, phone_ring:1.3, alarm_clock:1.4, beep_beep:1.35, siren:1.33};
+function loudBeepPlay(ctx, tone){
   loudBeepStop();
+  tone = TONE_PLAYERS[tone] ? tone : (TONE_PLAYERS[alertTone] ? alertTone : "chime");
   const t0 = ctx.currentTime + 0.03, dur = LOUD_BEEP_SECONDS;
   const comp = ctx.createDynamicsCompressor();          // keeps it loud without crackling
   comp.threshold.value = -12; comp.knee.value = 6; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.12;
-  const out = ctx.createGain(); out.gain.value = 1.3;    // makeup gain -> peaks just under full scale
+  const out = ctx.createGain(); out.gain.value = TONE_GAIN[tone] || 1.3;
   comp.connect(out).connect(ctx.destination);
   loudBeepNodes.push(comp, out);
-  const rounds = 3, roundLen = dur / rounds, step = 0.16;
-  for(let r = 0; r < rounds; r++){
-    LOUD_CHIME_NOTES.forEach((freq, i)=>{
-      const start = t0 + r * roundLen + i * step;
-      const ring = (i === LOUD_CHIME_NOTES.length - 1) ? 0.8 : 0.55;  // last note rings a bit longer
-      [[1, 1.0], [2, 0.35], [3, 0.12]].forEach(([mult, level])=>{
-        const o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = "sine"; o.frequency.value = freq * mult;
-        g.gain.setValueAtTime(0.0001, start);
-        g.gain.exponentialRampToValueAtTime(level, start + 0.006);      // bell strike
-        g.gain.exponentialRampToValueAtTime(0.0001, start + ring / mult); // ringing tail
-        o.connect(g).connect(comp);
-        o.start(start); o.stop(start + ring + 0.05);
-        loudBeepNodes.push(o, g);
-      });
-    });
-  }
-  setTimeout(loudBeepStop, (dur + 0.6) * 1000);
+  TONE_PLAYERS[tone](ctx, comp, t0);
+  setTimeout(loudBeepStop, (dur + 0.8) * 1000);
+}
+async function loadAlertTone(){
+  try{ const out = await api("alert_tone_get", {}); if(out && ALERT_TONES[out.tone]) alertTone = out.tone; }catch(e){}
 }
 function loudBeep(){
   const ctx = loudAudioCtx(); if(!ctx) return;
@@ -12643,6 +12739,32 @@ function stageRemSettingsHtml(){
     </div>
     <p style="font-size:12px;color:var(--muted);margin-top:-4px">Demo: 1 and 2. For real use, e.g. 240 (4 hours) per step and 30 to repeat.</p>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal();openStageRemOverview()">See overdue steps now</button><button class="btn" onclick="saveStageRemSettings()">Save reminder settings</button></div>`;
+}
+/* ---- Settings -> Reminder tone (every login picks its own) ---- */
+function alertToneSettingsHtml(){
+  return `
+    <div style="height:1px;background:var(--line);margin:18px 0"></div>
+    <h3>Reminder tone</h3>
+    <p class="msub">Plays loud for 3 seconds when a reminder pops up. Tap &#9654; to listen, then choose one.</p>
+    <div class="tone-list">${Object.entries(ALERT_TONES).map(([k,t])=>`
+      <label class="tone-opt ${alertTone===k?'sel':''}">
+        <input type="radio" name="alertTone" value="${k}" ${alertTone===k?'checked':''} onchange="alertToneChoose(${jsq(k)})">
+        <span class="tone-txt"><b>${esc(t.label)}</b><small>${esc(t.desc)}</small></span>
+        <button type="button" class="tone-play" title="Play" onclick="event.preventDefault();event.stopPropagation();alertTonePreview(${jsq(k)})">&#9654;</button>
+      </label>`).join("")}</div>`;
+}
+function alertTonePreview(k){
+  const ctx = loudAudioCtx(); if(!ctx){ toast("Sound isn't supported in this browser"); return; }
+  const go = ()=> loudBeepPlay(ctx, k);
+  if(ctx.state === "running") go(); else ctx.resume().then(go).catch(()=>{});
+}
+async function alertToneChoose(k){
+  if(!ALERT_TONES[k]) return;
+  const prev = alertTone; alertTone = k;
+  document.querySelectorAll(".tone-opt").forEach(el=>el.classList.toggle("sel", el.querySelector("input").value === k));
+  alertTonePreview(k);
+  try{ await api("alert_tone_set", {tone:k}); }catch(e){ alertTone = prev; toast(e.message); return; }
+  toast("Reminder tone: " + ALERT_TONES[k].label);
 }
 async function saveStageRemSettings(){
   const payload = {enabled:$("sr_enabled").checked, stepMinutes:parseInt($("sr_step").value,10), repeatMinutes:parseInt($("sr_repeat").value,10)};

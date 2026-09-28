@@ -639,6 +639,7 @@ CLIENT_ALLOWED_ACTIONS = {
     "add_query",
     "help_chat",
     "ai_reminder_save", "ai_reminder_list", "ai_reminder_delete", "ai_reminders_poll", "ai_reminder_ack",
+    "alert_tone_get", "alert_tone_set",
     "client_approve_proposal", "client_approve_paper", "client_approve_implementation",
     "client_request_correction_proposal", "client_request_correction_paper",
     "client_request_correction_implementation",
@@ -690,6 +691,9 @@ ACTION_ROLES = {
     "ai_reminder_delete": _R_ALL_STAFF,
     "ai_reminders_poll": _R_ALL_STAFF,
     "ai_reminder_ack": _R_ALL_STAFF,
+    # Reminder pop-up tone: each login picks its own from the built-in list.
+    "alert_tone_get": _R_ALL_STAFF,
+    "alert_tone_set": _R_ALL_STAFF,
 
     # ---- marketing / intake ----
     "add_client": _R_MARKETING,
@@ -2150,6 +2154,11 @@ def init_db():
         done_at TEXT
     );
     CREATE INDEX IF NOT EXISTS ai_reminders_owner ON ai_reminders (owner_key, status, remind_at);
+    CREATE TABLE IF NOT EXISTS alert_tone_pref (
+        owner_key TEXT PRIMARY KEY,
+        tone TEXT NOT NULL,
+        updated_at TEXT DEFAULT ({_NOW_SQL})
+    );
     CREATE TABLE IF NOT EXISTS stage_reminder_snoozes (
         id SERIAL PRIMARY KEY,
         client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -3852,6 +3861,11 @@ def ai_save_reminder(con, sess, scope_ids, text, when, client_id):
             "clientId": client_id, "clientName": client_name}
 
 
+# Built-in reminder tones (the sounds themselves are generated in index.html).
+ALERT_TONES = ("chime", "ding_dong", "marimba", "phone_ring", "alarm_clock", "beep_beep", "siren")
+DEFAULT_ALERT_TONE = "chime"
+
+
 def build_ai_context(con, sess):
     """Everything the assistant may use for THIS login, already filtered."""
     kind = sess["kind"]
@@ -4214,6 +4228,24 @@ def handle_action(action, d, ip=""):
             history = [h for h in history[-6:] if isinstance(h, dict)]
             return ai_assistant.respond(d.get("question") or "", ctx, history,
                                         logger=lambda m: print(m, file=sys.stderr))
+
+        # ---- reminder pop-up tone (Settings -> Reminder tone, each login its own) ----
+        if action in ("alert_tone_get", "alert_tone_set"):
+            owner_key, _label = ai_owner(get_principal())
+            if not owner_key:
+                raise ApiError("Not allowed.", 403)
+            if action == "alert_tone_set":
+                tone = str(d.get("tone") or "")
+                if tone not in ALERT_TONES:
+                    raise ApiError("Pick one of the listed tones.")
+                con.execute("""INSERT INTO alert_tone_pref (owner_key, tone, updated_at) VALUES (?,?,?)
+                               ON CONFLICT (owner_key) DO UPDATE SET tone=EXCLUDED.tone, updated_at=EXCLUDED.updated_at""",
+                            (owner_key, tone, now_str()))
+                con.commit()
+                return {"ok": True, "tone": tone}
+            r = con.execute("SELECT tone FROM alert_tone_pref WHERE owner_key=?", (owner_key,)).fetchone()
+            tone = r["tone"] if r and r["tone"] in ALERT_TONES else DEFAULT_ALERT_TONE
+            return {"tone": tone}
 
         # ---- AI assistant reminders (per login; never another person's) ----
         if action in ("ai_reminder_save", "ai_reminder_list", "ai_reminder_delete",
