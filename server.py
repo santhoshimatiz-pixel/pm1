@@ -27,6 +27,9 @@ from urllib.parse import urlparse, parse_qs
 import urllib.request
 from urllib.request import Request
 
+import help_assistant   # Help -> "Ask AI" chat (answers only questions about this PM tool)
+import ai_assistant     # floating AI assistant: answers from the caller's own dashboard data + reminders
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -57,7 +60,6 @@ def _load_dotenv():
 
 
 _load_dotenv()
-
 
 def _env_bool(name, default=False):
     v = os.environ.get(name)
@@ -123,7 +125,18 @@ if not SECRET_KEY:
     except OSError:
         SECRET_KEY = secrets.token_hex(32)  # in-memory fallback (sessions won't survive a restart)
 
+# TAB-SCOPED SESSIONS. A signed-in dashboard now needs two things on every request:
+#   * COOKIE_NAME   - an HttpOnly *browser-session* cookie (no Max-Age/Expires), so
+#                     JavaScript can never read it and the browser drops it when it
+#                     is fully closed. On its own it grants nothing.
+#   * TAB_TOKEN_HEADER - the per-tab session token. The page keeps it in
+#                     sessionStorage, which is private to one tab, survives a refresh
+#                     of that tab, and is thrown away when the tab is closed. A new
+#                     tab (or a reopened URL) has no token, so it must log in again.
+# A stolen tab token is useless without the HttpOnly cookie, and the cookie is
+# useless without a tab token.
 COOKIE_NAME = "matiz_session"
+TAB_TOKEN_HEADER = "X-Session-Token"
 CSRF_COOKIE_NAME = "matiz_csrf"
 
 # Basic RFC-ish address check, used to validate mail recipients.
@@ -624,6 +637,9 @@ CLIENT_ALLOWED_ACTIONS = {
     "get_thread", "send_message", "chat_typing",
     "get_client_document",
     "add_query",
+    "help_chat",
+    "ai_reminder_save", "ai_reminder_list", "ai_reminder_delete", "ai_reminders_poll", "ai_reminder_ack",
+    "alert_tone_get", "alert_tone_set",
     "client_approve_proposal", "client_approve_paper", "client_approve_implementation",
     "client_request_correction_proposal", "client_request_correction_paper",
     "client_request_correction_implementation",
@@ -666,6 +682,18 @@ ACTION_ROLES = {
     "delete_calendar_event": _R_ALL_STAFF,
     "request_hold": _R_ALL_STAFF,
     "request_deadline_extension": _R_ALL_STAFF,
+    # Help -> Ask AI chat. Everyone signed in (staff + client portal); the Validation
+    # Login has no Help menu and stays excluded.
+    "help_chat": _R_ALL_STAFF,
+    # Floating AI assistant reminders - each login only ever sees / changes its own.
+    "ai_reminder_save": _R_ALL_STAFF,
+    "ai_reminder_list": _R_ALL_STAFF,
+    "ai_reminder_delete": _R_ALL_STAFF,
+    "ai_reminders_poll": _R_ALL_STAFF,
+    "ai_reminder_ack": _R_ALL_STAFF,
+    # Reminder pop-up tone: each login picks its own from the built-in list.
+    "alert_tone_get": _R_ALL_STAFF,
+    "alert_tone_set": _R_ALL_STAFF,
 
     # ---- marketing / intake ----
     "add_client": _R_MARKETING,
@@ -774,6 +802,13 @@ ACTION_ROLES = {
     "format_manager_decision": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
     "proofread_decision": _R_ALL_STAFF,
     "proofread_request_correction": _R_ALL_STAFF,
+    # ---- stage reminders: anyone signed in polls/cancels their OWN pop-ups
+    #      (the handler only ever returns items that person must act on);
+    #      only Admin changes the timing or sees everyone's overdue list. ----
+    "stage_reminders_poll": _R_ALL_STAFF,
+    "stage_reminders_snooze": _R_ALL_STAFF,
+    "stage_reminders_overview": _R_ADMIN,
+    "stage_reminders_save_settings": _R_ADMIN,
     "resolve_hold": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "resolve_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
     "reject_deadline_extension": _R_MANAGERS + ("technical_tl", "journal_tl"),
@@ -948,24 +983,34 @@ def hash_session_token(token):
 
 
 def create_session(con, kind, role, ip="", emp_id=None, emp_uid=None, emp_name=None,
-                    emp_role=None, emp_team_type=None, client_id=None):
+                    emp_role=None, emp_team_type=None, client_id=None, browser_key=None):
+    # The session is bound to the browser's HttpOnly cookie; without one there is
+    # nothing to bind to, so refuse rather than create an unbound session.
+    if not browser_key:
+        raise ApiError("Your browser blocked the sign-in cookie. Please allow cookies for this site and try again.")
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
     con.execute("""INSERT INTO sessions (token, kind, role, emp_id, emp_uid, emp_name,
-                       emp_role, emp_team_type, client_id, ip, csrf)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                       emp_role, emp_team_type, client_id, ip, csrf, browser_key)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (hash_session_token(token), kind, role, emp_id, emp_uid, emp_name,
-                 emp_role, emp_team_type, client_id, ip, csrf))
+                 emp_role, emp_team_type, client_id, ip, csrf, hash_session_token(browser_key)))
     con.commit()
     return {"token": token, "csrf": csrf}
 
 
-def get_session(con, token):
-    if not token:
+def get_session(con, token, browser_key=None):
+    """`token` is the per-tab token (X-Session-Token header); `browser_key` is the
+    HttpOnly cookie. Both must be present and belong to the same session row."""
+    if not token or not browser_key:
         return None
     hashed = hash_session_token(token)
     row = con.execute("SELECT * FROM sessions WHERE token=?", (hashed,)).fetchone()
     if not row:
+        return None
+    # The tab token only works in the browser it was issued to. (Not deleted on a
+    # mismatch, so a leaked tab token can't be used to sign the real user out.)
+    if not hmac.compare_digest(row["browser_key"] or "", hash_session_token(browser_key)):
         return None
 
     def _parse(v):
@@ -1412,6 +1457,7 @@ _SERIAL_ID_TABLES = {
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
     "task_stages", "validation_papers", "validation_events", "task_handoffs",
+    "ai_reminders",
 }
 
 
@@ -1724,6 +1770,7 @@ def init_db():
         client_id TEXT,
         ip TEXT DEFAULT '',
         csrf TEXT DEFAULT '',
+        browser_key TEXT DEFAULT '',
         created_at TEXT DEFAULT ({_NOW_SQL}),
         last_seen TEXT DEFAULT ({_NOW_SQL})
     );
@@ -2079,6 +2126,55 @@ def init_db():
     con.execute("ALTER TABLE history ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''")
     con.commit()
 
+    # ----- STAGE REMINDERS (see the "STAGE REMINDERS" section further down).
+    #       stage_entered_at = when the client reached its CURRENT stage (set by
+    #       move_stage / add_client). Existing clients stay NULL, so they are not
+    #       timed until they next move — only work that moves from now on is tracked.
+    con.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS stage_entered_at TEXT")
+    con.executescript(f"""
+    CREATE TABLE IF NOT EXISTS stage_reminder_settings (
+        id INTEGER PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        step_minutes INTEGER NOT NULL DEFAULT 1,
+        repeat_minutes INTEGER NOT NULL DEFAULT 2,
+        updated_by TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE TABLE IF NOT EXISTS ai_reminders (
+        id SERIAL PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        owner_label TEXT DEFAULT '',
+        text TEXT NOT NULL,
+        client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
+        client_name TEXT DEFAULT '',
+        remind_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        snooze_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT ({_NOW_SQL}),
+        done_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS ai_reminders_owner ON ai_reminders (owner_key, status, remind_at);
+    CREATE TABLE IF NOT EXISTS alert_tone_pref (
+        owner_key TEXT PRIMARY KEY,
+        tone TEXT NOT NULL,
+        updated_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE TABLE IF NOT EXISTS stage_reminder_snoozes (
+        id SERIAL PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        stage TEXT NOT NULL,
+        stage_entered_at TEXT NOT NULL,
+        recipient_key TEXT NOT NULL,
+        snoozed_until TEXT NOT NULL,
+        snooze_count INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (client_id, stage, stage_entered_at, recipient_key)
+    );
+    """)
+    con.execute("""INSERT INTO stage_reminder_settings (id, enabled, step_minutes, repeat_minutes)
+                   VALUES (1, 1, ?, ?) ON CONFLICT (id) DO NOTHING""",
+                (REMINDER_DEFAULT_STEP_MINUTES, REMINDER_DEFAULT_REPEAT_MINUTES))
+    con.commit()
+
     con.execute("""INSERT INTO settings (id, from_email, to_email) VALUES (1, ?, ?)
                    ON CONFLICT (id) DO NOTHING""", (DEFAULT_FROM_EMAIL, DEFAULT_TO_EMAIL))
     con.commit()
@@ -2107,6 +2203,11 @@ def init_db():
     #       get_session()'s own idle-timeout check above.
     _cutoff = (datetime.now() - timedelta(hours=SESSION_TTL_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
     con.execute("DELETE FROM sessions WHERE last_seen < ?", (_cutoff,))
+    # Tab-scoped sessions: every session must be bound to a browser cookie. Sessions
+    # created before this change have no binding and are ended (users sign in once).
+    con.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS browser_key TEXT DEFAULT ''")
+    con.execute("DELETE FROM sessions WHERE browser_key IS NULL OR browser_key = ''")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_sessions_browser_key ON sessions (browser_key)")
     con.commit()
     con.close()
 
@@ -2374,9 +2475,187 @@ def get_client(con, cid):
 
 
 def move_stage(con, cid, stage, actor, note=""):
-    con.execute("UPDATE clients SET stage=? WHERE id=?", (stage, cid))
+    # stage_entered_at starts the per-step reminder clock for the new stage.
+    con.execute("UPDATE clients SET stage=?, stage_entered_at=? WHERE id=?", (stage, now_str(), cid))
     con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
                 (cid, stage, actor, note or ""))
+
+
+# =====================================================================
+# STAGE REMINDERS  (replaces the old AI Schedule Assistant)
+# ---------------------------------------------------------------------
+# Every pipeline step gets a fixed time window (settings: step_minutes,
+# default 1 minute for the demo). The clock starts when a client reaches
+# a stage (clients.stage_entered_at, stamped by move_stage/add_client).
+# If the client is still sitting at that stage when the window runs out,
+# the person responsible for the NEXT hand-off gets a pop-up the next
+# time their browser polls (i.e. straight away when they log in / open
+# the page). They can cancel it; it comes back after repeat_minutes
+# (default 2) for as long as the client has not moved on.
+#
+#   Telecaller  --1 min-->  Marketing TL  --1 min-->  Marketing Manager
+#   --1 min-->  Accounts  --1 min-->  Technical team  --1 min--> ... and
+#   so on for every step below. Stages that wait on the CLIENT (proposal /
+#   implementation / paper sent for client approval) are not timed.
+# =====================================================================
+REMINDER_DEFAULT_STEP_MINUTES = 1
+REMINDER_DEFAULT_REPEAT_MINUTES = 2
+REMINDER_MAX_MINUTES = 60 * 24 * 30          # sanity cap for the settings form (30 days)
+_TS_FMT = "%Y-%m-%d %H:%M:%S"
+
+_TM_TL = ("technical_manager", "technical_tl")
+_JM_TL = ("journal_manager", "journal_tl")
+
+# stage -> (department logins that must act, employee rule, what they must do next)
+# Mirrors "Your next step" (drawerActions) in index.html, so the pop-up always
+# goes to the same person who has the button for that step.
+STAGE_REMINDER_RULES = {
+    "NEW": (("telecaller",), "creator_telecaller", "Send this lead to the Marketing TL"),
+    "TL_REVIEW": (("marketing_tl",), None, "Verify and send to the Marketing Manager"),
+    "MANAGER_REVIEW": (("marketing_manager",), None, "Approve and send to Accounts"),
+    "ACCOUNT_REVIEW": (("account_team",), None, "Approve and send to the Technical Team"),
+    "TECH_ASSIGNED": (_TM_TL, None, "Assign the work to the technical team"),
+    "PROPOSAL_ASSIGNED": ((), "proposal_writer", "Write and submit the proposal"),
+    "PROPOSAL_SUBMITTED": (_TM_TL, None, "Verify the submitted proposal"),
+    "PROPOSAL_VERIFIED": (_TM_TL, None, "Deliver the proposal to the client"),
+    "PROPOSAL_APPROVED": (_TM_TL, None, "Assign programmers for implementation"),
+    "IMPLEMENTATION_ASSIGNED": ((), "programmers", "Finish the implementation and submit it"),
+    "IMPLEMENTATION_COMPLETE": (_TM_TL, None, "Send the implementation to the client"),
+    "IMPLEMENTATION_APPROVED": (_TM_TL, None, "Assign paper writers"),
+    "PAPERWRITER_ASSIGNED": ((), "writers", "Finish the paper writing and submit it"),
+    "COORDINATOR_REVIEW": ((), "coordinator", "Review the paper and send it on"),
+    "WRITER_FIXING": ((), "writers", "Fix the corrections and resubmit"),
+    "TECHTL_REVIEW": (("technical_tl",), None, "Review the paper and send it on"),
+    "TECHMGR_REVIEW": (("technical_manager",), None, "Review the paper and approve it"),
+    "WRITING_COMPLETE": (_TM_TL, None, "Deliver the paper to the client"),
+    "CLIENT_ACCEPTED": (_TM_TL, None, "Send the paper to the Journal team"),
+    "JOURNAL_MANAGER_REVIEW": (_JM_TL, None, "Assign a proofreading coordinator"),
+    "PROOFREAD_COORD_ASSIGNED": ((), "proofread_coordinator", "Assign proofreaders"),
+    "PROOFREADING": ((), "proofreaders", "Finish proofreading"),
+    "PROOFREAD_CORRECTION": ((), "writers", "Fix the proofreading corrections and resubmit"),
+    "PROOFREAD_RECHECK": ((), "proofread_coordinator", "Re-check the proofreading"),
+    "JOURNAL_MANAGER_FORMATTING": (_JM_TL, None, "Assign a formatting coordinator"),
+    "FORMATTING_ASSIGNED": ((), "format_coordinator", "Assign formatters"),
+    "FORMATTING_IN_PROGRESS": ((), "formatting_team", "Finish formatting"),
+    "FORMATTING_MANAGER_REVIEW": (_JM_TL, None, "Review the formatting"),
+    "SUBMISSION": ((), "submission_team", "Submit the paper to the journal"),
+}
+
+
+def now_str():
+    return datetime.now().strftime(_TS_FMT)
+
+
+def _parse_ts(v):
+    if not v:
+        return None
+    try:
+        return datetime.strptime(str(v)[:19], _TS_FMT)
+    except ValueError:
+        return None
+
+
+def restart_stage_clock(con, cid):
+    """A client that was paused (on hold / rejected) comes back: give the current
+    stage a fresh time window instead of popping up as overdue immediately. Only
+    clients that are already being timed are touched."""
+    con.execute("UPDATE clients SET stage_entered_at=? WHERE id=? AND stage_entered_at IS NOT NULL",
+                (now_str(), cid))
+
+
+def reminder_settings(con):
+    r = con.execute("SELECT * FROM stage_reminder_settings WHERE id=1").fetchone()
+    if not r:
+        return {"enabled": True, "stepMinutes": REMINDER_DEFAULT_STEP_MINUTES,
+                "repeatMinutes": REMINDER_DEFAULT_REPEAT_MINUTES}
+    return {"enabled": bool(r["enabled"]),
+            "stepMinutes": max(1, int(r["step_minutes"] or REMINDER_DEFAULT_STEP_MINUTES)),
+            "repeatMinutes": max(1, int(r["repeat_minutes"] or REMINDER_DEFAULT_REPEAT_MINUTES))}
+
+
+def _csv_names(v):
+    return {n.strip() for n in (v or "").split(",") if n.strip()}
+
+
+def _reminder_emp_match(con, rule, c, sess, creator_cache):
+    """Is this individually-added employee the one who must act on client c?"""
+    name = (sess.get("emp_name") or "").strip()
+    emp_role = sess.get("emp_role") or ""
+    team = sess.get("emp_team_type") or ""
+    if not name or not rule:
+        return False
+    if rule == "creator_telecaller":
+        if emp_role != "TELECALLER":
+            return False
+        if c["id"] not in creator_cache:
+            h = con.execute("""SELECT actor FROM history WHERE client_id=? AND stage='NEW'
+                               ORDER BY created_at ASC, id ASC LIMIT 1""", (c["id"],)).fetchone()
+            creator_cache[c["id"]] = (h["actor"] if h else "") or ""
+        return creator_cache[c["id"]].strip() == name
+    if rule == "proposal_writer":
+        who = c["proposal_coordinator"] if c["proposal_awaiting_team_pick"] else c["proposal_writer"]
+        return (who or "").strip() == name
+    if rule == "programmers":
+        return name in _csv_names(c["assigned_programmers"])
+    if rule == "writers":
+        return name in _csv_names(c["assigned_writers"])
+    if rule == "coordinator":
+        return (c["coordinator_name"] or "").strip() == name
+    if rule == "proofread_coordinator":
+        return (c["proofread_coordinator"] or "").strip() == name
+    if rule == "proofreaders":
+        people = _csv_names(c["assigned_proofreaders"]) or _csv_names(c["proofread_coordinator"])
+        return name in people
+    if rule == "format_coordinator":
+        return (c["format_coordinator"] or "").strip() == name
+    if rule == "formatting_team":
+        return name in (_csv_names(c["assigned_formatters"]) | _csv_names(c["format_coordinator"]))
+    if rule == "submission_team":
+        return emp_role == "JOURNAL_EMPLOYEE" and team == "SUBMISSION"
+    return False
+
+
+def _reminder_is_for(con, c, sess, creator_cache):
+    rule = STAGE_REMINDER_RULES.get(c["stage"])
+    if not rule:
+        return False
+    roles, emp_rule, _ = rule
+    if sess["kind"] == "employee":
+        return _reminder_emp_match(con, emp_rule, c, sess, creator_cache)
+    if sess["kind"] == "dept":
+        return (sess["role"] or "") in roles
+    return False
+
+
+def overdue_stage_items(con, cfg, now=None):
+    """Every timed client whose current step has run past its window."""
+    now = now or datetime.now()
+    step = timedelta(minutes=cfg["stepMinutes"])
+    out = []
+    rows = con.execute("""SELECT * FROM clients
+                          WHERE stage_entered_at IS NOT NULL AND stage_entered_at<>''
+                            AND COALESCE(rejected,0)=0 AND COALESCE(on_hold,0)=0""").fetchall()
+    for c in rows:
+        if c["stage"] not in STAGE_REMINDER_RULES:
+            continue
+        entered = _parse_ts(c["stage_entered_at"])
+        if not entered or now < entered + step:
+            continue
+        out.append((c, entered, entered + step))
+    return out
+
+
+def _reminder_item(c, entered, due, now, snooze_count):
+    waited = int((now - entered).total_seconds() // 60)
+    late = int((now - due).total_seconds() // 60)
+    return {"clientId": c["id"], "displayId": c["display_id"] or c["id"],
+            "projectId": c["project_id"] or "", "clientName": c["name"],
+            "service": service_conf(c["service_key"])["label"],
+            "stage": c["stage"], "stageLabel": STAGE_LABELS.get(c["stage"], c["stage"]),
+            "nextStep": STAGE_REMINDER_RULES[c["stage"]][2],
+            "enteredAt": c["stage_entered_at"], "dueAt": due.strftime(_TS_FMT),
+            "waitedMinutes": waited, "lateMinutes": late,
+            "deadlineDate": c["deadline_date"] or "", "timesReminded": snooze_count}
 
 
 def active_names(con, role, team_type=None):
@@ -3511,6 +3790,166 @@ def _dispatch_bulk_import(con, kind, rows, d):
     raise ApiError("Unknown import type.")
 
 
+# =====================================================================
+# FLOATING AI ASSISTANT (ai_assistant.py) - what each login may see.
+# ---------------------------------------------------------------------
+# The same rules as the dashboards themselves:
+#   * employees (programmers, writers, journal team, individual telecallers)
+#     -> only the clients they are attached to (employee_visible_client_ids,
+#        plus leads an individual telecaller added), no payment amounts;
+#   * Technical Manager / TL / Content Coordinator -> clients Accounts approved;
+#   * Journal Manager / TL -> clients handed to the Journal team;
+#   * Marketing, Accounts, Admins -> every client;
+#   * client portal -> their own CL-ID family only.
+# Team questions ("what is Ravi working on?") are limited to the manager's
+# own department (STAFF_MGMT_TEAM_ROLES); admins see everyone.
+# =====================================================================
+_AI_MONEY_ROLES = ("telecaller", "marketing_tl", "marketing_manager", "account_team",
+                   "technical_manager", "technical_tl", "journal_manager", "md_admin", "super_admin")
+AI_REMINDER_MAX_PENDING = 200
+
+
+def ai_owner(sess):
+    """(owner key, label) for reminders - one reminder list per login."""
+    if sess["kind"] == "client":
+        return "CLIENT:%s" % sess["client_id"], "Client"
+    ident = session_identity(sess)
+    return ident["key"], ident["label"]
+
+
+def _ai_reminder_out(r):
+    return {"id": r["id"], "text": r["text"], "clientId": r["client_id"] or "",
+            "clientName": r["client_name"] or "", "remindAt": str(r["remind_at"])[:16],
+            "status": r["status"], "snoozeCount": r["snooze_count"] or 0}
+
+
+def ai_list_reminders(con, owner_key):
+    return [_ai_reminder_out(r) for r in con.execute(
+        """SELECT * FROM ai_reminders WHERE owner_key=? AND status='PENDING'
+           ORDER BY remind_at ASC, id ASC LIMIT 100""", (owner_key,))]
+
+
+def ai_save_reminder(con, sess, scope_ids, text, when, client_id):
+    owner_key, owner_label = ai_owner(sess)
+    if not owner_key:
+        raise ApiError("Reminders aren't available for this login.", 403)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", str(text or "")).strip()[:200]
+    if not text:
+        raise ApiError("Write what the reminder is about.")
+    now = datetime.now()
+    if when < now - timedelta(minutes=1):
+        raise ApiError("That time has already passed - pick a time in the future.")
+    if when > now + timedelta(days=366):
+        raise ApiError("Pick a time within the next year.")
+    client_id = (client_id or "").strip()
+    client_name = ""
+    if client_id:
+        if client_id not in scope_ids:
+            raise ApiError("You can only link a reminder to a client on your own dashboard.", 403)
+        r = con.execute("SELECT name FROM clients WHERE id=?", (client_id,)).fetchone()
+        client_name = (r["name"] if r else "") or ""
+    n = con.execute("SELECT COUNT(*) AS n FROM ai_reminders WHERE owner_key=? AND status='PENDING'",
+                    (owner_key,)).fetchone()["n"]
+    if n >= AI_REMINDER_MAX_PENDING:
+        raise ApiError("You already have %d pending reminders - delete some first." % AI_REMINDER_MAX_PENDING)
+    cur = con.execute(
+        """INSERT INTO ai_reminders (owner_key, owner_label, text, client_id, client_name, remind_at)
+           VALUES (?,?,?,?,?,?)""",
+        (owner_key, owner_label, text, client_id or None, client_name, when.strftime(_TS_FMT)))
+    con.commit()
+    return {"id": cur.lastrowid, "text": text, "remindAt": when.strftime("%Y-%m-%d %H:%M"),
+            "clientId": client_id, "clientName": client_name}
+
+
+# Built-in reminder tones (the sounds themselves are generated in index.html).
+ALERT_TONES = ("chime", "ding_dong", "marimba", "phone_ring", "alarm_clock", "beep_beep", "siren")
+DEFAULT_ALERT_TONE = "chime"
+
+
+def build_ai_context(con, sess):
+    """Everything the assistant may use for THIS login, already filtered."""
+    kind = sess["kind"]
+    role = sess["role"] or ""
+    role_key = help_assistant.role_key_for(sess)
+    now = datetime.now()
+    clients = all_clients(con)
+    tasks = [dict(r) for r in con.execute(
+        """SELECT id, title, client_id, priority, start_date, finish_date, status, assigned_to, task_type
+           FROM tasks ORDER BY created_at DESC, id DESC""")]
+    queries = [dict(r) for r in con.execute(
+        """SELECT id, client_id, query_text, query_date, assigned_to, status FROM client_queries
+           ORDER BY query_date DESC, id DESC""")]
+    events = [dict(r) for r in con.execute(
+        "SELECT id, title, event_date, event_time, note, created_by_id, visibility FROM calendar_events")]
+    name, money, team_view, team = "", False, False, []
+
+    if kind == "client":
+        fam = client_family_ids(con, sess["client_id"])
+        clients = [scrub_client_for_client(c) for c in clients if c["id"] in fam]
+        tasks, queries = [], [q for q in queries if q["client_id"] in fam]
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"]
+        own = next((c for c in clients if c["id"] == sess["client_id"]), None)
+        name, money = (own["name"] if own else ""), True
+    elif kind == "employee":
+        name = (sess["emp_name"] or "").strip()
+        visible = employee_visible_client_ids(con, sess["emp_id"], name, tasks, queries)
+        if (sess["emp_role"] or "") == "TELECALLER" and name:
+            # leads this telecaller added themselves
+            for r in con.execute("""SELECT DISTINCT client_id FROM history
+                                    WHERE stage='NEW' AND actor=?""", (name,)):
+                visible.add(r["client_id"])
+        clients = [scrub_client_for_employee(c) for c in clients if c["id"] in visible]
+        tasks = [t for t in tasks if task_assigned_to(t, name)]
+        queries = [q for q in queries if q["client_id"] in visible]
+        my_id = "emp:" + name
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"
+                  or e.get("created_by_id") == my_id]
+    else:
+        if role in ("technical_manager", "technical_tl", "content_coordinator"):
+            clients = [c for c in clients if stageIdxServer(c["stage"]) >= stageIdxServer("TECH_ASSIGNED")]
+        elif role in ("journal_manager", "journal_tl"):
+            clients = [c for c in clients if stageIdxServer(c["stage"]) >= stageIdxServer("JOURNAL_MANAGER_REVIEW")]
+        ids = {c["id"] for c in clients}
+        tasks = [t for t in tasks if not t.get("client_id") or t["client_id"] in ids]
+        queries = [q for q in queries if q["client_id"] in ids]
+        events = [e for e in events if (e.get("visibility") or "everyone") != "private"
+                  or e.get("created_by_id") == role]
+        money = role in _AI_MONEY_ROLES
+        if role in ADMIN_ROLES:
+            team_view, team = True, all_employees(con)
+        elif role in STAFF_MGMT_TEAM_ROLES:
+            allowed_roles = STAFF_MGMT_TEAM_ROLES[role]
+            team_view, team = True, [e for e in all_employees(con) if e["role"] in allowed_roles]
+        if not money:
+            clients = [{k: v for k, v in c.items()
+                        if k not in ("payments", "installments", "totalAmount", "serviceItems")} for c in clients]
+    team = [{"id": e["id"], "name": e["name"], "role": e["role"], "teamType": e.get("teamType", "")} for e in team]
+
+    # What is waiting on THIS login right now (same rules as the stage-reminder pop-up).
+    waiting = []
+    if kind in ("dept", "employee"):
+        by_id = {c["id"]: c for c in clients}
+        sess_d = dict(sess)
+        cache = {}
+        for row in con.execute("""SELECT * FROM clients WHERE COALESCE(rejected,0)=0
+                                  AND COALESCE(on_hold,0)=0"""):
+            if row["id"] not in by_id or row["stage"] not in STAGE_REMINDER_RULES:
+                continue
+            if _reminder_is_for(con, row, sess_d, cache):
+                waiting.append((by_id[row["id"]], STAGE_REMINDER_RULES[row["stage"]][2]))
+
+    owner_key, _ = ai_owner(sess)
+    scope_ids = {c["id"] for c in clients}
+    ctx = ai_assistant.Ctx(
+        kind=kind, role_key=role_key, name=name, is_admin=role in ADMIN_ROLES, money=money,
+        team_view=team_view, team=team, clients=clients, tasks=tasks, queries=queries, events=events,
+        waiting=waiting, now=now,
+        services={k: {"label": v["label"], "amounts": v["amounts"]} for k, v in SERVICES.items()},
+        save_reminder=lambda text, when, cid: ai_save_reminder(con, sess, scope_ids, text, when, cid),
+        list_reminders=lambda: ai_list_reminders(con, owner_key))
+    return ctx, scope_ids
+
+
 def handle_action(action, d, ip=""):
     con = db()
     try:
@@ -3521,7 +3960,7 @@ def handle_action(action, d, ip=""):
         # "Who am I?" — lets the page restore the signed-in view after a refresh
         # from the HttpOnly cookie alone, instead of trusting sessionStorage.
         if action == "session":
-            sess = get_session(con, d.get("_session_token"))
+            sess = get_session(con, d.get("_session_token"), d.get("_browser_key"))
             if not sess:
                 return {"authenticated": False}
             out = {"authenticated": True, "kind": sess["kind"], "role": sess["role"],
@@ -3535,8 +3974,15 @@ def handle_action(action, d, ip=""):
             return out
 
         if action == "logout":
+            # Ends only THIS tab's session. The browser cookie is cleared as well once
+            # no other tab in this browser is still signed in with it.
             delete_session(con, d.get("_session_token"))
-            return {"ok": True, "_clear_cookie": True}
+            out = {"ok": True}
+            bk = d.get("_browser_key")
+            if not bk or not con.execute("SELECT 1 FROM sessions WHERE browser_key=? LIMIT 1",
+                                         (hash_session_token(bk),)).fetchone():
+                out["_clear_cookie"] = True
+            return out
 
         if action == "login_captcha":
             # A fresh, single-use captcha for the login screen (all dashboards).
@@ -3575,13 +4021,13 @@ def handle_action(action, d, ip=""):
                     raise ApiError("You don't have validation access yet. Ask your Technical Manager to give "
                                    "you access to a validation folder (AI Check, Plagiarism Check or Test Paper).")
                 delete_session(con, d.get("_session_token"))   # no session fixation
-                sess = create_session(con, "validator", "validator", ip=ip, emp_id=e["id"],
+                sess = create_session(con, "validator", "validator", ip=ip, browser_key=d.get("_browser_key"), emp_id=e["id"],
                                        emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
                                        emp_team_type=e["team_type"] or "")
                 return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
                         "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
                         "validationFolders": folders,
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             if role == "employee":
                 uid = (d.get("empUid") or "").strip()
                 if not uid:
@@ -3594,12 +4040,12 @@ def handle_action(action, d, ip=""):
                 if not verify_password(d.get("password") or "", e["password"] or ""):
                     raise ApiError("Incorrect password. Please try again.")
                 delete_session(con, d.get("_session_token"))   # no session fixation
-                sess = create_session(con, "employee", "employee", ip=ip, emp_id=e["id"],
+                sess = create_session(con, "employee", "employee", ip=ip, browser_key=d.get("_browser_key"), emp_id=e["id"],
                                        emp_uid=e["emp_uid"], emp_name=e["name"], emp_role=e["role"],
                                        emp_team_type=e["team_type"] or "")
                 return {"ok": True, "empId": e["id"], "empName": e["name"], "empRole": e["role"],
                         "empTeamType": e["team_type"] or "", "empUid": e["emp_uid"],
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             if role == "client":
                 key = (d.get("clientKey") or "").strip()
                 if not key:
@@ -3621,9 +4067,9 @@ def handle_action(action, d, ip=""):
                             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), c["id"]))
                 con.commit()
                 delete_session(con, d.get("_session_token"))
-                sess = create_session(con, "client", "client", ip=ip, client_id=c["id"])
+                sess = create_session(con, "client", "client", ip=ip, browser_key=d.get("_browser_key"), client_id=c["id"])
                 return {"ok": True, "clientId": c["id"],
-                        "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+                        "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
             u = con.execute("SELECT * FROM users WHERE role=?", (role,)).fetchone()
             if not u:
                 raise ApiError("Please select a role above.")
@@ -3632,8 +4078,8 @@ def handle_action(action, d, ip=""):
             if not verify_password(d.get("password") or "", u["password"] or ""):
                 raise ApiError("Incorrect password. Please try again.")
             delete_session(con, d.get("_session_token"))
-            sess = create_session(con, "dept", role, ip=ip)
-            return {"ok": True, "csrfToken": sess["csrf"], "_session_token": sess["token"]}
+            sess = create_session(con, "dept", role, ip=ip, browser_key=d.get("_browser_key"))
+            return {"ok": True, "csrfToken": sess["csrf"], "sessionToken": sess["token"]}
 
         if action == "create_invite_link":
             # Generates (or reuses) a pending setup code and hands back a shareable
@@ -3766,6 +4212,86 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
+        # =============================================================
+        # HELP -> ASK AI  (help_assistant.py). Answers only questions about
+        # this PM tool; the role used to pick answers comes from the server-side
+        # session, never from the request body.
+        # =============================================================
+        if action == "help_chat":
+            sess = get_principal()
+            ctx, _scope = build_ai_context(con, sess)
+            if (d.get("mode") or "") == "welcome":
+                return ai_assistant.welcome(ctx)
+            if _rate_limited(ip, "help_chat", limit=40, window_seconds=300):
+                raise ApiError("You're asking very quickly - please wait a minute and try again.", 429)
+            history = d.get("history") if isinstance(d.get("history"), list) else []
+            history = [h for h in history[-6:] if isinstance(h, dict)]
+            return ai_assistant.respond(d.get("question") or "", ctx, history,
+                                        logger=lambda m: print(m, file=sys.stderr))
+
+        # ---- reminder pop-up tone (Settings -> Reminder tone, each login its own) ----
+        if action in ("alert_tone_get", "alert_tone_set"):
+            owner_key, _label = ai_owner(get_principal())
+            if not owner_key:
+                raise ApiError("Not allowed.", 403)
+            if action == "alert_tone_set":
+                tone = str(d.get("tone") or "")
+                if tone not in ALERT_TONES:
+                    raise ApiError("Pick one of the listed tones.")
+                con.execute("""INSERT INTO alert_tone_pref (owner_key, tone, updated_at) VALUES (?,?,?)
+                               ON CONFLICT (owner_key) DO UPDATE SET tone=EXCLUDED.tone, updated_at=EXCLUDED.updated_at""",
+                            (owner_key, tone, now_str()))
+                con.commit()
+                return {"ok": True, "tone": tone}
+            r = con.execute("SELECT tone FROM alert_tone_pref WHERE owner_key=?", (owner_key,)).fetchone()
+            tone = r["tone"] if r and r["tone"] in ALERT_TONES else DEFAULT_ALERT_TONE
+            return {"tone": tone}
+
+        # ---- AI assistant reminders (per login; never another person's) ----
+        if action in ("ai_reminder_save", "ai_reminder_list", "ai_reminder_delete",
+                      "ai_reminders_poll", "ai_reminder_ack"):
+            sess = get_principal()
+            owner_key, _label = ai_owner(sess)
+            if not owner_key:
+                raise ApiError("Not allowed.", 403)
+            if action == "ai_reminder_list":
+                return {"reminders": ai_list_reminders(con, owner_key)}
+            if action == "ai_reminder_save":
+                raw = str(d.get("remindAt") or "").strip().replace("T", " ")[:16]
+                try:
+                    when = datetime.strptime(raw, "%Y-%m-%d %H:%M")
+                except ValueError:
+                    raise ApiError("Pick a date and time for the reminder.")
+                _ctx, scope_ids = build_ai_context(con, sess) if d.get("clientId") else (None, set())
+                r = ai_save_reminder(con, sess, scope_ids, d.get("text"), when, d.get("clientId"))
+                return {"ok": True, "reminder": r}
+            if action == "ai_reminder_delete":
+                cur = con.execute("UPDATE ai_reminders SET status='DELETED', done_at=? WHERE id=? AND owner_key=?",
+                                  (now_str(), int(d.get("id") or 0), owner_key))
+                con.commit()
+                return {"ok": True}
+            if action == "ai_reminders_poll":
+                due = [_ai_reminder_out(r) for r in con.execute(
+                    """SELECT * FROM ai_reminders WHERE owner_key=? AND status='PENDING' AND remind_at<=?
+                       ORDER BY remind_at ASC, id ASC LIMIT 20""", (owner_key, now_str()))]
+                return {"due": due, "serverNow": now_str()}
+            if action == "ai_reminder_ack":
+                rid = int(d.get("id") or 0)
+                try:
+                    snooze = int(d.get("snoozeMinutes") or 0)
+                except (TypeError, ValueError):
+                    snooze = 0
+                if snooze > 0:
+                    snooze = min(snooze, 24 * 60)
+                    con.execute("""UPDATE ai_reminders SET remind_at=?, snooze_count=snooze_count+1
+                                   WHERE id=? AND owner_key=? AND status='PENDING'""",
+                                ((datetime.now() + timedelta(minutes=snooze)).strftime(_TS_FMT), rid, owner_key))
+                else:
+                    con.execute("""UPDATE ai_reminders SET status='DONE', done_at=?
+                                   WHERE id=? AND owner_key=?""", (now_str(), rid, owner_key))
+                con.commit()
+                return {"ok": True}
+
         if action == "bootstrap":
             events = [dict(r) for r in con.execute(
                 """SELECT id, title, event_date, event_time, note, color, created_by, created_by_id, visibility
@@ -3870,7 +4396,8 @@ def handle_action(action, d, ip=""):
                     "clientReferrals": client_refs, "workSends": sends_out,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
-                                      "amounts": v["amounts"]} for k, v in SERVICES.items()}}
+                                      "amounts": v["amounts"]} for k, v in SERVICES.items()},
+                    "stageReminders": reminder_settings(con) if (d.get("role") or "") != "client" else None}
 
         if action == "add_client":
             name = (d.get("name") or "").strip()
@@ -3985,6 +4512,9 @@ def handle_action(action, d, ip=""):
 
             actor = (d.get("actorLabel") or "").strip() or "Telecaller"
             con.execute("INSERT INTO history (client_id, stage, actor) VALUES (?,'NEW',?)", (cid, actor))
+            # Start the stage-reminder clock: the Telecaller now has one step-time
+            # to send this lead to the Marketing TL.
+            con.execute("UPDATE clients SET stage_entered_at=? WHERE id=?", (now_str(), cid))
             con.commit()
             return {"ok": True, "id": cid, "displayId": display_id, "projectId": project_id}
 
@@ -4104,6 +4634,7 @@ def handle_action(action, d, ip=""):
             c = get_client(con, d.get("clientId") or "")
             con.execute("UPDATE clients SET rejected=0, reject_reason='', rejected_at=NULL WHERE id=?",
                         (c["id"],))
+            restart_stage_clock(con, c["id"])
             con.commit()
             return {"ok": True}
 
@@ -5219,6 +5750,113 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True}
 
+        # =============================================================
+        # STAGE REMINDERS (see the section above STAGE_REMINDER_RULES)
+        # =============================================================
+        if action == "stage_reminders_poll":
+            sess = get_principal()
+            cfg = reminder_settings(con)
+            if not sess or not cfg["enabled"] or sess["kind"] not in ("dept", "employee"):
+                return {"ok": True, "enabled": cfg["enabled"], "items": [],
+                        "repeatMinutes": cfg["repeatMinutes"], "stepMinutes": cfg["stepMinutes"]}
+            now = datetime.now()
+            me = session_identity(sess)["key"]
+            snoozes = {}
+            for r in con.execute("SELECT * FROM stage_reminder_snoozes WHERE recipient_key=?", (me,)):
+                snoozes[(r["client_id"], r["stage"], r["stage_entered_at"])] = r
+            items, creator_cache = [], {}
+            for c, entered, due in overdue_stage_items(con, cfg, now):
+                if not _reminder_is_for(con, c, sess, creator_cache):
+                    continue
+                sz = snoozes.get((c["id"], c["stage"], c["stage_entered_at"]))
+                count = sz["snooze_count"] if sz else 0
+                if sz and (_parse_ts(sz["snoozed_until"]) or now) > now:
+                    continue            # cancelled recently - comes back after repeat_minutes
+                items.append(_reminder_item(c, entered, due, now, count))
+            items.sort(key=lambda x: x["dueAt"])
+            return {"ok": True, "enabled": True, "items": items, "serverNow": now.strftime(_TS_FMT),
+                    "repeatMinutes": cfg["repeatMinutes"], "stepMinutes": cfg["stepMinutes"]}
+
+        if action == "stage_reminders_snooze":
+            # "Cancel" on the pop-up. Only snoozes items that really are this person's.
+            sess = get_principal()
+            cfg = reminder_settings(con)
+            me = session_identity(sess)["key"]
+            if not me:
+                raise ApiError("Not allowed.", 403)
+            until = (datetime.now() + timedelta(minutes=cfg["repeatMinutes"])).strftime(_TS_FMT)
+            wanted = d.get("items") or []
+            if not isinstance(wanted, list):
+                raise ApiError("Nothing to cancel.")
+            creator_cache, done = {}, 0
+            for it in wanted[:200]:
+                if not isinstance(it, dict):
+                    continue
+                c = con.execute("SELECT * FROM clients WHERE id=?", (str(it.get("clientId") or ""),)).fetchone()
+                if (not c or c["stage"] != it.get("stage") or not c["stage_entered_at"]
+                        or c["stage_entered_at"] != it.get("enteredAt")
+                        or not _reminder_is_for(con, c, sess, creator_cache)):
+                    continue            # moved on already, or not this person's step
+                con.execute("""INSERT INTO stage_reminder_snoozes
+                                 (client_id, stage, stage_entered_at, recipient_key, snoozed_until, snooze_count)
+                               VALUES (?,?,?,?,?,1)
+                               ON CONFLICT (client_id, stage, stage_entered_at, recipient_key)
+                               DO UPDATE SET snoozed_until=EXCLUDED.snoozed_until,
+                                             snooze_count=stage_reminder_snoozes.snooze_count+1""",
+                            (c["id"], c["stage"], c["stage_entered_at"], me, until))
+                done += 1
+            # Old snoozes for stages the client has already left are never needed again.
+            con.execute("""DELETE FROM stage_reminder_snoozes s USING clients c
+                           WHERE s.client_id=c.id AND (c.stage<>s.stage
+                                 OR COALESCE(c.stage_entered_at,'')<>s.stage_entered_at)""")
+            con.commit()
+            return {"ok": True, "snoozed": done, "until": until, "repeatMinutes": cfg["repeatMinutes"]}
+
+        if action == "stage_reminders_overview":
+            # Admin view: every step that is late right now, and whose turn it is.
+            cfg = reminder_settings(con)
+            now = datetime.now()
+            rows = []
+            for c, entered, due in overdue_stage_items(con, cfg, now):
+                it = _reminder_item(c, entered, due, now, 0)
+                roles, emp_rule, _ = STAGE_REMINDER_RULES[c["stage"]]
+                who = [STAFF_ROLE_LABELS.get(r, r) for r in roles]
+                people = {"proposal_writer": c["proposal_writer"], "programmers": c["assigned_programmers"],
+                          "writers": c["assigned_writers"], "coordinator": c["coordinator_name"],
+                          "proofread_coordinator": c["proofread_coordinator"],
+                          "proofreaders": c["assigned_proofreaders"] or c["proofread_coordinator"],
+                          "format_coordinator": c["format_coordinator"],
+                          "formatting_team": c["assigned_formatters"] or c["format_coordinator"],
+                          "submission_team": "Submission team"}.get(emp_rule)
+                if people:
+                    who.append(people)
+                it["waitingOn"] = ", ".join(w for w in who if w)
+                rows.append(it)
+            rows.sort(key=lambda x: x["dueAt"])
+            return {"ok": True, "settings": cfg, "items": rows, "serverNow": now.strftime(_TS_FMT)}
+
+        if action == "stage_reminders_save_settings":
+            def _mins(key, label):
+                try:
+                    v = int(d.get(key))
+                except (TypeError, ValueError):
+                    raise ApiError("Enter a whole number of minutes for %s." % label)
+                if v < 1 or v > REMINDER_MAX_MINUTES:
+                    raise ApiError("%s must be between 1 and %d minutes." % (label, REMINDER_MAX_MINUTES))
+                return v
+            step = _mins("stepMinutes", "Time allowed per step")
+            repeat = _mins("repeatMinutes", "Show again after cancel")
+            enabled = 1 if d.get("enabled") else 0
+            actor = session_identity(get_principal())["label"] or "Admin"
+            con.execute("""INSERT INTO stage_reminder_settings (id, enabled, step_minutes, repeat_minutes, updated_by, updated_at)
+                           VALUES (1,?,?,?,?,?)
+                           ON CONFLICT (id) DO UPDATE SET enabled=EXCLUDED.enabled, step_minutes=EXCLUDED.step_minutes,
+                             repeat_minutes=EXCLUDED.repeat_minutes, updated_by=EXCLUDED.updated_by,
+                             updated_at=EXCLUDED.updated_at""",
+                        (enabled, step, repeat, actor, now_str()))
+            con.commit()
+            return {"ok": True, "settings": reminder_settings(con)}
+
         if action == "resolve_hold":
             c = get_client(con, d.get("clientId") or "")
             if not c["on_hold"]:
@@ -5239,6 +5877,7 @@ def handle_action(action, d, ip=""):
                            WHERE id=?""", (c["id"],))
             con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,'HOLD_RESOLVED',?,?)",
                         (c["id"], actor, f"New deadline {new_deadline} set by {actor}. Work resumed."))
+            restart_stage_clock(con, c["id"])
             con.commit()
             return {"ok": True}
 
@@ -7615,8 +8254,9 @@ class Handler(BaseHTTPRequestHandler):
         attrs = [f"{COOKIE_NAME}=" + ("" if clear else token), "Path=/", "HttpOnly", "SameSite=Lax"]
         if clear:
             attrs.append("Max-Age=0")
-        else:
-            attrs.append(f"Max-Age={int(SESSION_TTL_HOURS * 3600)}")
+        # No Max-Age/Expires otherwise: a browser-session cookie, discarded when the
+        # browser is closed. How long a login lasts is enforced server-side
+        # (SESSION_TTL_HOURS / SESSION_MAX_HOURS), not by the cookie.
         if COOKIE_SECURE:
             attrs.append("Secure")
         return "; ".join(attrs)
@@ -7664,13 +8304,21 @@ class Handler(BaseHTTPRequestHandler):
         #       simply trusted a "role"/"empId"/"clientId"/"empName" field sent by the
         #       browser. Only a small, explicit allow-list of actions may be called without
         #       a valid session at all (login, invite/reset flows, etc). -----
-        token = self._get_cookie(COOKIE_NAME)
+        token = (self.headers.get(TAB_TOKEN_HEADER) or "").strip() or None
+        browser_key = self._get_cookie(COOKIE_NAME) or None
+        new_browser_key = None
+        if action == "login" and not browser_key:
+            # First sign-in in this browser session: issue the HttpOnly binding cookie.
+            # It is reused by later logins in other tabs so they don't sign each other out.
+            browser_key = new_browser_key = secrets.token_urlsafe(32)
         con = db()
         try:
-            session = get_session(con, token)
+            session = get_session(con, token, browser_key)
         finally:
             con.close()
+        # Always overwritten here, so nothing in the request body can supply them.
         data["_session_token"] = token
+        data["_browser_key"] = browser_key
 
         # ----- AUTHORIZATION: deny-by-default role check before anything runs.
         #       Unmapped actions are rejected, so a new handler added without a
@@ -7743,9 +8391,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = handle_action(action, data, ip=ip)
             if isinstance(result, dict):
-                new_token = result.pop("_session_token", None)
-                if new_token:
-                    set_cookie = new_token
+                if new_browser_key and result.get("sessionToken"):
+                    set_cookie = new_browser_key
                 if result.pop("_clear_cookie", False):
                     clear_cookie = True
             extra = []
