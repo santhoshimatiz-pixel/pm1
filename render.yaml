@@ -43,8 +43,3 @@ services:
         sync: false
       - key: DEFAULT_TO_EMAIL
         sync: false
-      # Optional: Help -> Ask AI uses an AI model when a key is set (OpenAI by
-      # default; for DeepSeek also set HELP_AI_BASE_URL=https://api.deepseek.com
-      # and HELP_AI_MODEL=deepseek-chat). Without a key it uses its built-in answers.
-      - key: HELP_AI_API_KEY
-        sync: false
