@@ -12417,9 +12417,9 @@ function pingBeep(){
     });
   }catch(e){}
 }
-/* ---------- LOUD 3-SECOND ALERT BEEP (AI reminders + stage-reminder pop-ups) ----------
-   One big, full-volume beep lasting 3 seconds. Two square-wave tones through a
-   compressor at maximum gain = as loud as the browser/computer volume allows.
+/* ---------- LOUD 3-SECOND ALERT CHIME (AI reminders + stage-reminder pop-ups) ----------
+   A full-volume bell chime lasting 3 seconds - as loud as the browser/computer
+   volume allows.
    Browsers block sound until the person has clicked/typed on the page once (after a
    refresh the page starts "locked"), so the audio is unlocked on the first click or
    key press, and a beep that was blocked plays the moment the page is unlocked -
@@ -12436,27 +12436,36 @@ function loudBeepStop(){
   loudBeepNodes.forEach(n=>{ try{ n.stop(); }catch(e){} try{ n.disconnect(); }catch(e){} });
   loudBeepNodes = [];
 }
+// The alert sound: a bright bell chime (C - E - G - high C) rung three times over 3 seconds,
+// at full volume. Each note is a bell-like tone (sine + soft overtones, fast strike, ringing
+// tail) instead of a harsh buzzer.
+const LOUD_CHIME_NOTES = [1046.5, 1318.5, 1568.0, 2093.0];   // C6 E6 G6 C7
 function loudBeepPlay(ctx){
   loudBeepStop();
-  const t0 = ctx.currentTime + 0.02, dur = LOUD_BEEP_SECONDS;
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -4; comp.knee.value = 0; comp.ratio.value = 20; comp.attack.value = 0.001; comp.release.value = 0.05;
-  const master = ctx.createGain();
-  master.gain.setValueAtTime(0.0001, t0);
-  master.gain.exponentialRampToValueAtTime(1.0, t0 + 0.03);     // full volume almost instantly
-  master.gain.setValueAtTime(1.0, t0 + dur - 0.08);                // hold for the whole 3 seconds
-  master.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  master.connect(comp).connect(ctx.destination);
-  [[1000, 0.75], [1500, 0.45]].forEach(([freq, level])=>{
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = "square"; o.frequency.value = freq; o.frequency.setValueAtTime(freq, t0);
-    g.gain.value = level;
-    o.connect(g).connect(master);
-    o.start(t0); o.stop(t0 + dur + 0.05);
-    loudBeepNodes.push(o, g);
-  });
-  loudBeepNodes.push(master, comp);
-  setTimeout(loudBeepStop, (dur + 0.3) * 1000);
+  const t0 = ctx.currentTime + 0.03, dur = LOUD_BEEP_SECONDS;
+  const comp = ctx.createDynamicsCompressor();          // keeps it loud without crackling
+  comp.threshold.value = -12; comp.knee.value = 6; comp.ratio.value = 12; comp.attack.value = 0.002; comp.release.value = 0.12;
+  const out = ctx.createGain(); out.gain.value = 1.3;    // makeup gain -> peaks just under full scale
+  comp.connect(out).connect(ctx.destination);
+  loudBeepNodes.push(comp, out);
+  const rounds = 3, roundLen = dur / rounds, step = 0.16;
+  for(let r = 0; r < rounds; r++){
+    LOUD_CHIME_NOTES.forEach((freq, i)=>{
+      const start = t0 + r * roundLen + i * step;
+      const ring = (i === LOUD_CHIME_NOTES.length - 1) ? 0.8 : 0.55;  // last note rings a bit longer
+      [[1, 1.0], [2, 0.35], [3, 0.12]].forEach(([mult, level])=>{
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = freq * mult;
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.exponentialRampToValueAtTime(level, start + 0.006);      // bell strike
+        g.gain.exponentialRampToValueAtTime(0.0001, start + ring / mult); // ringing tail
+        o.connect(g).connect(comp);
+        o.start(start); o.stop(start + ring + 0.05);
+        loudBeepNodes.push(o, g);
+      });
+    });
+  }
+  setTimeout(loudBeepStop, (dur + 0.6) * 1000);
 }
 function loudBeep(){
   const ctx = loudAudioCtx(); if(!ctx) return;
