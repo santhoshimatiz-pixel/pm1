@@ -1241,13 +1241,12 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
           </div>
 
           <div class="dept-item" data-dept="marketing">
-            <button class="dept-btn" type="button">&#128188;&nbsp; Marketing Team <span class="dcount">Telecaller &middot; TL &middot; Manager</span><span class="chev">&#9660;</span></button>
+            <button class="dept-btn" type="button">&#128188;&nbsp; Marketing Team <span class="dcount">BDC &middot; TL &middot; Manager</span><span class="chev">&#9660;</span></button>
             <div class="dept-panel">
               <div class="role-grid">
-                <button class="role-card" data-role="telecaller"><span class="ric">&#128222;</span><b>Telecaller (shared)</b><span>Leads, calls &amp; payments</span></button>
+                <button class="role-card" data-role="employee" data-label="BDC Login" data-only-emp-role="TELECALLER"><span class="ric">&#128222;</span><b>BDC Login</b><span>Leads, calls &amp; payments — sign in with your employee ID</span></button>
                 <button class="role-card" data-role="marketing_tl"><span class="ric">&#128737;&#65039;</span><b>Marketing TL</b><span>First verification</span></button>
                 <button class="role-card" data-role="marketing_manager"><span class="ric">&#128081;</span><b>Marketing Manager</b><span>Final marketing approval</span></button>
-                <button class="role-card" data-role="employee"><span class="ric">&#128100;</span><b>Employee Login</b><span>Individual telecallers — sign in with your ID</span></button>
               </div>
             </div>
           </div>
@@ -1453,7 +1452,7 @@ const STAGE_LABEL = {
   JOURNAL_SUBMITTED:'Submitted to journal', COMPLETED:'Completed'
 };
 const ROLE_LABEL = {
-  super_admin:'Super Admin', md_admin:'MD / Admin', telecaller:'Telecaller', marketing_tl:'Marketing TL',
+  super_admin:'Super Admin', md_admin:'MD / Admin', telecaller:'BDC', marketing_tl:'Marketing TL',
   marketing_manager:'Marketing Manager', account_team:'Accounts Team', technical_manager:'Technical Manager',
   technical_tl:'Technical TL',
   journal_manager:'Journal Manager', journal_tl:'Journal TL', client:'Client'
@@ -1490,7 +1489,7 @@ let workSends = [];   // every "send completed work to ..." (coordinator / valid
 const ADM_SEARCH_STORES = {};
 let settings = {fromEmail:"", toEmail:""};
 let role = null, empId = null, empName = null, empRole = null, empTeamType = null, clientSelf = null;
-let selectedRole = null, selectedEmpId = null;
+let selectedRole = null, selectedEmpId = null, selectedOnlyEmpRole = "";
 let tmTab = 'work';
 let tcView = 'dashboard'; // telecaller sidebar sub-view
 let tcDashSubTab = 'mine'; // telecaller dashboard: 'mine' = My leads, 'pipeline' = Already in the pipeline
@@ -1938,7 +1937,7 @@ function copyMail(){
 
 /* ================= LOGIN ================= */
 const ROLE_DISPLAY = {
-  super_admin:"Super Admin", md_admin:"MD / Admin", telecaller:"Telecaller",
+  super_admin:"Super Admin", md_admin:"MD / Admin", telecaller:"BDC",
   marketing_tl:"Marketing TL", marketing_manager:"Marketing Manager", account_team:"Accounts Team",
   technical_manager:"Technical Manager", technical_tl:"Technical TL", client:"Client Status Portal",
   employee:"Employee Login", validator:"Validation Login"
@@ -1961,12 +1960,13 @@ function bindRoleCards(){
       b.classList.add("sel");
       selectedRole = b.dataset.role;
       selectedEmpId = b.dataset.emp ? parseInt(b.dataset.emp) : null;
+      selectedOnlyEmpRole = b.dataset.onlyEmpRole || "";
       $("clientIdField").style.display = selectedRole==="client" ? "block" : "none";
       $("clientPortalLinks").style.display = selectedRole==="client" ? "block" : "none";
       $("empUidField").style.display = (selectedRole==="employee" || selectedRole==="validator") ? "block" : "none";
       $("loginErr").textContent = "";
       const note = $("selRoleNote");
-      const label = b.dataset.emp ? b.querySelector("b").textContent : (ROLE_DISPLAY[selectedRole] || selectedRole);
+      const label = b.dataset.label || (b.dataset.emp ? b.querySelector("b").textContent : (ROLE_DISPLAY[selectedRole] || selectedRole));
       note.textContent = "Selected: " + label;
       note.classList.remove("empty");
       if(selectedRole==="employee" || selectedRole==="validator") $("empUid").focus(); else $("pwd").focus();
@@ -2131,6 +2131,12 @@ async function doLogin(){
     csrfToken = out.csrfToken || "";
     setTabToken(out.sessionToken || "");
     if(selectedRole === "client") clientSelf = out.clientId;
+    if(selectedRole === "employee" && selectedOnlyEmpRole && out.empRole !== selectedOnlyEmpRole){
+      // BDC Login is only for BDC staff; everyone else uses their own team's Employee Login.
+      try{ await api("logout", {}); }catch(e2){}
+      csrfToken = ""; setTabToken("");
+      throw new Error("BDC Login is only for BDC staff. Please use the Employee Login under your own team.");
+    }
     if(selectedRole === "employee" || selectedRole === "validator"){ empName = out.empName; empRole = out.empRole; empId = out.empId; empTeamType = out.empTeamType || ""; }
   }catch(e){
     loginBusy = false;
@@ -2240,7 +2246,7 @@ function confirmLogoutFromBrand(){
 
 /* ================= RENDER ================= */
 const EMP_ROLE_LABEL = {
-  PROGRAMMER:'Programmer', PAPER_WRITER:'Paper Writer', COORDINATOR:'Content Coordinator', TELECALLER:'Telecaller',
+  PROGRAMMER:'Programmer', PAPER_WRITER:'Paper Writer', COORDINATOR:'Content Coordinator', TELECALLER:'BDC',
   PROOFREAD_COORDINATOR:'Proofreading Coordinator', PROOFREADER:'Proofreader',
   FORMAT_COORDINATOR:'Formatting Coordinator', FORMATTER:'Formatter', SUBMISSION:'Submission Team'
 };
@@ -2717,11 +2723,11 @@ function renderTelecaller(){
     accounts:"Clients waiting on Accounts sign-off",
     pay2:"Clients with the 2nd payment (Code Implementation) still pending",
     pay3:"Clients with the 3rd payment (Paper Writing) still pending",
-    messages:"Messages your clients have sent to Telecaller",
+    messages:"Messages your clients have sent to BDC",
     add:"Add one client at a time, or bulk-import from Excel / CSV / Google Sheets",
     rejected:"Clients who were contacted but are not proceeding",
   };
-  setHead("Telecaller — " + item.label, subs[tcView] || "",
+  setHead("BDC — " + item.label, subs[tcView] || "",
     tcView==='dashboard' ? `<button class="btn" onclick="openAddClient()">+ Add client</button>` : "");
   const active = clients.filter(c=>!c.rejected);
   const inMkt = active.filter(c=>stageIdx(c.stage)<=2).length;
@@ -3048,14 +3054,14 @@ function telecallerRosterPanel(){
   const empRow = e => `<button class="roster-chip" style="cursor:pointer" onclick="openEmployeeDrawer(${e.id})">
       <span class="dot"></span>${esc(e.name)}<small style="color:var(--muted);margin-left:6px;font-weight:700">${esc(e.empUid||"")}</small></button>`;
   return `<div class="panel" style="padding:16px 20px;margin-bottom:18px">
-      <p style="color:var(--muted);font-size:13px">Telecallers added here sign in with "Employee Login" using the ID/password shown when created. The shared "Telecaller" login on the main screen still works too.</p>
+      <p style="color:var(--muted);font-size:13px">BDC staff added here sign in with "BDC Login" (Marketing Team) using the employee ID and password shown when created.</p>
     </div>
     <div class="roster-wrap">
     <div class="roster-col">
-      <h4>Telecallers</h4>
+      <h4>BDC</h4>
       <div class="roster-chips">${list.map(empRow).join("")||`<span style="color:var(--muted);font-size:13px">None added yet.</span>`}</div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px dashed rgba(59,44,107,.6)">
-        <label>Add a telecaller</label>
+        <label>Add a BDC member</label>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newTeleName" placeholder="Full name">
           <input id="newTeleEmail" placeholder="Email (optional)">
@@ -3147,7 +3153,7 @@ function renderMarketingManagerModern(){
   if(mktPage==="journals"){ setHead("Journals","Journal submissions across the pipeline",""); renderMktJournals(); return; }
   if(mktPage==="tasks"){ setHead("Tasks","Everything assigned to the marketing team",""); renderMktTasks(); return; }
   if(mktPage==="taskDetail"){ setHead("Task","",""); renderMktTaskDetail(); return; }
-  if(mktPage==="team"){ setHead("Team","Add and manage telecallers",""); $("content").innerHTML = telecallerRosterPanel(); return; }
+  if(mktPage==="team"){ setHead("Team","Add and manage BDC staff",""); $("content").innerHTML = telecallerRosterPanel(); return; }
   setHead("Dashboard","Marketing performance at a glance",""); renderMktDashboard();
 }
 function renderMktDashboard(){
@@ -4662,7 +4668,7 @@ function renderJMTeam(){ renderTMTeam(); }
 
 function allEmployeesBoardHtml(){
   const groups = [
-    ["TELECALLER","Telecallers"], ["PROGRAMMER","Programmers"], ["PAPER_WRITER","Paper Writers"],
+    ["TELECALLER","BDC"], ["PROGRAMMER","Programmers"], ["PAPER_WRITER","Paper Writers"],
   ];
   const jTypes = [["PROOFREAD_COORDINATOR","Proofreading Coordinators"], ["PROOFREADER","Proofreaders"],
     ["FORMAT_COORDINATOR","Formatting Coordinators"], ["FORMATTER","Formatters"], ["SUBMISSION","Submission Team"]];
@@ -4777,14 +4783,14 @@ async function restoreEmployee(id){
 }
 function showCreatedEmployee(name, uid, pwd, roleType){
   const label = roleType==='PROGRAMMER' ? 'Programmer' : roleType==='PAPER_WRITER' ? 'Paper Writer'
-    : roleType==='TELECALLER' ? 'Telecaller' : 'Journal Team member';
+    : roleType==='TELECALLER' ? 'BDC' : 'Journal Team member';
   openModal(`
     <h3>${esc(name)} added</h3><p class="msub">${label} — share these sign-in details with them</p>
     <div class="mailbox">
       <div class="mrow">Employee ID: <b>${esc(uid)}</b></div>
       <div class="mrow">Password: <b>${esc(pwd)}</b></div>
     </div>
-    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">On the login page they choose <b>Employee Login</b>, then enter these. (The address to open is printed in the terminal running server.py.)</p>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:14px">On the login page they choose <b>${roleType==='TELECALLER' ? 'BDC Login' : 'Employee Login'}</b>, then enter these. (The address to open is printed in the terminal running server.py.)</p>
     <div class="modal-actions"><button class="btn" onclick="closeModal()">Done</button></div>`);
 }
 function coordinatorEditHtml(e){
@@ -9067,12 +9073,12 @@ function admOpenAddMember(){
   const ROLE_OPTION_SETS = {
     technical_manager: [["PROGRAMMER","Programmer"],["PAPER_WRITER","Paper Writer"]],
     technical_tl: [["PROGRAMMER","Programmer"],["PAPER_WRITER","Paper Writer"]],
-    marketing_manager: [["TELECALLER","Telecaller"]],
-    marketing_tl: [["TELECALLER","Telecaller"]],
+    marketing_manager: [["TELECALLER","BDC"]],
+    marketing_tl: [["TELECALLER","BDC"]],
     journal_manager: [["JOURNAL_EMPLOYEE","Journal team"]],
     journal_tl: [["JOURNAL_EMPLOYEE","Journal team"]],
   };
-  const allOptions = [["PROGRAMMER","Programmer"],["PAPER_WRITER","Paper Writer"],["JOURNAL_EMPLOYEE","Journal team"],["TELECALLER","Telecaller"]];
+  const allOptions = [["PROGRAMMER","Programmer"],["PAPER_WRITER","Paper Writer"],["JOURNAL_EMPLOYEE","Journal team"],["TELECALLER","BDC"]];
   const options = ROLE_OPTION_SETS[role] || allOptions; // Super Admin / MD Admin (or any unlisted role) get every option
   openModal(`<h3>Add member</h3>
     <div class="grid2">
@@ -11779,6 +11785,9 @@ let aiChat = {owner:"", log:[], welcome:null, busy:false};
 let aiReg = [];                 // clickable items / actions, referenced by index from onclick
 let aiRemTimer = null, aiRemBusy = false, aiRemShown = {}, aiRemTitleTimer = null;
 const AI_REM_POLL_MS = 20000;
+// AI reminder pop-ups (bottom-right "Reminder" cards) are switched off on every dashboard.
+// The AI assistant chat itself still works normally.
+const AI_REM_POPUP_DISABLED = true;
 function aiCanUse(){ return !!role && role !== "validator"; }
 function aiOwner(){ return [role||"", empId||"", clientSelf||""].join("|"); }
 function aiStart(){
@@ -11794,9 +11803,11 @@ function aiStart(){
     try{ sessionStorage.setItem("aiHintSeen","1"); }catch(e){}
   }
   loadAlertTone();
-  clearInterval(aiRemTimer);
-  aiPollReminders();
-  aiRemTimer = setInterval(aiPollReminders, AI_REM_POLL_MS);
+  clearInterval(aiRemTimer); aiRemTimer = null;
+  if(!AI_REM_POPUP_DISABLED){
+    aiPollReminders();
+    aiRemTimer = setInterval(aiPollReminders, AI_REM_POLL_MS);
+  }
 }
 function aiStop(){
   clearInterval(aiRemTimer); aiRemTimer = null;
@@ -11994,7 +12005,7 @@ async function aiRfSave(i){
 }
 /* ---- due reminders: pop-up above the button + beep + desktop notification ---- */
 async function aiPollReminders(){
-  if(!aiCanUse() || aiRemBusy) return;
+  if(AI_REM_POPUP_DISABLED || !aiCanUse() || aiRemBusy) return;
   aiRemBusy = true;
   try{
     const out = await api("ai_reminders_poll", {});
@@ -12008,6 +12019,7 @@ async function aiPollReminders(){
   finally{ aiRemBusy = false; }
 }
 function aiShowDue(r){
+  if(AI_REM_POPUP_DISABLED) return;
   const st = $("aiRemStack"); if(!st) return;
   const el = document.createElement("div");
   el.className = "ai-rem"; el.id = "aiRem" + r.id;
@@ -12652,8 +12664,11 @@ const STAGE_REM_QUICK = {
 };
 function stageRemCanListen(){ return !!role && role!=="client" && role!=="validator"; }
 function stageRemKey(it){ return it.clientId + "|" + it.stage + "|" + it.enteredAt; }
+// The "A client is waiting on you" pop-up is switched off on every dashboard.
+const STAGE_REM_POPUP_DISABLED = true;
 function startStageReminderListener(){
   stopStageReminderListener();
+  if(STAGE_REM_POPUP_DISABLED) return;
   if(!stageRemCanListen()) return;
   pollStageReminders();
   stageRemTimer = setInterval(pollStageReminders, STAGE_REM_POLL_MS);
@@ -12665,7 +12680,7 @@ function stopStageReminderListener(){
   const bg = $("stageRemBg"); if(bg) bg.classList.remove("open");
 }
 async function pollStageReminders(){
-  if(!stageRemCanListen() || stageRemBusy) return;
+  if(STAGE_REM_POPUP_DISABLED || !stageRemCanListen() || stageRemBusy) return;
   stageRemBusy = true;
   try{
     const out = await api("stage_reminders_poll", {});
@@ -12675,6 +12690,7 @@ async function pollStageReminders(){
   finally{ stageRemBusy = false; }
 }
 function showStageReminders(items){
+  if(STAGE_REM_POPUP_DISABLED){ stageRemItems = []; const b0 = $("stageRemBg"); if(b0) b0.classList.remove("open"); return; }
   stageRemItems = items;
   const bg = $("stageRemBg");
   if(!items.length){ bg.classList.remove("open"); stopStageRemTitleFlash(); stageRemShownKeys = new Set(); return; }

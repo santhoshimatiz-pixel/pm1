@@ -6,7 +6,6 @@ FILES
   index.html         the whole web page (all dashboards)
   ai_assistant.py    floating AI chat: answers from each login's own dashboard data + reminders
   help_assistant.py  Help guide answers + the fixed "only about this PM tool" replies
-  seed_demo_data.py  optional: fills an empty database with demo clients and team members
   requirements.txt, Procfile, render.yaml   deployment (Render)
 
 RUN LOCALLY
@@ -15,7 +14,6 @@ RUN LOCALLY
       DATABASE_URL=postgresql://user:password@localhost:5432/matiz
       INITIAL_ADMIN_PASSWORD=<8+ characters, first run only>
   python server.py          then open http://localhost:8000
-  (optional demo data:  python seed_demo_data.py)
 
 DEPLOY (Render)
   render.yaml creates the web service + PostgreSQL. In the Render dashboard set:
