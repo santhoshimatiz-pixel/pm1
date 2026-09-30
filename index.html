@@ -9144,21 +9144,110 @@ function renderJournalsTable(){
 function renderAdminJournals(){ $("content").innerHTML = renderJournalsTable(); }
 
 /* ================= TASKS ================= */
-function renderAdminTasks(){
-  const rows = clients.flatMap(c => (c.workUpdates||[]).map(w => Object.assign({}, w, {clientId:c.id, clientName:c.name})))
-    .sort((a,b)=> new Date(b.at) - new Date(a.at));
-  const body = rows.map(w=>`<tr onclick="openDrawer(${jsq(w.clientId)})">
-    <td><b>${esc(w.empName)}</b></td>
-    <td>${esc((w.milestone||"").replace(/_/g," "))}</td>
-    <td>${esc(w.clientName)}<br><small style="color:#8DA39A">${w.clientId}</small></td>
-    <td>${esc(w.note||"—")}</td>
-    <td>${fmtDateTime(w.at)}</td>
+/* ---------- Work Log (Admin / Super Admin) ----------
+   Used to read ONLY the manual "+ Log code delivered / + Log paper delivered" entries
+   (workUpdates), which almost nobody clicks - so it sat at 0 while the team was doing
+   real work every day. It now merges every piece of recorded work, newest first:
+     * c.history    - every stage move (who sent the client to which step) plus the
+                      notes logged along the way (team assigned, demo given, hold,
+                      extension approved, journal set, writing completed ...)
+     * workSends    - work sent to a Coordinator / Technical TL / Manager / Validation,
+                      and who approved or returned it
+     * workUpdates  - the manual code / paper delivered logs (still shown)
+   Admins receive all three in full from the server, so nothing new is fetched. */
+const WORKLOG_EXTRA_LABEL = {EDITED:"Edited client details", ON_HOLD:"Put on hold", HOLD_RESOLVED:"Hold resolved"};
+const WORKLOG_PAGE = 100;
+let admWorkLogWho = "", admWorkLogQuery = "", admWorkLogLimit = WORKLOG_PAGE;
+function wlStatusWord(s){ s = String(s||"").toLowerCase().replace(/_/g," "); return s ? s.charAt(0).toUpperCase()+s.slice(1) : ""; }
+function admWorkLogEntries(){
+  const out = [];
+  clients.forEach(c=>{
+    // history comes newest-first; walk it oldest-first so a real stage MOVE (stage differs
+    // from the step before) can be told apart from a note logged at the same step.
+    let prevStage = null;
+    (c.history||[]).slice().reverse().forEach(h=>{
+      const extra = WORKLOG_EXTRA_LABEL[h.stage];
+      let what, note = h.note || "";
+      if(extra) what = extra;
+      else if(h.stage !== prevStage) what = prevStage===null && h.stage==="NEW" ? "Added as a new lead" : "Moved to: " + (STAGE_LABEL[h.stage] || h.stage);
+      else { what = note || "Update"; note = ""; }   // a note logged at the same step: the note IS the activity
+      if(!extra) prevStage = h.stage;
+      out.push({at:h.at, by:h.actor || "—", what, note, clientId:c.id, clientName:c.name, clientTag:c.displayId || c.id, kind:"stage"});
+    });
+    (c.workUpdates||[]).forEach(w=> out.push({at:w.at, by:w.empName || "—",
+      what: MILESTONE_LABEL[w.milestone] || (w.milestone||"").replace(/_/g," "), note:w.note || "",
+      clientId:c.id, clientName:c.name, clientTag:c.displayId || c.id, kind:"update"}));
+  });
+  (workSends||[]).forEach(s=>{
+    const c = s.clientId ? findClient(s.clientId) : null;
+    const base = {clientId: c ? c.id : "", clientName: c ? c.name : "", clientTag: c ? (c.displayId || c.id) : ""};
+    const item = s.kind==="VALIDATION" ? (s.paperTitle || s.taskTitle || "") : (s.taskTitle || "");
+    if(s.kind==="VALIDATION"){
+      out.push(Object.assign({at:s.at, by:s.sentBy || "—",
+        what: (s.round>1 ? "Resubmitted for validation" : "Submitted for validation") + (s.purposeLabel ? " — " + s.purposeLabel : ""),
+        note: [item, s.note].filter(Boolean).join(" — "), kind:"send"}, base));
+    } else {
+      out.push(Object.assign({at:s.at, by:s.sentBy || "—",
+        what: "Sent to " + (s.targetLabel || s.target || "") + (s.targetName ? " (" + s.targetName + ")" : ""),
+        note: [item, s.note].filter(Boolean).join(" — "), kind:"send"}, base));
+    }
+    if(s.resolvedAt && s.resolvedBy){
+      out.push(Object.assign({at:s.resolvedAt, by:s.resolvedBy,
+        what: wlStatusWord(s.status) + (s.kind==="VALIDATION" ? " in validation" : "") + (item ? ": " + item : ""),
+        note: s.resolvedNote || "", kind:"send"}, base));
+    }
+  });
+  return out.filter(x=>x.at).sort((a,b)=> new Date(b.at) - new Date(a.at));
+}
+function admWorkLogFiltered(all){
+  const q = admWorkLogQuery.trim().toLowerCase();
+  return all.filter(x=>{
+    if(admWorkLogWho && x.by !== admWorkLogWho) return false;
+    if(q && !((x.by+" "+x.what+" "+x.note+" "+x.clientName+" "+x.clientId+" "+(x.clientTag||"")).toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function admWorkLogTableHtml(all){
+  const rows = admWorkLogFiltered(all);
+  const shown = rows.slice(0, admWorkLogLimit);
+  if(!rows.length) return `<div class="adm-empty">${all.length ? "Nothing matches this filter." : "No work recorded yet."}</div>`;
+  const body = shown.map(w=>`<tr ${w.clientId?`onclick="openDrawer(${jsq(w.clientId)})"`:`style="cursor:default"`}>
+    <td><b>${esc(w.by)}</b></td>
+    <td>${esc(w.what)}</td>
+    <td>${w.clientId ? `${esc(w.clientName)}<br><small style="color:#8DA39A">${esc(w.clientTag || w.clientId)}</small>` : "—"}</td>
+    <td>${w.note ? esc(w.note) : "—"}</td>
+    <td style="white-space:nowrap">${fmtDateTime(w.at)}</td>
   </tr>`).join("");
+  const more = rows.length > shown.length
+    ? `<div style="text-align:center;padding:14px"><button class="btn ghost small" onclick="admWorkLogLimit+=WORKLOG_PAGE;admWorkLogRefreshTable()">Show more (${rows.length - shown.length} older)</button></div>` : "";
+  return `<table class="adm-table"><thead><tr><th>By</th><th>Activity</th><th>Client</th><th>Details</th><th>When</th></tr></thead><tbody>${body}</tbody></table>${more}`;
+}
+// Filters redraw only the table, so the search box keeps focus while typing.
+function admWorkLogRefreshTable(){
+  const all = admWorkLogEntries();
+  const box = $("wlTable"); if(box) box.innerHTML = admWorkLogTableHtml(all);
+  const n = $("wlCount"); if(n) n.textContent = admWorkLogFiltered(all).length;
+}
+function admWorkLogSetWho(v){ admWorkLogWho = v; admWorkLogLimit = WORKLOG_PAGE; admWorkLogRefreshTable(); }
+function admWorkLogSetQuery(v){ admWorkLogQuery = v; admWorkLogLimit = WORKLOG_PAGE; admWorkLogRefreshTable(); }
+function renderAdminTasks(){
+  const all = admWorkLogEntries();
+  const people = [...new Set(all.map(x=>x.by).filter(b=>b && b!=="—"))].sort((a,b)=>a.localeCompare(b));
+  if(admWorkLogWho && !people.includes(admWorkLogWho)) admWorkLogWho = "";
+  const selStyle = "background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13.5px;color:var(--text);width:auto;max-width:220px;margin:0";
   $("content").innerHTML = `<div class="adm-panel">
-    <div class="adm-panel-head"><h3>All work updates</h3><span class="badge b-purp">${rows.length}</span></div>
-    <p class="msub" style="margin:-6px 0 14px">Looking for the actual project task list instead? Open a project's own <b>Tasks</b> / <b>Task Board</b> sub-tab from Projects.</p>
-    <div class="adm-table-wrap">${rows.length?`<table class="adm-table"><thead><tr><th>By</th><th>Milestone</th><th>Client</th><th>Note</th><th>When</th></tr></thead><tbody>${body}</tbody></table>`
-    :`<div class="adm-empty">No work updates logged yet.</div>`}</div>
+    <div class="adm-panel-head">
+      <h3>All work activity <span class="badge b-purp" id="wlCount" style="margin-left:6px">${admWorkLogFiltered(all).length}</span></h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end">
+        <select style="${selStyle}" onchange="admWorkLogSetWho(this.value)">
+          <option value="">Everyone</option>
+          ${people.map(p=>`<option value="${esc(p)}" ${admWorkLogWho===p?"selected":""}>${esc(p)}</option>`).join("")}
+        </select>
+        <div class="adm-search"><span>&#128269;</span><input placeholder="Search person, client, activity" value="${esc(admWorkLogQuery)}" oninput="admWorkLogSetQuery(this.value)"></div>
+      </div>
+    </div>
+    <p class="msub" style="margin:0;padding:12px 18px 0">Every stage move, hand-off, review and delivery across all teams. Click a row to open the client.</p>
+    <div class="adm-table-wrap" id="wlTable">${admWorkLogTableHtml(all)}</div>
   </div>`;
 }
 
@@ -12351,15 +12440,6 @@ function openSettings(){
     <p class="msub">Where each department login's notifications go (e.g. BDC lead &rarr; Marketing TL, Technical Manager &rarr; Technical TL review).</p>
     ${roleRows}
     <div class="modal-actions"><button class="btn" onclick="saveRoleEmailsForm()">Save department emails</button></div>
-    <h3 style="margin-top:14px">Email sending check</h3>
-    <div id="mailCheckStatus" class="msub">Checking…</div>
-    <div class="field" style="display:flex;gap:8px;align-items:flex-end">
-      <div style="flex:1"><label>Send a test email to</label><input id="mailTestTo" type="email" value="${esc(myEmail||"")}" placeholder="you@example.com"></div>
-      <button class="btn small" id="mailTestBtn" type="button" onclick="runMailTest()">Send test</button>
-    </div>
-    <div id="mailTestResult" style="font-size:13px;margin:-4px 0 10px"></div>
-    <details><summary style="cursor:pointer;font-size:13px;color:var(--gold)">Recent emails (last 40)</summary>
-      <div id="mailLogList" style="max-height:260px;overflow:auto;font-size:12px;margin-top:8px"></div></details>
     <div style="height:1px;background:var(--line);margin:18px 0"></div>`;
   const dbSection = (role==="super_admin" || role==="md_admin") ? `
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
@@ -12375,10 +12455,11 @@ function openSettings(){
     <div class="field"><label>New password</label><input id="s_newpwd" type="password" placeholder="New password"></div>
     <div class="field"><label>Confirm new password</label><input id="s_newpwd2" type="password" placeholder="Re-enter new password"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveMyPassword()">Save password</button></div>
-    ${role !== "validator" ? alertToneSettingsHtml() : ""}
-    ${(role==="super_admin" || role==="md_admin") ? stageRemSettingsHtml() : ""}
     ${dbSection}`);
-  if(isAdmin) loadMailStatus();
+  // Removed from Settings: "Email sending check", "Reminder tone" and "Stage reminders".
+  // Both reminder pop-ups are switched off (AI_REM_POPUP_DISABLED / STAGE_REM_POPUP_DISABLED),
+  // so the tone and stage-reminder timings had no effect. Their helper functions are left
+  // in place, so any of these can be brought back by re-adding one line here.
 }
 /* ================= MY PROFILE (every dashboard) =================
    Everyone opens "My profile" from the sidebar and can update it any time.
