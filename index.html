@@ -118,7 +118,7 @@ a{color:var(--purple)}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
 
 /* ---------- login ---------- */
-#loginView,#clientSetupView,#clientForgotView{
+#loginView,#clientSetupView,#clientForgotView,#empForgotView{
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 18px;
   background:
     radial-gradient(1200px 640px at 85% -10%, rgba(14,116,144,.10), transparent 60%),
@@ -1208,6 +1208,9 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
           <div class="field" id="empUidField" style="display:none">
             <label for="empUid">Your employee ID</label>
             <input id="empUid" placeholder="e.g. EMP-1006" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">
+            <div style="margin-top:6px;font-size:13px">
+              <a href="#" onclick="event.preventDefault();openEmpForgot()" style="color:var(--gold);font-weight:700">Forgot password?</a>
+            </div>
           </div>
           <div class="field">
             <label for="pwd">Password</label>
@@ -1353,6 +1356,44 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
   </div>
 </div>
 
+<!-- ============ EMPLOYEE: FORGOT PASSWORD (code emailed to the profile Mail ID) ============ -->
+<div id="empForgotView" style="display:none">
+  <div class="login-wrap" style="max-width:440px">
+    <div class="brand"><h1>iMatiz <em>Technology</em></h1></div>
+    <div class="login-form" style="margin-top:18px">
+      <h2 style="margin:0 0 6px;font-size:20px" id="efTitle">Forgot your password?</h2>
+      <!-- step 1: employee ID -->
+      <div id="efStep1">
+        <p class="msub" style="margin:0 0 18px">Enter your Employee ID. We'll email a reset code to the Mail ID saved in your profile.</p>
+        <div class="field">
+          <label for="ef_uid">Employee ID</label>
+          <input id="ef_uid" placeholder="e.g. EMP-1006" autocomplete="off">
+        </div>
+        <button class="btn" id="efSendBtn" onclick="submitEmpForgot()">Email me a reset code</button>
+        <p class="login-note" style="margin-top:12px">
+          <a href="#" onclick="event.preventDefault();showEmpResetStep()" style="color:var(--gold);font-weight:700">I already have a code</a>
+        </p>
+      </div>
+      <!-- step 2: code + new password -->
+      <div id="efStep2" style="display:none">
+        <div id="efSentNote" style="display:none;margin:0 0 14px;padding:12px 14px;border-radius:10px;background:rgba(120,200,140,.12);color:#3f9a57;font-size:13.5px;font-weight:600"></div>
+        <div class="field"><label for="ef_uid2">Employee ID</label><input id="ef_uid2" autocomplete="off"></div>
+        <div class="field" id="ef_codeField"><label for="ef_code">Reset code from the email</label><input id="ef_code" placeholder="e.g. K7Q2M-9XDRP" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"></div>
+        <div class="field"><label for="ef_pwd1">New password</label><input id="ef_pwd1" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+        <div class="field"><label for="ef_pwd2">Confirm new password</label><input id="ef_pwd2" type="password" autocomplete="new-password"></div>
+        <button class="btn" id="efResetBtn" onclick="submitEmpReset()">Set new password</button>
+        <p class="login-note" style="margin-top:12px">
+          <a href="#" onclick="event.preventDefault();openEmpForgot()" style="color:var(--gold);font-weight:700">Send a new code</a>
+        </p>
+      </div>
+      <div class="login-err" id="efErr"></div>
+      <p class="login-note" style="margin-top:16px">
+        <a href="#" onclick="event.preventDefault();closeEmpForgot()" style="color:var(--gold);font-weight:700">&larr; Back to login</a>
+      </p>
+    </div>
+  </div>
+</div>
+
 <!-- ================= APP ================= -->
 <div id="appView">
   <div class="mnav-overlay" id="mnavOverlay" onclick="closeMobileNav()"></div>
@@ -1488,6 +1529,7 @@ let clientDocuments = [], clientNotesV2 = [], clientReferrals = [];
 let workSends = [];   // every "send completed work to ..." (coordinator / validation / TL / TM)
 const ADM_SEARCH_STORES = {};
 let settings = {fromEmail:"", toEmail:""};
+let myEmail = "", roleEmails = {}, roleEmailLabels = {}, mailConfigured = false;
 let role = null, empId = null, empName = null, empRole = null, empTeamType = null, clientSelf = null;
 let selectedRole = null, selectedEmpId = null, selectedOnlyEmpRole = "";
 let tmTab = 'work';
@@ -1544,7 +1586,56 @@ async function api(action, data){
     throw new Error(out.error || "Your session has expired. Please log in again.");
   }
   if(!res.ok || out.error) throw new Error(out.error || "Server error");
+  if(out && out.mailNotice) showMailNotice(out.mailNotice);
   return out;
+}
+
+/* ---- Automatic hand-off emails ----
+   When an action gives work to someone (a task, a client assignment, or the next
+   pipeline step), the server emails that person at the address saved in their
+   profile and tells us who it went to. We show that in a small note that doesn't
+   fight with the normal toast. */
+function showMailNotice(n){
+  const parts = [];
+  if(n.sent && n.sent.length){
+    parts.push("\u2709 Email sent to " + n.sent.map(x=>x.name + " (" + x.email + ")" +
+      (x.cc && x.cc.length ? " cc " + x.cc.join(", ") : "")).join(", "));
+  }
+  if(n.missing && n.missing.length){
+    parts.push("No email saved for " + n.missing.join(", ") +
+      (settings.toEmail ? " \u2014 sent to the default address instead" : "") +
+      ". Add it in their profile (Team) or Settings \u2192 My email.");
+  }
+  if(!parts.length) return;
+  let el = document.getElementById("mailNote");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "mailNote";
+    el.style.cssText = "position:fixed;left:16px;bottom:16px;max-width:min(460px,calc(100vw - 32px));z-index:9999;" +
+      "background:var(--card,#1d2433);color:var(--text,#fff);border:1px solid var(--gold,#c9a44c);border-radius:10px;" +
+      "padding:10px 14px;font-size:13px;line-height:1.45;box-shadow:0 6px 24px rgba(0,0,0,.35);cursor:pointer";
+    el.onclick = ()=>{ el.style.display = "none"; };
+    document.body.appendChild(el);
+  }
+  el.textContent = parts.join("  ");
+  el.style.display = "block";
+  clearTimeout(el._h);
+  el._h = setTimeout(()=>{ el.style.display = "none"; }, 7000);
+}
+// Addresses the server resolved for this step but could not send itself (Gmail not
+// configured) - used to pre-fill the "Open mail app" draft.
+function mailNoticeTo(out){
+  const p = out && out.mailNotice && out.mailNotice.pending;
+  return p && p.length ? p.map(x=>x.email).filter(Boolean).join(", ") : "";
+}
+function mailNoticeCc(out){
+  const p = out && out.mailNotice && out.mailNotice.pending;
+  const cc = new Set();
+  (p||[]).forEach(x=>(x.cc||[]).forEach(c=>cc.add(c)));
+  return [...cc].join(", ");
+}
+function mailAlreadySent(out){
+  return !!(out && out.mailNotice && out.mailNotice.sent && out.mailNotice.sent.length);
 }
 
 // Called when the server tells us the session is gone.
@@ -1581,6 +1672,10 @@ async function loadData(){
       clients = out.clients || [];
       employees = out.employees || [];
       settings = Object.assign(settings, out.settings || {});
+      myEmail = out.myEmail || "";
+      roleEmails = out.roleEmails || {};
+      roleEmailLabels = out.roleEmailLabels || {};
+      mailConfigured = !!out.mailConfigured;
       services = out.services || {};
       calendarEvents = out.calendarEvents || [];
       clientQueries = out.clientQueries || [];
@@ -1896,15 +1991,17 @@ function payLines(c){
     return `${PAY_LABELS[k]} : ${p.status==='paid' ? 'Paid Rs. '+(p.amount||'-')+' on '+fmtDate(p.date) : 'Pending'}`;
   }).join("\n");
 }
-function composeMail(subject, body){
-  mailDraft = {subject, body};
-  const to = settings.toEmail || "";
+function composeMail(subject, body, to, cc){
+  to = (to || settings.toEmail || "").trim();
+  cc = (cc || "").trim();
+  mailDraft = {subject, body, to, cc};
   openModal(`
     <h3>Email ready to send</h3>
     <p class="msub">Review the details, then open your mail app — everything is pre-filled.</p>
     <div class="mailbox">
       <div class="mrow">From: <b>${esc(settings.fromEmail)}</b></div>
-      <div class="mrow">To: <b>${esc(to)||"&lt;set in Email settings&gt;"}</b></div>
+      <div class="mrow">To: <b>${esc(to)||"&lt;no email saved for this person &mdash; add it in Settings &rarr; My email&gt;"}</b></div>
+      ${cc ? `<div class="mrow">Cc: <b>${esc(cc)}</b></div>` : ""}
       <div class="mrow">Subject: <b>${esc(subject)}</b></div>
       <textarea id="mailBody" readonly>${esc(body)}</textarea>
     </div>
@@ -1914,13 +2011,14 @@ function composeMail(subject, body){
       <button class="btn gold" id="sendNowBtn" onclick="sendMailNow()">Send email now &#9993;</button>
       <button class="btn" onclick="closeModal()">Done</button>
     </div>`);
-  $("mailtoLink").href = "mailto:" + encodeURIComponent(to) + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+  $("mailtoLink").href = "mailto:" + to.split(/\s*,\s*/).map(encodeURIComponent).join(",") + "?subject=" + encodeURIComponent(subject) +
+    (cc ? "&cc=" + encodeURIComponent(cc) : "") + "&body=" + encodeURIComponent(body);
 }
 async function sendMailNow(){
   const btn = $("sendNowBtn");
   btn.disabled = true; btn.innerHTML = "Sending...";
   try{
-    const out = await api("send_email", {subject:mailDraft.subject, body:mailDraft.body});
+    const out = await api("send_email", {to:[mailDraft.to, mailDraft.cc].filter(Boolean).join(", "), subject:mailDraft.subject, body:mailDraft.body});
     toast("Email sent to " + out.to);
     closeModal();
   }catch(e){
@@ -2052,7 +2150,85 @@ async function submitClientForgot(){
   $("cfSubmitBtn").style.display = "none";
   $("cfSuccess").style.display = "block";
 }
+/* ============ EMPLOYEE: FORGOT PASSWORD ============
+   Step 1: Employee ID -> the server emails a one-time code (and link) to the Mail ID
+   in that person's profile. Step 2: code + new password. The emailed link
+   (?empreset=EMPID:CODE) opens step 2 with both already filled in. */
+function openEmpForgot(prefillUid){
+  $("loginView").style.display = "none";
+  $("clientSetupView").style.display = "none";
+  $("clientForgotView").style.display = "none";
+  $("empForgotView").style.display = "flex";
+  $("efTitle").textContent = "Forgot your password?";
+  $("efStep1").style.display = "block";
+  $("efStep2").style.display = "none";
+  $("efSendBtn").disabled = false;
+  $("efErr").textContent = "";
+  $("ef_uid").value = prefillUid || ($("empUid") ? $("empUid").value.trim() : "");
+  $("ef_uid").focus();
+}
+function showEmpResetStep(uid, code, sentMsg){
+  $("empForgotView").style.display = "flex";
+  $("loginView").style.display = "none";
+  $("efTitle").textContent = "Choose a new password";
+  $("efStep1").style.display = "none";
+  $("efStep2").style.display = "block";
+  $("efErr").textContent = "";
+  $("ef_uid2").value = uid || $("ef_uid").value.trim();
+  $("ef_code").value = code || "";
+  $("ef_codeField").style.display = code ? "none" : "block";
+  $("ef_pwd1").value = ""; $("ef_pwd2").value = "";
+  $("efSentNote").style.display = sentMsg ? "block" : "none";
+  $("efSentNote").textContent = sentMsg || "";
+  (code ? $("ef_pwd1") : $("ef_code")).focus();
+}
+function closeEmpForgot(){
+  $("empForgotView").style.display = "none";
+  $("loginView").style.display = "flex";
+  loadCaptcha();
+}
+async function submitEmpForgot(){
+  const err = $("efErr");
+  const empUid = $("ef_uid").value.trim();
+  if(!empUid){ err.textContent = "Enter your employee ID."; return; }
+  err.textContent = "Sending...";
+  $("efSendBtn").disabled = true;
+  let out;
+  try{ out = await api("request_employee_password_reset", {empUid}); }
+  catch(e){ err.textContent = e.message; $("efSendBtn").disabled = false; return; }
+  showEmpResetStep(empUid, "", (out.sentTo ? "Reset code sent to " + out.sentTo + ". " : "") + (out.message || "") +
+    " If nothing arrives, your profile may not have an email yet - ask your manager to add it, or to reset your password for you.");
+}
+async function submitEmpReset(){
+  const err = $("efErr");
+  const empUid = $("ef_uid2").value.trim();
+  const code = $("ef_code").value.trim();
+  const p1 = $("ef_pwd1").value, p2 = $("ef_pwd2").value;
+  if(!empUid){ err.textContent = "Enter your employee ID."; return; }
+  if(!code){ err.textContent = "Enter the reset code from the email."; return; }
+  if(p1.length < 8){ err.textContent = "Choose a password at least 8 characters long."; return; }
+  if(p1 !== p2){ err.textContent = "Passwords don't match."; return; }
+  err.textContent = "Saving...";
+  $("efResetBtn").disabled = true;
+  try{ await api("employee_reset_with_code", {empUid, code, newPassword:p1}); }
+  catch(e){ err.textContent = e.message; $("efResetBtn").disabled = false; if(/expired|wrong/i.test(e.message)) $("ef_codeField").style.display = "block"; return; }
+  $("efResetBtn").disabled = false;
+  err.textContent = "";
+  closeEmpForgot();
+  if($("empUid")) $("empUid").value = empUid;
+  toast("Password changed — please sign in with your new password.");
+  if($("pwd")) $("pwd").focus();
+}
 function checkInviteLinkOnLoad(){
+  // Employee password-reset link from the email: ?empreset=EMPID:CODE
+  const _p = new URLSearchParams(window.location.search);
+  const er = _p.get("empreset");
+  if(er && er.includes(":")){
+    const i = er.lastIndexOf(":");
+    history.replaceState(null, "", window.location.pathname);
+    showEmpResetStep(er.slice(0, i), er.slice(i + 1), "");
+    return;
+  }
   // Supports links generated by the app: ?setup=CLIENTID:TOKEN
   const params = new URLSearchParams(window.location.search);
   const setup = params.get("setup");
@@ -3064,7 +3240,7 @@ function telecallerRosterPanel(){
         <label>Add a BDC member</label>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newTeleName" placeholder="Full name">
-          <input id="newTeleEmail" placeholder="Email (optional)">
+          <input id="newTeleEmail" placeholder="Email (work assignments are emailed here)">
         </div>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newTeleUid" placeholder="Employee ID (leave blank to auto-generate)">
@@ -4708,7 +4884,7 @@ function rosterPanel(){
         <label>Add programmer</label>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newProgName" placeholder="Full name">
-          <input id="newProgEmail" placeholder="Email (optional)">
+          <input id="newProgEmail" placeholder="Email (work assignments are emailed here)">
         </div>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newProgUid" placeholder="Employee ID (leave blank to auto-generate)">
@@ -4734,7 +4910,7 @@ function rosterPanel(){
         <label>Add paper writer</label>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newWriterName" placeholder="Full name">
-          <input id="newWriterEmail" placeholder="Email (optional)">
+          <input id="newWriterEmail" placeholder="Email (work assignments are emailed here)">
         </div>
         <div class="grid2" style="margin-bottom:8px">
           <input id="newWriterUid" placeholder="Employee ID (leave blank to auto-generate)">
@@ -4892,7 +5068,7 @@ function journalRosterPanel(){
         <label>Add ${esc(label.toLowerCase())}</label>
         <div class="grid2" style="margin-bottom:8px">
           <input id="${pfx}Name" placeholder="Full name">
-          <input id="${pfx}Email" placeholder="Email (optional)">
+          <input id="${pfx}Email" placeholder="Email (work assignments are emailed here)">
         </div>
         <div class="grid2" style="margin-bottom:8px">
           <input id="${pfx}Uid" placeholder="Employee ID (leave blank to auto-generate)">
@@ -9100,7 +9276,7 @@ function admOpenAddMember(){
       </select>
     </div>
     <div class="grid2">
-      <div class="field"><label>Mail ID</label><input id="mem_email" type="email"></div>
+      <div class="field"><label>Mail ID <span style="font-weight:400;color:var(--muted)">(work assigned to them is emailed here)</span></label><input id="mem_email" type="email"></div>
       <div class="field"><label>Phone</label><input id="mem_phone" type="tel" inputmode="numeric" maxlength="10" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)"></div>
     </div>
     <div class="grid2">
@@ -9294,7 +9470,7 @@ function admOpenUpdateMember(empId){
   openModal(`<h3>Update member</h3>
     <div class="grid2">
       <div class="field"><label>Full Name</label><input id="up_mem_name" value="${esc(e.name)}"></div>
-      <div class="field"><label>Mail ID</label><input id="up_mem_email" value="${esc(e.email||"")}"></div>
+      <div class="field"><label>Mail ID <span style="font-weight:400;color:var(--muted)">(work assigned to them is emailed here)</span></label><input id="up_mem_email" type="email" value="${esc(e.email||"")}"></div>
     </div>
     <div class="grid2">
       <div class="field"><label>Phone</label><input id="up_mem_phone" type="tel" inputmode="numeric" maxlength="10" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)" value="${esc(e.phone||"")}"></div>
@@ -10093,10 +10269,12 @@ window.addEventListener("resize", function(){
 
 /* ================= PIPELINE ACTIONS ================= */
 async function sendToTL(id){
-  try{ await api("send_to_tl",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
+  let out;
+  try{ out = await api("send_to_tl",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
   const c = findClient(id);
-  composeMail(`[Verification needed] ${c.name} — new lead`,
+  // Already emailed automatically to the next person's own address? Then no draft needed.
+  if(!mailAlreadySent(out)) composeMail(`[Verification needed] ${c.name} — new lead`,
 `Dear Marketing TL,
 
 A new lead is ready for your verification.
@@ -10112,14 +10290,16 @@ Pipeline       : Telecaller -> Marketing TL -> Marketing Manager -> Accounts -> 
 Please verify this in your iMatiz TL dashboard.
 
 Regards,
-iMatiz Technology`);
+iMatiz Technology`, mailNoticeTo(out) || roleEmails.marketing_tl || "", mailNoticeCc(out));
   toast("Sent to Marketing TL");
 }
 async function tlVerify(id){
-  try{ await api("tl_verify",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
+  let out;
+  try{ out = await api("tl_verify",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
   const c = findClient(id);
-  composeMail(`[TL verified — approval needed] ${c.name}`,
+  // Already emailed automatically to the next person's own address? Then no draft needed.
+  if(!mailAlreadySent(out)) composeMail(`[TL verified — approval needed] ${c.name}`,
 `Dear Marketing Manager,
 
 The Marketing TL has verified the client below. Your approval is needed.
@@ -10134,14 +10314,16 @@ Verified by    : Marketing TL
 Please approve this in your iMatiz Manager dashboard.
 
 Regards,
-iMatiz Technology`);
+iMatiz Technology`, mailNoticeTo(out) || roleEmails.marketing_manager || "", mailNoticeCc(out));
   toast("Verified & sent to Manager");
 }
 async function managerApprove(id){
-  try{ await api("manager_approve",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
+  let out;
+  try{ out = await api("manager_approve",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
   const c = findClient(id);
-  composeMail(`[Manager approved — for Accounts] ${c.name}`,
+  // Already emailed automatically to the next person's own address? Then no draft needed.
+  if(!mailAlreadySent(out)) composeMail(`[Manager approved — for Accounts] ${c.name}`,
 `Dear Accounts team,
 
 This client has been verified by the Marketing TL and approved by the Marketing Manager.
@@ -10156,14 +10338,16 @@ Approved by    : Marketing Manager
 Please sign off in your iMatiz Accounts dashboard to send it to the Technical Team.
 
 Regards,
-iMatiz Technology`);
+iMatiz Technology`, mailNoticeTo(out) || roleEmails.account_team || "", mailNoticeCc(out));
   toast("Approved & sent to Accounts");
 }
 async function accountApprove(id){
-  try{ await api("account_approve",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
+  let out;
+  try{ out = await api("account_approve",{clientId:id}); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
   const c = findClient(id);
-  composeMail(`[Accounts confirmed — for Technical Team] ${c.name}`,
+  // Already emailed automatically to the next person's own address? Then no draft needed.
+  if(!mailAlreadySent(out)) composeMail(`[Accounts confirmed — for Technical Team] ${c.name}`,
 `Dear Technical Team,
 
 Accounts has confirmed this client. Please review the proposal.
@@ -10178,7 +10362,7 @@ Confirmed by   : Accounts Team
 Next step: a programmer verifies the proposal, then the Technical TL assigns implementation.
 
 Regards,
-iMatiz Technology`);
+iMatiz Technology`, mailNoticeTo(out) || roleEmails.technical_manager || "", mailNoticeCc(out));
   toast("Approved & sent to Technical Team");
 }
 function preAssignExtraHtml(id, sfx){
@@ -12067,12 +12251,26 @@ document.addEventListener("visibilitychange", function(){ if(document.visibility
 document.addEventListener("keydown", function(e){ if(e.key === "Escape" && $("aiPanel") && $("aiPanel").classList.contains("open") && !$("modalBg").classList.contains("open")) aiClose(); });
 
 function openSettings(){
-  const emailSection = role==="client" ? "" : `
-    <h3>Email settings</h3><p class="msub">Every handoff step opens a ready email with these addresses</p>
-    <div class="field"><label>From email</label><input id="s_from" value="${esc(settings.fromEmail)}">
-      <p style="font-size:12px;color:var(--muted);margin-top:5px">Emails open in your mail app, so they send from whichever account is signed in there.</p></div>
-    <div class="field"><label>To email (all steps for now)</label><input id="s_to" value="${esc(settings.toEmail)}" placeholder="receiver@email.com"></div>
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveSettingsForm()">Save settings</button></div>
+  const isAdmin = (role==="super_admin" || role==="md_admin");
+  // Everyone (except the client portal) sets the address THEIR work notifications go to.
+  const myEmailSection = role==="client" ? "" : `
+    <h3>My email</h3>
+    <p class="msub">When someone assigns you work or sends the next step to you, the email comes here.${role==="employee" ? "" : " This is the address for the <b>" + esc(ROLE_DISPLAY[role]||role) + "</b> login."}</p>
+    <div class="field"><label>My email address</label><input id="s_myemail" type="email" value="${esc(myEmail)}" placeholder="you@company.com"></div>
+    <div class="modal-actions"><button class="btn" onclick="saveMyEmail()">Save my email</button></div>
+    <div style="height:1px;background:var(--line);margin:18px 0"></div>`;
+  const roleRows = Object.keys(roleEmailLabels).filter(r=>r!=="super_admin" && r!=="md_admin").map(r=>`
+    <div class="field"><label>${esc(roleEmailLabels[r])}</label><input data-role-email="${esc(r)}" type="email" value="${esc(roleEmails[r]||"")}" placeholder="not set"></div>`).join("");
+  const emailSection = !isAdmin ? "" : `
+    <h3>Email settings</h3>
+    <p class="msub">Emails are sent <b>from</b> the company account and go <b>to</b> the person who gets the work: team members at the email in their profile (Team), department logins at the address below (they can also set it themselves in Settings &rarr; My email).${mailConfigured ? "" : " <b>Automatic sending is off</b> &mdash; set GMAIL_USER and GMAIL_APP_PASSWORD on the server; until then hand-off steps open a ready email in your mail app."}</p>
+    <div class="field"><label>From email</label><input id="s_from" value="${esc(settings.fromEmail)}"></div>
+    <div class="field"><label>Default To email (used only when the person has no email saved)</label><input id="s_to" value="${esc(settings.toEmail)}" placeholder="office@company.com"></div>
+    <div class="modal-actions"><button class="btn" onclick="saveSettingsForm()">Save settings</button></div>
+    <h3 style="margin-top:14px">Department login emails</h3>
+    <p class="msub">Where each department login's notifications go (e.g. BDC lead &rarr; Marketing TL, Technical Manager &rarr; Technical TL review).</p>
+    ${roleRows}
+    <div class="modal-actions"><button class="btn" onclick="saveRoleEmailsForm()">Save department emails</button></div>
     <div style="height:1px;background:var(--line);margin:18px 0"></div>`;
   const dbSection = (role==="super_admin" || role==="md_admin") ? `
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
@@ -12080,6 +12278,7 @@ function openSettings(){
     <p class="msub">Export a backup, upload (restore) a backup, or permanently clear client &amp; project data from the database.</p>
     <button class="btn ghost" onclick="closeModal();openDatabaseManagement()">&#128451; Open Database Management &#8594;</button>` : "";
   openModal(`
+    ${myEmailSection}
     ${emailSection}
     <h3>Change my password</h3>
     <p class="msub">${role==="employee" ? "Changes your individual login" : "Changes the shared login for this whole role — everyone using it will need the new password"}</p>
@@ -12105,12 +12304,28 @@ async function saveMyPassword(){
   closeModal();
   toast("Password updated — use it next time you sign in");
 }
+async function saveMyEmail(){
+  const email = $("s_myemail").value.trim();
+  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast("Enter a valid email address"); return; }
+  try{ await api("save_my_email",{email}); }catch(e){ toast(e.message); return; }
+  myEmail = email;
+  if(roleEmails && role in roleEmails) roleEmails[role] = email;
+  toast(email ? "Saved — your work emails will come to " + email : "Email removed");
+}
+async function saveRoleEmailsForm(){
+  const emails = {};
+  document.querySelectorAll("[data-role-email]").forEach(el=>{ emails[el.getAttribute("data-role-email")] = el.value.trim(); });
+  let out;
+  try{ out = await api("save_role_emails",{emails}); }catch(e){ toast(e.message); return; }
+  roleEmails = Object.assign({}, roleEmails, out.roleEmails || emails);
+  toast("Department emails saved");
+}
 async function saveSettingsForm(){
   const fromEmail = $("s_from").value.trim();
   const toEmail = $("s_to").value.trim();
   try{ await api("save_settings",{fromEmail, toEmail}); }catch(e){ toast(e.message); await refresh(); return; }
   settings.fromEmail = fromEmail; settings.toEmail = toEmail;
-  closeModal(); toast("Email settings saved for the whole team");
+  toast("Email settings saved for the whole team");
 }
 
 /* ================= DATABASE MANAGEMENT (Super Admin / MD Admin only) =================

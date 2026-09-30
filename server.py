@@ -628,7 +628,8 @@ def verify_login_captcha(captcha_id, answer):
 
 # Reachable with no session at all.
 PUBLIC_ACTIONS = {"login", "login_captcha", "logout", "session",
-                  "set_client_password", "request_client_password_reset"}
+                  "set_client_password", "request_client_password_reset",
+                  "request_employee_password_reset", "employee_reset_with_code"}
 
 # The only actions a client-portal session may reach. Everything else is
 # staff-only, including the destructive pipeline actions.
@@ -854,6 +855,8 @@ ACTION_ROLES = {
     "admin_import_data": _R_ADMIN,
     "admin_import_summary": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
+    "save_my_email": _R_ALL_STAFF,
+    "save_role_emails": _R_ADMIN,
 
     # ---- Validation folders (AI Check / Plagiarism Check / Test Paper) ----
     # "validator" is the dedicated Validation login (an employee whose Technical
@@ -1864,6 +1867,7 @@ def init_db():
     con.commit()
 
     con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1")
+    con.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''")
     con.commit()
 
     con.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS service_key TEXT DEFAULT '%s'" % DEFAULT_SERVICE)
@@ -1888,6 +1892,10 @@ def init_db():
     # ----- Validation folders (AI Check / Plagiarism Check / Test Paper) -----
     # validation_access: comma list of folder keys the Technical Manager granted.
     con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS validation_access TEXT DEFAULT ''")
+    # Forgot password: only a hash of the emailed reset code is stored, with an expiry.
+    con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_code_hash TEXT DEFAULT ''")
+    con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_code_expires TEXT DEFAULT ''")
+    con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_code_tries INTEGER NOT NULL DEFAULT 0")
     con.executescript(f"""
     CREATE TABLE IF NOT EXISTS validation_papers (
         id SERIAL PRIMARY KEY,
@@ -2764,6 +2772,369 @@ def get_settings(con):
     if not s:
         return {"fromEmail": DEFAULT_FROM_EMAIL or GMAIL_USER, "toEmail": DEFAULT_TO_EMAIL}
     return {"fromEmail": s["from_email"], "toEmail": s["to_email"]}
+
+
+# =====================================================================
+# PERSON-TO-PERSON EMAIL ROUTING
+# ---------------------------------------------------------------------
+# "From" is always the company Gmail account (GMAIL_USER). "To" is now the
+# actual person the work goes to:
+#   * individually-added team members -> employees.email (set when they are
+#     added, edited in Team, or by themselves in Settings -> My email)
+#   * department logins (Marketing TL, Marketing Manager, Accounts, Technical
+#     Manager/TL, Journal Manager/TL, BDC ...) -> users.email, set by that login
+#     in Settings -> My email, or by an admin in Settings -> Email settings.
+# If the person has no email saved yet, the mail goes to the old default
+# "To" address (Settings) with a line saying who it was meant for, so
+# nothing is silently lost.
+# =====================================================================
+ROLE_EMAIL_LABELS = {
+    "telecaller": "BDC (Telecaller)", "marketing_tl": "Marketing TL",
+    "marketing_manager": "Marketing Manager", "account_team": "Accounts Team",
+    "technical_manager": "Technical Manager", "technical_tl": "Technical TL",
+    "content_coordinator": "Content Coordinator", "journal_manager": "Journal Manager",
+    "journal_tl": "Journal TL", "md_admin": "MD / Admin", "super_admin": "Super Admin",
+}
+
+# Client columns that name the people doing the work, and how to describe them.
+ASSIGNMENT_COLUMNS = {
+    "proposal_writer": "Proposal writing",
+    "proposal_coordinator": "Proposal (coordinator — pick the writer)",
+    "impl_coordinator": "Implementation (coordinator — pick the team)",
+    "assigned_programmers": "Implementation / programming",
+    "pre_impl_programmers": "Implementation (pre-assigned — starts after the proposal is approved)",
+    "assigned_writers": "Paper writing",
+    "pre_write_writers": "Paper writing (pre-assigned — starts after implementation)",
+    "coordinator_name": "Paper review (content coordinator)",
+    "proofread_coordinator": "Proofreading coordinator",
+    "assigned_proofreaders": "Proofreading",
+    "format_coordinator": "Formatting coordinator",
+    "assigned_formatters": "Formatting",
+}
+
+HANDOFF_TARGET_ROLES = {"TECH_TL": ("technical_tl",), "TECH_MANAGER": ("technical_manager",)}
+
+# Extra people copied on a stage (besides who STAGE_REMINDER_RULES says must act).
+# A new lead from the BDC goes to the Marketing TL and is copied to the Marketing Manager.
+STAGE_EMAIL_CC_ROLES = {"TL_REVIEW": ("marketing_manager",)}
+
+# Actions that never move work between people - skip the before/after snapshot.
+_NOTIFY_SKIP_PREFIXES = ("get_", "list_", "ai_", "help_", "alert_tone", "login", "logout",
+                         "session", "bootstrap", "chat_typing", "dm_", "export", "download",
+                         "send_email", "save_settings", "save_my_email", "save_role_emails")
+
+
+def _mail_configured():
+    return bool(GMAIL_USER and GMAIL_APP_PASSWORD.replace(" ", ""))
+
+
+def _valid_email_list(raw):
+    out = []
+    for part in re.split(r"[,;\s]+", raw or ""):
+        part = part.strip()
+        if part and EMAIL_RE.match(part) and part.lower() not in [x.lower() for x in out]:
+            out.append(part)
+    return out
+
+
+def role_email_map(con):
+    try:
+        rows = con.execute("SELECT role, email FROM users").fetchall()
+    except Exception:
+        return {}
+    return {r["role"]: (r["email"] or "").strip() for r in rows}
+
+
+def employee_email_map(con, names_):
+    names_ = [n.strip() for n in names_ if n and n.strip()]
+    if not names_:
+        return {}
+    out = {}
+    for r in con.execute("""SELECT name, email FROM employees
+                            WHERE deleted_at IS NULL AND active=1""").fetchall():
+        if r["name"] in names_:
+            out[r["name"]] = (r["email"] or "").strip()
+    return out
+
+
+def send_mail_async(to_list, subject, body, cc_list=None):
+    """Send one plain-text mail from the company account in a background thread,
+    so a slow SMTP server never holds up the button the user clicked."""
+    pwd = GMAIL_APP_PASSWORD.replace(" ", "")
+    to_list = [t for t in (to_list or []) if EMAIL_RE.match(t or "")]
+    cc_list = [t for t in (cc_list or []) if EMAIL_RE.match(t or "") and t not in to_list]
+    if not pwd or not GMAIL_USER or not to_list:
+        return False
+    subject = re.sub(r"[\r\n]+", " ", str(subject))[:200]
+
+    def _go():
+        try:
+            msg = MIMEText(str(body)[:20000], "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = GMAIL_USER
+            msg["To"] = ", ".join(to_list)
+            if cc_list:
+                msg["Cc"] = ", ".join(cc_list)
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+                smtp.login(GMAIL_USER, pwd)
+                smtp.sendmail(GMAIL_USER, to_list + cc_list, msg.as_string())
+        except Exception as e:
+            print("[email] could not send %r to %s: %s" % (subject, to_list, e))
+
+    threading.Thread(target=_go, daemon=True).start()
+    return True
+
+
+class _Outbox:
+    """Collects everything one request wants to tell each person, then sends ONE
+    email per person (a writer assigned a task AND a client column in the same
+    click gets a single mail, not two)."""
+
+    def __init__(self, con, actor_label, actor_email=""):
+        self.con = con
+        self.actor = actor_label or "Someone"
+        self.actor_email = (actor_email or "").lower()
+        self.role_emails = role_email_map(con)
+        self.default_to = (get_settings(con).get("toEmail") or "").strip()
+        self.items = {}      # key -> {"name", "email", "subject", "sections", "cc"}
+
+    def _add(self, key, display, email, subject, section, cc=()):
+        missing = not email
+        email = email or self.default_to
+        if not email:
+            self.items.setdefault(key, {"name": display, "email": "", "missing": True,
+                                        "subject": subject, "sections": [], "cc": set()})
+            return
+        if email.lower() == self.actor_email:
+            return                       # don't mail people about what they just did themselves
+        it = self.items.setdefault(key, {"name": display, "email": email, "missing": missing,
+                                         "subject": subject, "sections": [], "cc": set()})
+        if section not in it["sections"]:
+            it["sections"].append(section)
+        it["cc"].update(c for c in cc if c and c.lower() != email.lower())
+
+    def to_role(self, role, subject, section, cc_roles=()):
+        cc = [self.role_emails.get(r, "") for r in cc_roles]
+        self._add("role:" + role, ROLE_EMAIL_LABELS.get(role, role), self.role_emails.get(role, ""),
+                  subject, section, cc)
+        if "role:" + role in self.items:
+            self.items["role:" + role]["is_role"] = True
+
+    def to_employees(self, names_, subject, section):
+        emails = employee_email_map(self.con, names_)
+        for n in names_:
+            n = (n or "").strip()
+            if n:
+                self._add("emp:" + n, n, emails.get(n, ""), subject, section)
+
+    def flush(self):
+        sent, missing = [], []
+        configured = _mail_configured()
+        for it in self.items.values():
+            if it["missing"]:
+                missing.append(it["name"])
+            if not it["email"]:
+                continue
+            head = "Hi %s,\n\n" % it["name"]
+            if it["missing"]:
+                where = ("an admin can add it in Settings -> Department login emails"
+                         if it.get("is_role") else "add it in their Team profile")
+                head = ("[This was meant for %s, who has no email saved yet - %s, or they can add it "
+                        "themselves in Settings -> My email.]\n\n" % (it["name"], where)) + head
+            link = ("\nOpen your iMatiz dashboard: %s\n" % APP_BASE_URL) if APP_BASE_URL else \
+                   "\nPlease check your iMatiz dashboard.\n"
+            body = head + "\n\n".join(it["sections"]) + "\n" + link + "\nRegards,\niMatiz Technology"
+            subject = it["subject"] if len(it["sections"]) == 1 else "iMatiz: %d updates for you" % len(it["sections"])
+            if configured and send_mail_async([it["email"]], subject, body, sorted(it["cc"])):
+                sent.append({"name": it["name"], "email": it["email"], "cc": sorted(it["cc"])})
+            else:
+                sent_to = {"name": it["name"], "email": it["email"], "cc": sorted(it["cc"]),
+                           "subject": subject, "body": body}
+                sent.append(dict(sent_to, notSent=True))
+        return {"configured": configured,
+                "sent": [s for s in sent if not s.get("notSent")],
+                "pending": [s for s in sent if s.get("notSent")],
+                "missing": missing} if (sent or missing) else None
+
+
+def _client_lines(c):
+    svc = SERVICES.get(c["service_key"] or "", {}).get("label", c["service_key"] or "-") \
+        if "service_key" in c.keys() else "-"
+    rows = [("Client", "%s (%s)" % (c["name"], c["id"])), ("Service", svc),
+            ("Phone", c["phone"] or "-"), ("Email", c["email"] or "-"),
+            ("Project deadline", c["deadline_date"] or "-"),
+            ("Current stage", STAGE_LABELS.get(c["stage"], c["stage"]))]
+    for col in ("topic", "domain"):
+        if col in c.keys() and (c[col] or "").strip():
+            rows.append((col.title(), c[col]))
+    return "\n".join("%-17s: %s" % r for r in rows)
+
+
+def _snapshot(con, d):
+    snap = {"client": None, "task": None, "max_task": 0, "max_handoff": 0}
+    cid = (d.get("clientId") or "").strip() if isinstance(d.get("clientId"), str) else ""
+    if cid:
+        r = con.execute("SELECT * FROM clients WHERE id=?", (cid,)).fetchone()
+        snap["client"] = dict(r) if r else None
+    tid = d.get("taskId") or d.get("id")
+    if tid and str(tid).isdigit():
+        r = con.execute("SELECT id, assigned_to FROM tasks WHERE id=?", (int(tid),)).fetchone()
+        snap["task"] = dict(r) if r else None
+    snap["max_task"] = con.execute("SELECT COALESCE(MAX(id),0) m FROM tasks").fetchone()["m"]
+    snap["max_handoff"] = con.execute("SELECT COALESCE(MAX(id),0) m FROM task_handoffs").fetchone()["m"]
+    return snap
+
+
+def _stage_recipients(con, c):
+    """(role logins, employee names) who must act on client c at its current stage.
+    Mirrors STAGE_REMINDER_RULES, so the email goes to the same person who gets
+    the pop-up and has the button for that step."""
+    rule = STAGE_REMINDER_RULES.get(c["stage"])
+    if not rule:
+        return (), [], ""
+    roles, emp_rule, what = rule
+    people = []
+    if emp_rule == "creator_telecaller":
+        h = con.execute("""SELECT actor FROM history WHERE client_id=? AND stage='NEW'
+                           ORDER BY created_at ASC, id ASC LIMIT 1""", (c["id"],)).fetchone()
+        people = [h["actor"]] if h and h["actor"] else []
+    elif emp_rule == "proposal_writer":
+        who = c.get("proposal_coordinator") if c.get("proposal_awaiting_team_pick") else c.get("proposal_writer")
+        people = [who] if who else []
+    elif emp_rule == "programmers":
+        people = sorted(_csv_names(c.get("assigned_programmers")))
+    elif emp_rule == "writers":
+        people = sorted(_csv_names(c.get("assigned_writers")))
+    elif emp_rule == "coordinator":
+        people = [c.get("coordinator_name")] if c.get("coordinator_name") else []
+    elif emp_rule == "proofread_coordinator":
+        people = sorted(_csv_names(c.get("proofread_coordinator")))
+    elif emp_rule == "proofreaders":
+        people = sorted(_csv_names(c.get("assigned_proofreaders")) or _csv_names(c.get("proofread_coordinator")))
+    elif emp_rule == "format_coordinator":
+        people = sorted(_csv_names(c.get("format_coordinator")))
+    elif emp_rule == "formatting_team":
+        people = sorted(_csv_names(c.get("assigned_formatters")) | _csv_names(c.get("format_coordinator")))
+    elif emp_rule == "submission_team":
+        people = [r["name"] for r in con.execute(
+            """SELECT name FROM employees WHERE role='JOURNAL_EMPLOYEE' AND team_type='SUBMISSION'
+               AND active=1 AND deleted_at IS NULL""")]
+    return roles, people, what
+
+
+def collect_notifications(con, action, d, before):
+    """Compare before/after and queue an email for everyone who just got work."""
+    actor = (d.get("_principal_label") or d.get("actorLabel") or "Someone").strip()
+    actor_email = ""
+    if (d.get("role") or "") == "employee" and d.get("empId"):
+        r = con.execute("SELECT email FROM employees WHERE id=?", (d.get("empId"),)).fetchone()
+        actor_email = (r["email"] or "") if r else ""
+    elif d.get("role"):
+        actor_email = role_email_map(con).get(d.get("role"), "")
+    box = _Outbox(con, actor, actor_email)
+
+    # 1) Client pipeline: new people on a client, and stage hand-offs.
+    old_c = before.get("client")
+    if old_c:
+        r = con.execute("SELECT * FROM clients WHERE id=?", (old_c["id"],)).fetchone()
+        new_c = dict(r) if r else None
+        if new_c:
+            block = _client_lines(r)
+            just_assigned = set()
+            for col, label in ASSIGNMENT_COLUMNS.items():
+                if col not in new_c:
+                    continue
+                added = sorted(_csv_names(new_c.get(col)) - _csv_names(old_c.get(col)))
+                if added:
+                    just_assigned.update(added)
+                    box.to_employees(
+                        added, "iMatiz: new work assigned to you — %s" % new_c["name"],
+                        "%s assigned you: %s.\n\n%s" % (actor, label, block))
+            if new_c["stage"] != old_c["stage"]:
+                roles, people, what = _stage_recipients(con, new_c)
+                last = con.execute("""SELECT note FROM history WHERE client_id=?
+                                      ORDER BY id DESC LIMIT 1""", (new_c["id"],)).fetchone()
+                note = ((last["note"] or "").strip() if last else "")
+                subject = "iMatiz: [%s] %s — action needed" % (
+                    STAGE_LABELS.get(new_c["stage"], new_c["stage"]), new_c["name"])
+                section = "%s moved this client to: %s.\nYour next step: %s.\n%s\n%s" % (
+                    actor, STAGE_LABELS.get(new_c["stage"], new_c["stage"]), what or "-",
+                    ("Note: %s\n" % note) if note else "", block)
+                for role_ in roles:
+                    box.to_role(role_, subject, section, STAGE_EMAIL_CC_ROLES.get(new_c["stage"], ()))
+                people = [p for p in people if p not in just_assigned]
+                if people:
+                    box.to_employees(people, subject, section)
+
+    # 2) Tasks: newly created tasks, and people added to an existing task.
+    task_changes = []
+    old_t = before.get("task")
+    if old_t:
+        t = con.execute("SELECT * FROM tasks WHERE id=?", (old_t["id"],)).fetchone()
+        if t:
+            task_changes.append((t, _csv_names(old_t.get("assigned_to"))))
+    for t in con.execute("SELECT * FROM tasks WHERE id>? ORDER BY id", (before.get("max_task") or 0,)).fetchall():
+        if (t["created_by"] or "").strip() in (actor, d.get("actorName") or "", d.get("role") or ""):
+            task_changes.append((t, set()))
+    for t, old_names in task_changes:
+        added = sorted(_csv_names(t["assigned_to"]) - old_names)
+        if not added:
+            continue
+        c = con.execute("SELECT * FROM clients WHERE id=?", (t["client_id"],)).fetchone() if t["client_id"] else None
+        lines = ["Task      : %s" % t["title"],
+                 "Type      : %s" % ((t["task_type"] or "-") if "task_type" in t.keys() else "-"),
+                 "Priority  : %s" % (t["priority"] or "-"),
+                 "Start date: %s" % (t["start_date"] or "-"),
+                 "Due date  : %s" % (t["finish_date"] or "-")]
+        if (t["description"] or "").strip():
+            lines.append("Details   : %s" % t["description"].strip())
+        section = "%s assigned you a task.\n\n%s%s" % (actor, "\n".join(lines),
+                                                      ("\n\n" + _client_lines(c)) if c else "")
+        box.to_employees(added, "iMatiz: task assigned to you — %s" % t["title"], section)
+
+    # 3) Completed work sent to a coordinator / Technical TL / Technical Manager.
+    for h in con.execute("""SELECT h.*, t.title FROM task_handoffs h JOIN tasks t ON t.id=h.task_id
+                            WHERE h.id>? AND h.sent_by_key=?""",
+                         (before.get("max_handoff") or 0, d.get("_principal_key") or "")).fetchall():
+        subject = "iMatiz: work sent to you for review — %s" % h["title"]
+        section = "%s sent you completed work to review.\n\nTask   : %s\nClient : %s\n%s" % (
+            h["sent_by_name"] or actor, h["title"], h["client_id"] or "-",
+            ("Note   : %s\n" % h["note"]) if (h["note"] or "").strip() else "")
+        if h["target"] in HANDOFF_TARGET_ROLES:
+            for role_ in HANDOFF_TARGET_ROLES[h["target"]]:
+                box.to_role(role_, subject, section)
+        elif h["target_name"]:
+            box.to_employees([h["target_name"]], subject, section)
+    return box.flush()
+
+
+def notify_after_action(action, d, run):
+    """Run the action; if it moved work to someone, email that person."""
+    if action.startswith(_NOTIFY_SKIP_PREFIXES) or action in PUBLIC_ACTIONS:
+        return run()
+    before = None
+    try:
+        con = db()
+        try:
+            before = _snapshot(con, d)
+        finally:
+            con.close()
+    except Exception:
+        before = None
+    result = run()
+    if before is None or not isinstance(result, dict):
+        return result
+    try:
+        con = db()
+        try:
+            notice = collect_notifications(con, action, d, before)
+        finally:
+            con.close()
+        if notice:
+            result["mailNotice"] = notice
+    except Exception:
+        traceback.print_exc()
+    return result
 
 
 # =====================================================================
@@ -3951,6 +4322,59 @@ def build_ai_context(con, sess):
 
 
 def handle_action(action, d, ip=""):
+    """Every action goes through here; when it hands work to someone, that
+    person gets an email at the address saved in their profile."""
+    return notify_after_action(action, d, lambda: _handle_action_core(action, d, ip))
+
+
+# =====================================================================
+# EMPLOYEE "FORGOT PASSWORD"
+# The employee types their Employee ID; a one-time reset code (and a link, when
+# APP_BASE_URL is set) is emailed to the Mail ID saved in their profile. Only an
+# HMAC of the code is stored; it expires after 30 minutes, allows 5 wrong tries,
+# and works once. The link never uses a browser-supplied address, so a forged
+# request can't make us email someone a link to a look-alike site.
+# =====================================================================
+RESET_CODE_MINUTES = 30
+RESET_CODE_MAX_TRIES = 5
+_RESET_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # no 0/O/1/I - easy to type
+
+
+def _reset_code_hash(emp_id, code):
+    msg = ("emp-reset:%s:%s" % (emp_id, (code or "").strip().upper().replace("-", "").replace(" ", "")))
+    return hmac.new(SECRET_KEY.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _new_reset_code():
+    raw = "".join(secrets.choice(_RESET_ALPHABET) for _ in range(10))
+    return raw[:5] + "-" + raw[5:]
+
+
+def _mask_email(e):
+    try:
+        user, dom = e.split("@", 1)
+    except ValueError:
+        return ""
+    return (user[:2] + "*" * max(1, len(user) - 2)) + "@" + dom
+
+
+def employee_reset_email_body(name, uid, code):
+    lines = ["Hi %s," % name, "",
+             "We received a request to reset the password for Employee ID %s." % uid, ""]
+    if APP_BASE_URL:
+        lines += ["Click this link to choose a new password:",
+                  "%s/?empreset=%s:%s" % (APP_BASE_URL, uid, code.replace("-", "")), "",
+                  "Or open the iMatiz login page, click \"Forgot password?\" and enter this code:"]
+    else:
+        lines += ["Open the iMatiz login page, click \"Forgot password?\" and enter this code:"]
+    lines += ["", "    %s" % code, "",
+              "The code works once and expires in %d minutes." % RESET_CODE_MINUTES,
+              "If you didn't ask for this, you can ignore this email - your password stays the same.",
+              "", "Regards,", "iMatiz Technology"]
+    return "\n".join(lines)
+
+
+def _handle_action_core(action, d, ip=""):
     con = db()
     try:
         # SECURITY: "login_options" was removed. It returned every employee's name,
@@ -4178,6 +4602,64 @@ def handle_action(action, d, ip=""):
             con.commit()
             return {"ok": True, "clientId": c["id"]}
 
+        # ----- Employee forgot password: email a reset code to the profile Mail ID -----
+        if action == "request_employee_password_reset":
+            if _rate_limited(ip, "request_employee_password_reset", limit=5, window_seconds=900):
+                raise ApiError("Too many requests. Please wait a few minutes and try again.")
+            uid = (d.get("empUid") or "").strip()
+            if not uid:
+                raise ApiError("Enter your employee ID.")
+            if not _mail_configured():
+                raise ApiError("Password reset emails aren't set up yet. Please ask your manager or the "
+                               "Super Admin to reset your password from Team & Access.")
+            generic = {"ok": True, "message": "If that employee ID has an email saved in its profile, "
+                       "a reset code has been sent to it. It can take a minute to arrive - check Spam too."}
+            e = con.execute("""SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?)
+                               AND deleted_at IS NULL""", (uid,)).fetchone()
+            if not e or not e["active"] or not EMAIL_RE.match((e["email"] or "").strip()):
+                return generic       # same answer either way: don't reveal which IDs exist
+            if _rate_limited(e["emp_uid"].upper(), "emp_reset_per_id", limit=3, window_seconds=900):
+                return generic       # stop anyone flooding one person's inbox
+            code = _new_reset_code()
+            expires = (datetime.now() + timedelta(minutes=RESET_CODE_MINUTES)).strftime(_TS_FMT)
+            con.execute("""UPDATE employees SET reset_code_hash=?, reset_code_expires=?, reset_code_tries=0
+                           WHERE id=?""", (_reset_code_hash(e["id"], code), expires, e["id"]))
+            con.commit()
+            send_mail_async([e["email"].strip()], "iMatiz: reset your password",
+                            employee_reset_email_body(e["name"], e["emp_uid"], code))
+            return generic
+
+        if action == "employee_reset_with_code":
+            if _rate_limited(ip, "employee_reset_with_code", limit=10, window_seconds=300):
+                raise ApiError("Too many attempts. Please wait a few minutes and try again.")
+            uid = (d.get("empUid") or "").strip()
+            code = (d.get("code") or "").strip()
+            new_pwd = (d.get("newPassword") or "").strip()
+            if not uid or not code:
+                raise ApiError("Enter your employee ID and the reset code from the email.")
+            if len(new_pwd) < MIN_PASSWORD_LENGTH:
+                raise ApiError("Choose a password at least %d characters long." % MIN_PASSWORD_LENGTH)
+            bad = ApiError("That reset code is wrong or has expired. Request a new one.")
+            e = con.execute("""SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?)
+                               AND deleted_at IS NULL""", (uid,)).fetchone()
+            if not e or not e["active"] or not (e["reset_code_hash"] or ""):
+                raise bad
+            exp = _parse_ts(e["reset_code_expires"])
+            if not exp or exp < datetime.now() or (e["reset_code_tries"] or 0) >= RESET_CODE_MAX_TRIES:
+                con.execute("UPDATE employees SET reset_code_hash='', reset_code_expires='' WHERE id=?", (e["id"],))
+                con.commit()
+                raise bad
+            if not hmac.compare_digest(e["reset_code_hash"], _reset_code_hash(e["id"], code)):
+                con.execute("UPDATE employees SET reset_code_tries=reset_code_tries+1 WHERE id=?", (e["id"],))
+                con.commit()
+                raise bad
+            con.execute("""UPDATE employees SET password=?, reset_code_hash='', reset_code_expires='',
+                           reset_code_tries=0 WHERE id=?""", (hash_password(new_pwd), e["id"]))
+            # Sign out every existing session of this person (someone else may have had it).
+            con.execute("DELETE FROM sessions WHERE emp_id=? AND kind IN ('employee','validator')", (e["id"],))
+            con.commit()
+            return {"ok": True, "empUid": e["emp_uid"]}
+
         if action == "request_client_password_reset":
             # SECURITY: throttle to slow down account enumeration / spam requests.
             if _rate_limited(ip, "request_client_password_reset", limit=10, window_seconds=300):
@@ -4390,7 +4872,22 @@ def handle_action(action, d, ip=""):
             if (d.get("role") or "") in ("client", "employee"):
                 employees_out = [scrub_employee(e) for e in employees_out]
 
+            caller_role = (d.get("role") or "")
+            if caller_role == "employee":
+                _me = con.execute("SELECT email FROM employees WHERE id=?", (d.get("empId"),)).fetchone()
+                my_email = (_me["email"] or "") if _me else ""
+            elif caller_role == "client":
+                my_email = ""
+            else:
+                my_email = role_email_map(con).get(caller_role, "")
+            # Department-login addresses: needed by staff to address hand-off mails
+            # (and by admins to edit them). Never sent to clients or employees.
+            role_emails_out = {} if caller_role in ("client", "employee") else {
+                r: e for r, e in role_email_map(con).items() if r in ROLE_EMAIL_LABELS}
             return {"clients": clients_out, "employees": employees_out,
+                    "myEmail": my_email, "roleEmails": role_emails_out,
+                    "roleEmailLabels": ROLE_EMAIL_LABELS if caller_role in ADMIN_ROLES else {},
+                    "mailConfigured": _mail_configured() if caller_role != "client" else False,
                     "settings": get_settings(con), "calendarEvents": events, "clientQueries": queries,
                     "tasks": tasks, "clientDocuments": client_docs, "clientNotes": client_notes,
                     "clientReferrals": client_refs, "workSends": sends_out,
@@ -6275,7 +6772,7 @@ def handle_action(action, d, ip=""):
             note = (d.get("note") or "").strip()
             if approve:
                 move_stage(con, client["id"], approve_stage, actor_label, note)
-                try_auto_email(con, client, subj, body + (("\n\nNote: " + note) if note else ""))
+                # (the person who reviews next is emailed automatically - see notify_after_action)
             else:
                 if not note:
                     raise ApiError("Add a correction note for the writer before sending it back.")
@@ -7303,13 +7800,15 @@ def handle_action(action, d, ip=""):
             # header-injection-safe and rate limited.
             if _rate_limited(ip, "send_email", limit=40, window_seconds=3600):
                 raise ApiError("Too many emails sent recently. Please try again later.")
-            to = (d.get("to") or "").strip() or get_settings(con)["toEmail"]
+            raw_to = (d.get("to") or "").strip() or get_settings(con)["toEmail"]
             subject = (d.get("subject") or "iMatiz Pipeline update")
             body = d.get("body") or ""
-            if not to:
+            if not raw_to:
                 raise ApiError("No 'To' email is set. Add one in Email settings first.")
-            if not EMAIL_RE.match(to):
+            to_list = _valid_email_list(raw_to)[:10]
+            if not to_list or len(to_list) != len([x for x in re.split(r"[,;\s]+", raw_to) if x.strip()][:10]):
                 raise ApiError("That doesn't look like a valid email address.")
+            to = ", ".join(to_list)
             # Strip CR/LF so a crafted subject cannot inject extra SMTP headers
             # (Bcc:, Content-Type:, ...) into the outgoing message.
             subject = re.sub(r"[\r\n]+", " ", str(subject))[:200]
@@ -7325,7 +7824,7 @@ def handle_action(action, d, ip=""):
             try:
                 with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
                     smtp.login(GMAIL_USER, pwd)
-                    smtp.sendmail(GMAIL_USER, [to], msg.as_string())
+                    smtp.sendmail(GMAIL_USER, to_list, msg.as_string())
             except smtplib.SMTPAuthenticationError:
                 raise ApiError("The mail account rejected the login. Check the app password in "
                                "the server environment and that 2-Step Verification is on.")
@@ -7334,6 +7833,40 @@ def handle_action(action, d, ip=""):
             except Exception:
                 raise ApiError("Could not send the email. Please try again.")
             return {"ok": True, "to": to}
+
+        # ----- My email: where MY notifications go. An individual login updates its own
+        #       employee profile; a department login (Marketing TL, Technical Manager, ...)
+        #       updates the address for that login. Identity comes from the session.
+        if action == "save_my_email":
+            email = (d.get("email") or "").strip()
+            if email and not EMAIL_RE.match(email):
+                raise ApiError("That doesn't look like a valid email address.")
+            caller = (d.get("role") or "").strip()
+            if caller == "employee":
+                if not d.get("empId"):
+                    raise ApiError("Unknown employee.")
+                con.execute("UPDATE employees SET email=? WHERE id=?", (email, d.get("empId")))
+            elif caller in ROLE_EMAIL_LABELS:
+                con.execute("UPDATE users SET email=? WHERE role=?", (email, caller))
+            else:
+                raise ApiError("This login can't save an email.")
+            con.commit()
+            return {"ok": True, "email": email}
+
+        # ----- Admin: set the email of every department login in one go.
+        if action == "save_role_emails":
+            emails = d.get("emails") or {}
+            if not isinstance(emails, dict):
+                raise ApiError("Bad request.")
+            for r, e in emails.items():
+                if r not in ROLE_EMAIL_LABELS:
+                    continue
+                e = (e or "").strip()
+                if e and not EMAIL_RE.match(e):
+                    raise ApiError("%s: that doesn't look like a valid email address." % ROLE_EMAIL_LABELS[r])
+                con.execute("UPDATE users SET email=? WHERE role=?", (e, r))
+            con.commit()
+            return {"ok": True, "roleEmails": role_email_map(con)}
 
         if action == "save_settings":
             frm = (d.get("fromEmail") or "").strip() or DEFAULT_FROM_EMAIL or GMAIL_USER
