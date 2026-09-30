@@ -3372,13 +3372,10 @@ function renderMktDashboard(){
   const regPrev = clients.filter(c=>admInRange(admClientRegDate(c),prevStart,prevEnd)).length;
 
   let revNow=0, revPrev=0, collectCountNow=0, collectCountPrev=0;
-  clients.forEach(c=> activePayKeys(c).forEach(k=>{
-    const p=c.payments[k];
-    if(p && p.status==="paid" && p.date){
-      const amt = parseFloat(p.amount)||0;
-      if(admInRange(p.date,start,end)){ revNow += amt; collectCountNow++; }
-      if(admInRange(p.date,prevStart,prevEnd)){ revPrev += amt; collectCountPrev++; }
-    }
+  // Same source as the Collection popup these tiles open — includes paid installments.
+  clients.forEach(c=> clientPaidEntries(c).forEach(i=>{
+    if(admInRange(i.date,start,end)){ revNow += i.amount; collectCountNow++; }
+    if(admInRange(i.date,prevStart,prevEnd)){ revPrev += i.amount; collectCountPrev++; }
   }));
 
   const famSize = c => clients.filter(x=>(x.displayId||x.id)===(c.displayId||c.id)).length;
@@ -6085,28 +6082,29 @@ function admPeriodRange(period){
   else start = new Date(now.getFullYear(), now.getMonth(), 1); // month (default)
   return {start, end: now};
 }
+// Every payment actually received from a client (Registration, any service-stage payment
+// Accounts recorded, and paid custom installments), taken from the client's real plan.
+function clientPaidEntries(c){
+  return clientPaymentPlan(c).items.filter(i=>i.paid && i.date);
+}
 function admOpenCollection(){
   const {start, end} = admPeriodRange(admCollectionFilter);
-  let paidInPeriod=0, paidTotal=0, dueTotal=0;
+  let paidInPeriod=0, pendingAmt=0;
   const pendingClients = [];
   clients.forEach(c=>{
-    let hasPending = false;
-    activePayKeys(c).forEach(k=>{
-      const p = c.payments && c.payments[k];
-      const amt = suggestedAmount(c,k) || 0;
-      dueTotal += amt;
-      if(p && p.status==="paid"){
-        const paidAmt = parseFloat(p.amount)||amt;
-        paidTotal += paidAmt;
-        if(p.date){
-          const d = new Date(p.date);
-          if(d >= start && d <= end) paidInPeriod += paidAmt;
-        }
-      } else { hasPending = true; }
+    // Uses the client's real plan (Total amount + agreed split), the same as the
+    // Pending Amount card — NOT the service's default stage prices. Earlier this summed
+    // every default stage (Registration / Start Work / Code / Paper ...) as "due", so a
+    // client who paid their full Total still showed a pending balance here.
+    const pl = clientPaymentPlan(c);
+    pl.items.forEach(i=>{
+      if(!i.paid || !i.date) return;
+      const d = new Date(i.date);
+      if(d >= start && d <= end) paidInPeriod += i.amount;
     });
-    if(hasPending) pendingClients.push(c);
+    const hasPending = !pl.fullyPaid && (pl.items.some(i=>!i.paid) || pl.unscheduled > 0);
+    if(hasPending){ pendingAmt += pl.due; pendingClients.push(c); }
   });
-  const pendingAmt = Math.max(0, dueTotal - paidTotal);
   const periods = [["day","Day"],["week","Week"],["month","Month"],["year","Year"]];
   const periodLabel = (periods.find(p=>p[0]===admCollectionFilter)||periods[2])[1];
   const filterHtml = `<div class="adm-tabbar" style="margin-bottom:14px">${periods.map(([k,l])=>
@@ -6279,18 +6277,13 @@ function renderAdminDashboard(){
   const lastMonthDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
   const lastMonthClients = clients.filter(c=>{ const d=admClientRegDate(c); return d && new Date(d).getMonth()===lastMonthDate.getMonth() && new Date(d).getFullYear()===lastMonthDate.getFullYear(); });
 
-  let paidTotal=0, dueTotal=0, paidThisMonth=0, paidLastMonth=0;
-  clients.forEach(c=>{ activePayKeys(c).forEach(k=>{ const p=c.payments&&c.payments[k]; const amt = suggestedAmount(c,k)||0;
-    dueTotal += amt;
-    if(p && p.status==="paid"){
-      const paidAmt = parseFloat(p.amount)||amt;
-      paidTotal += paidAmt;
-      if(p.date){
-        const d = new Date(p.date);
-        if(d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear()) paidThisMonth += paidAmt;
-        if(d.getMonth()===lastMonthDate.getMonth() && d.getFullYear()===lastMonthDate.getFullYear()) paidLastMonth += paidAmt;
-      }
-    }
+  let paidThisMonth=0, paidLastMonth=0;
+  // Same source as the Collection popup: the client's real payment plan, so paid
+  // custom installments count too (the old loop only looked at service-stage payments).
+  clients.forEach(c=>{ clientPaidEntries(c).forEach(i=>{
+    const d = new Date(i.date);
+    if(d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear()) paidThisMonth += i.amount;
+    if(d.getMonth()===lastMonthDate.getMonth() && d.getFullYear()===lastMonthDate.getFullYear()) paidLastMonth += i.amount;
   }); });
   const collectionTarget = paidLastMonth;
   const collectionNote = paidLastMonth===0
