@@ -39,6 +39,13 @@ services:
         sync: false
       - key: GMAIL_APP_PASSWORD
         sync: false
+      # Gmail API (required on Render's free plan, which blocks SMTP) - see README "GMAIL API"
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
       - key: DEFAULT_FROM_EMAIL
         sync: false
       - key: DEFAULT_TO_EMAIL

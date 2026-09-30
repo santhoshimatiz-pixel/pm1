@@ -1415,6 +1415,11 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
       </button>
       <button class="navbtn act" id="navDash">&#9632;&nbsp; Dashboard</button>
       <div id="tcNav"></div>
+      <button class="navbtn" id="navProfile" onclick="openMyProfile()" style="display:flex;align-items:center;gap:8px">
+        <img id="navProfilePhoto" alt="" style="display:none;width:22px;height:22px;border-radius:50%;object-fit:cover">
+        <span id="navProfileIcon">&#128100;</span><span>My profile</span>
+        <span id="navProfileDot" title="Profile incomplete" style="display:none;width:8px;height:8px;border-radius:50%;background:var(--gold,#c9a44c);margin-left:auto"></span>
+      </button>
       <button class="navbtn" id="navSettings" onclick="openSettings()">&#9881;&nbsp; Settings</button>
       <button class="navbtn" id="navHelp" onclick="openHelp()">&#128172;&nbsp; Help</button>
       <div class="side-foot">
@@ -1641,6 +1646,7 @@ function mailAlreadySent(out){
 // Called when the server tells us the session is gone.
 function handleSessionExpired(){
   if(!role) return;
+  try{ myProfile = null; myProfileChecked = false; sessionStorage.removeItem("profileNudged"); paintProfileNav(); }catch(_){}
   try{ if(typeof stopRefreshLoop === "function") stopRefreshLoop(); }catch(e){}
   try{ stopPingListener(); }catch(e){}
   csrfToken = "";
@@ -2389,6 +2395,7 @@ function logout(){
   // api() builds its headers synchronously, so this request still carries the
   // tab token even though clearSession() below removes it straight away.
   api("logout", {}).catch(()=>{ /* best effort — still clear locally */ });
+  try{ myProfile = null; myProfileChecked = false; sessionStorage.removeItem("profileNudged"); paintProfileNav(); }catch(_){}
   stopPingListener(); pingUnseen = []; $("pingAlert").classList.remove("show");
   csrfToken = "";
   role = null; clientSelf = null; selectedRole = null; selectedEmpId = null; empName = empRole = empId = empTeamType = null; tmTab='work'; clientView='overview';
@@ -2449,6 +2456,8 @@ async function refresh(){
   $("rolePill").textContent = roleTitle();
   $("whoAmI").textContent = "Signed in as " + roleTitle();
   $("navSettings").style.display = "flex";
+  $("navProfile").style.display = "flex";
+  checkMyProfileOnce();
   $("navHelp").style.display = "flex";   // the Validation login hides it; restore for every other login
   $("navDash").style.display = (isTelecaller() || isModernRole() || role==="client") ? "none" : "flex";
   $("navInbox").style.display = (role==="client") ? "none" : "flex";
@@ -3225,6 +3234,17 @@ async function submitEditClient(id){
 }
 
 let mktTab = 'work';
+// Marketing Manager / Marketing TL "Team" page: the same Team Members table, full
+// Add-member form and member profile page the Admin and Technical Manager use.
+function renderMktTeamPage(prefixHtml){
+  if(admTeamPage==="profile"){ renderTeamMemberProfile(); return; }
+  $("content").innerHTML = (prefixHtml||"") + `<div class="adm-tabbar">
+      <button class="adm-tab active">Team Members</button>
+      <button class="adm-tab" onclick="admOpenAddMember()">+ Add Member</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px">BDC staff sign in with <b>BDC Login</b> (Marketing Team) using their User ID and password. Click a name to see or update their details.</p>` +
+    admTeamMembersTableHtml();
+}
 function telecallerRosterPanel(){
   const list = employees.filter(e=>e.role==='TELECALLER');
   const empRow = e => `<button class="roster-chip" style="cursor:pointer" onclick="openEmployeeDrawer(${e.id})">
@@ -3281,7 +3301,7 @@ function renderMarketingTL(){
     <button class="tab ${mktTab==='work'?'active':''}" onclick="mktTab='work';refresh()">Marketing work</button>
     <button class="tab ${mktTab==='team'?'active':''}" onclick="mktTab='team';refresh()">Team</button>
   </div>`;
-  if(mktTab==='team'){ $("content").innerHTML = html + telecallerRosterPanel(); return; }
+  if(mktTab==='team'){ renderMktTeamPage(html); return; }
   html += sectionHead("Awaiting TL review", q.length);
   if(!q.length) html += emptyBox("Queue is clear. New items appear here automatically.");
   q.forEach(c=> html += pipeCard(c, `<button class="btn small" onclick="tlVerify(${jsq(c.id)})">Verify &amp; send to Manager &#8594;</button>`));
@@ -3329,7 +3349,7 @@ function renderMarketingManagerModern(){
   if(mktPage==="journals"){ setHead("Journals","Journal submissions across the pipeline",""); renderMktJournals(); return; }
   if(mktPage==="tasks"){ setHead("Tasks","Everything assigned to the marketing team",""); renderMktTasks(); return; }
   if(mktPage==="taskDetail"){ setHead("Task","",""); renderMktTaskDetail(); return; }
-  if(mktPage==="team"){ setHead("Team","Add and manage BDC staff",""); $("content").innerHTML = telecallerRosterPanel(); return; }
+  if(mktPage==="team"){ setHead("Team","Add and manage BDC staff",""); renderMktTeamPage(); return; }
   setHead("Dashboard","Marketing performance at a glance",""); renderMktDashboard();
 }
 function renderMktDashboard(){
@@ -3491,7 +3511,7 @@ function renderMarketingManager(){
     <button class="tab ${mktTab==='work'?'active':''}" onclick="mktTab='work';refresh()">Marketing work</button>
     <button class="tab ${mktTab==='team'?'active':''}" onclick="mktTab='team';refresh()">Team</button>
   </div>`;
-  if(mktTab==='team'){ $("content").innerHTML = html + telecallerRosterPanel(); return; }
+  if(mktTab==='team'){ renderMktTeamPage(html); return; }
   html += sectionHead("Awaiting Manager review", q.length);
   if(!q.length) html += emptyBox("Queue is clear. New items appear here automatically.");
   q.forEach(c=> html += pipeCard(c, `<button class="btn small" onclick="managerApprove(${jsq(c.id)})">Approve &amp; send to Accounts &#8594;</button>`));
@@ -5018,6 +5038,8 @@ function openEmployeeDrawer(id){
       <div><b>Joining date</b><p>${fmtDate(e.joiningDate)}</p></div>
       <div><b>Date of birth</b><p>${fmtDate(e.dateOfBirth)}</p></div>
     </div>
+    <div class="sec" id="memberProfileSec-${e.id}"><h4>Profile (filled in by ${esc(e.name)})</h4>
+      <p style="color:var(--muted);font-size:13px">Loading…</p></div>
     <div class="sec">
       <h4>Reset password</h4>
       <div style="display:flex;gap:8px">
@@ -5038,6 +5060,7 @@ function openEmployeeDrawer(id){
     </div>`;
   $("overlay").classList.add("open");
   $("drawer").classList.add("open");
+  loadMemberProfile(e.id);
 }
 async function resetEmployeePassword(id){
   const val = $("resetPwd-"+id).value.trim();
@@ -9181,7 +9204,7 @@ function renderAdminTeam(){
 function scopedEmployeesForCurrentView(){
   if(isTechManagerModern()) return employees.filter(e=>e.role==='PROGRAMMER'||e.role==='PAPER_WRITER');
   if(isJournalModern()) return employees.filter(e=>e.role==='JOURNAL_EMPLOYEE');
-  if(isMktModern()) return employees.filter(e=>e.role==='TELECALLER');
+  if(isMktModern() || role==="marketing_tl") return employees.filter(e=>e.role==='TELECALLER');
   return employees;
 }
 function admTeamMembersTableHtml(){
@@ -9256,14 +9279,24 @@ function admOpenAddMember(){
   };
   const allOptions = [["PROGRAMMER","Programmer"],["PAPER_WRITER","Paper Writer"],["JOURNAL_EMPLOYEE","Journal team"],["TELECALLER","BDC"]];
   const options = ROLE_OPTION_SETS[role] || allOptions; // Super Admin / MD Admin (or any unlisted role) get every option
-  openModal(`<h3>Add member</h3>
+  const today = new Date().toISOString().slice(0,10);
+  openModal(`<h3>Add team member</h3>
+    <p class="msub">Fill in their details. Fields marked * are required. The Mail ID is where their work assignments and password-reset emails go.</p>
     <div class="grid2">
-      <div class="field"><label>Full Name *</label><input id="mem_name"></div>
-      <div class="field"><label>Role *</label>
-        <select id="mem_role" onchange="admToggleMemberTeamType()">
+      <div class="field"><label>User Name *</label><input id="mem_name" placeholder="e.g. Amrutha N M"></div>
+      <div class="field"><label>User ID <span style="font-weight:400;color:var(--muted)">(blank = next free ID)</span></label><input id="mem_uid" placeholder="e.g. EMP-1007" autocomplete="off"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Mail ID *</label><input id="mem_email" type="email" placeholder="name@gmail.com" autocomplete="off"></div>
+      <div class="field"><label>Phone *</label><input id="mem_phone" type="tel" inputmode="numeric" maxlength="10" placeholder="10 digits" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>User Role *</label>
+        <select id="mem_role" onchange="admToggleMemberTeamType();admDefaultDepartment()">
           ${options.map(([val,label])=>`<option value="${val}">${esc(label)}</option>`).join("")}
         </select>
       </div>
+      <div class="field"><label>Designation *</label><input id="mem_designation" placeholder="e.g. Research Associate"></div>
     </div>
     <div class="field" id="mem_teamtype_wrap" style="display:${options[0][0]==='JOURNAL_EMPLOYEE'?'block':'none'}">
       <label>Journal team type</label>
@@ -9276,19 +9309,16 @@ function admOpenAddMember(){
       </select>
     </div>
     <div class="grid2">
-      <div class="field"><label>Mail ID <span style="font-weight:400;color:var(--muted)">(work assigned to them is emailed here)</span></label><input id="mem_email" type="email"></div>
-      <div class="field"><label>Phone</label><input id="mem_phone" type="tel" inputmode="numeric" maxlength="10" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)"></div>
+      <div class="field"><label>Department *</label><input id="mem_department"></div>
+      <div class="field"><label>Branch *</label><input id="mem_branch" list="branchOptionsList" placeholder="Select or type a branch" oninput="this.value=this.value.replace(/^\s+/,'')">${branchDatalistHtml()}</div>
     </div>
     <div class="grid2">
-      <div class="field"><label>Designation</label><input id="mem_designation"></div>
-      <div class="field"><label>Department</label><input id="mem_department"></div>
+      <div class="field"><label>Joining Date *</label><input id="mem_joining" type="date" value="${today}"></div>
+      <div class="field"><label>Date of birth</label><input id="mem_dob" type="date" max="${today}"></div>
     </div>
-    <div class="grid2">
-      <div class="field"><label>Branch</label><input id="mem_branch" list="branchOptionsList" placeholder="Select or type a branch" oninput="this.value=this.value.replace(/^\s+/,'')">${branchDatalistHtml()}</div>
-      <div class="field"><label>Joining Date</label><input id="mem_joining" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-    </div>
-    <div class="field"><label>Login Password</label><input id="mem_password" placeholder="8+ characters - leave blank to generate one"></div>
-    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="admSaveMember()">Add member</button></div>`);
+    <div class="field"><label>Login Password <span style="font-weight:400;color:var(--muted)">(8+ characters &mdash; blank = generate one)</span></label><input id="mem_password" autocomplete="new-password"></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="memSaveBtn" onclick="admSaveMember()">Add member</button></div>`);
+  admDefaultDepartment();
 }
 // Standardizes free-typed branch/city names so the same place is always stored
 // identically (e.g. "banglore", "Bangalore", "bengaluru" all collapse to one
@@ -9316,22 +9346,62 @@ function branchDatalistHtml(){
 function admToggleMemberTeamType(){
   $("mem_teamtype_wrap").style.display = $("mem_role").value==="JOURNAL_EMPLOYEE" ? "block" : "none";
 }
+// Department that matches the chosen role, pre-filled (still editable).
+function admDefaultDepartment(){
+  const r = $("mem_role"), d = $("mem_department");
+  if(!r || !d || d.dataset.touched) return;
+  d.value = {TELECALLER:"Marketing", PROGRAMMER:"Technical", PAPER_WRITER:"Technical", JOURNAL_EMPLOYEE:"Journal"}[r.value] || "";
+  d.oninput = ()=>{ d.dataset.touched = "1"; };
+}
+// Catches the usual Mail ID slips (gmnail.com, gamil.com, gmail.co ...) before they
+// become an address that silently never receives anything.
+const EMAIL_DOMAIN_FIXES = {
+  "gmnail.com":"gmail.com","gmial.com":"gmail.com","gamil.com":"gmail.com","gmai.com":"gmail.com",
+  "gmail.co":"gmail.com","gmail.con":"gmail.com","gmaill.com":"gmail.com","gnail.com":"gmail.com",
+  "gmail.cm":"gmail.com","gmail.om":"gmail.com","gmsil.com":"gmail.com","gmail.in":"gmail.com",
+  "yahho.com":"yahoo.com","yaho.com":"yahoo.com","yahoo.co":"yahoo.com","yahoo.con":"yahoo.com",
+  "hotmial.com":"hotmail.com","hotmal.com":"hotmail.com","outlok.com":"outlook.com","outlook.co":"outlook.com"
+};
+function checkEmailTypo(inputId){
+  const el = $(inputId); if(!el) return true;
+  const v = el.value.trim(), at = v.lastIndexOf("@");
+  if(at < 0) return true;
+  const dom = v.slice(at+1).toLowerCase(), fix = EMAIL_DOMAIN_FIXES[dom];
+  if(!fix) return true;
+  const suggestion = v.slice(0, at+1) + fix;
+  if(confirm(`"${v}" looks like a typo.\n\nDid you mean ${suggestion} ?\n\nOK = use ${suggestion}\nCancel = keep what I typed`)){
+    el.value = suggestion;
+  }
+  return true;
+}
 async function admSaveMember(){
-  const name = $("mem_name").value.trim();
-  if(!name){ toast("Enter a name"); return; }
+  const v = id => ($(id) ? $(id).value.trim() : "");
+  const req = [["mem_name","User Name"],["mem_email","Mail ID"],["mem_phone","Phone"],["mem_designation","Designation"],
+               ["mem_department","Department"],["mem_branch","Branch"],["mem_joining","Joining Date"]];
+  const missing = req.filter(([id])=>!v(id)).map(([,label])=>label);
+  if(missing.length){ toast("Please fill in: " + missing.join(", ")); const f = $(req.find(([id])=>!v(id))[0]); if(f) f.focus(); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v("mem_email"))){ toast("Enter a valid Mail ID"); $("mem_email").focus(); return; }
+  checkEmailTypo("mem_email");
+  if(!/^\d{10}$/.test(v("mem_phone"))){ toast("Phone must be 10 digits"); $("mem_phone").focus(); return; }
+  const pwd = v("mem_password");
+  if(pwd && pwd.length < 8){ toast("Password must be at least 8 characters (or leave it blank to generate one)"); return; }
+  const btn = $("memSaveBtn"); btn.disabled = true; btn.textContent = "Adding...";
+  const empRole = v("mem_role"), name = v("mem_name");
   try{
     const out = await api("employee_create", {
-      name, empRole: $("mem_role").value, teamType: $("mem_teamtype")?$("mem_teamtype").value:"",
-      email: $("mem_email").value.trim(), phone: $("mem_phone").value.trim(),
-      designation: $("mem_designation").value.trim(), department: $("mem_department").value.trim(),
-      branch: normalizeBranchName($("mem_branch").value), joiningDate: $("mem_joining").value,
-      password: $("mem_password").value.trim()
+      name, empRole, teamType: $("mem_teamtype") ? $("mem_teamtype").value : "",
+      email: v("mem_email"), phone: v("mem_phone"), empUid: v("mem_uid"),
+      designation: v("mem_designation"), department: v("mem_department"),
+      branch: normalizeBranchName(v("mem_branch")), joiningDate: v("mem_joining"),
+      dateOfBirth: v("mem_dob"), password: pwd
     });
-    closeModal();
     await loadData(); await loadAdminDirectory();
     rerenderCurrent();
-    toast(`Member added — ID ${out.empUid}, password ${out.password}`);
-  }catch(e){ toast(e.message || "Could not add member"); }
+    showCreatedEmployee(name, out.empUid, out.password, empRole);   // stays open until they note the login details
+  }catch(e){
+    toast(e.message || "Could not add member");
+    btn.disabled = false; btn.textContent = "Add member";
+  }
 }
 function admOpenTeamProfile(empId){
   admTeamMemberId = empId; admTeamPage = "profile";
@@ -9398,7 +9468,9 @@ function renderTeamMemberProfile(){
             <div class="adm-profile-row"><label>Joining Date</label><p>${dirEmp.joiningDate?fmtDate(dirEmp.joiningDate):"—"}</p></div>
             <div class="adm-profile-row"><label>User Role</label><p>${esc(roleLabel)}</p></div>
             <div class="adm-profile-row"><label>Login Password</label><p><code id="pwdshow-team-${dirEmp.id}" style="letter-spacing:1px">&#8226;&#8226;&#8226;&#8226;</code>
-              <a href="#" onclick="event.preventDefault();openChangePasswordAdmin('emp',${dirEmp.id},${jsq(dirEmp.name)})" style="margin-left:8px;font-size:11px;color:#0E9A6C">change</a></p></div>
+              ${(role==="super_admin"||role==="md_admin")
+                ? `<a href="#" onclick="event.preventDefault();openChangePasswordAdmin('emp',${dirEmp.id},${jsq(dirEmp.name)})" style="margin-left:8px;font-size:11px;color:#0E9A6C">change</a>`
+                : `<span style="margin-left:8px;font-size:11px;color:var(--muted)">they reset it with "Forgot password?" on the login page</span>`}</p></div>
           </div>
           <div>
             <div class="adm-profile-row"><label>User ID</label><p>${esc(dirEmp.empUid||"—")}</p></div>
@@ -9406,7 +9478,7 @@ function renderTeamMemberProfile(){
             <div class="adm-profile-row"><label>Department</label><p>${esc(dirEmp.department||"—")}</p></div>
             <div class="adm-profile-row"><label>Branch</label><p>${esc(dirEmp.branch||"—")}</p></div>
             <div class="adm-profile-row"><label>Access</label><p><span class="adm-status ${dirEmp.active?'good':'bad'}">${dirEmp.active?'Active':'Revoked'}</span>
-              <button class="btn ghost small" style="margin-left:8px" onclick="setEmployeeAccess(${dirEmp.id},${!dirEmp.active})">${dirEmp.active?'Revoke':'Restore'}</button></p></div>
+              ${(role==="super_admin"||role==="md_admin") ? `<button class="btn ghost small" style="margin-left:8px" onclick="setEmployeeAccess(${dirEmp.id},${!dirEmp.active})">${dirEmp.active?'Revoke':'Restore'}</button>` : ""}</p></div>
           </div>
         </div>
       </div>
@@ -9469,7 +9541,7 @@ function admOpenUpdateMember(empId){
   const e = adminDirectory.employees.find(x=>x.id===empId); if(!e) return;
   openModal(`<h3>Update member</h3>
     <div class="grid2">
-      <div class="field"><label>Full Name</label><input id="up_mem_name" value="${esc(e.name)}"></div>
+      <div class="field"><label>User Name</label><input id="up_mem_name" value="${esc(e.name)}"></div>
       <div class="field"><label>Mail ID <span style="font-weight:400;color:var(--muted)">(work assigned to them is emailed here)</span></label><input id="up_mem_email" type="email" value="${esc(e.email||"")}"></div>
     </div>
     <div class="grid2">
@@ -9484,6 +9556,9 @@ function admOpenUpdateMember(empId){
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="admSaveUpdateMember(${empId})">Save</button></div>`);
 }
 async function admSaveUpdateMember(empId){
+  const em = $("up_mem_email").value.trim();
+  if(em && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)){ toast("Enter a valid Mail ID"); return; }
+  checkEmailTypo("up_mem_email");
   try{
     await api("employee_update", {empId, name:$("up_mem_name").value, email:$("up_mem_email").value,
       phone:$("up_mem_phone").value, designation:$("up_mem_designation").value,
@@ -12271,6 +12346,15 @@ function openSettings(){
     <p class="msub">Where each department login's notifications go (e.g. BDC lead &rarr; Marketing TL, Technical Manager &rarr; Technical TL review).</p>
     ${roleRows}
     <div class="modal-actions"><button class="btn" onclick="saveRoleEmailsForm()">Save department emails</button></div>
+    <h3 style="margin-top:14px">Email sending check</h3>
+    <div id="mailCheckStatus" class="msub">Checking…</div>
+    <div class="field" style="display:flex;gap:8px;align-items:flex-end">
+      <div style="flex:1"><label>Send a test email to</label><input id="mailTestTo" type="email" value="${esc(myEmail||"")}" placeholder="you@example.com"></div>
+      <button class="btn small" id="mailTestBtn" type="button" onclick="runMailTest()">Send test</button>
+    </div>
+    <div id="mailTestResult" style="font-size:13px;margin:-4px 0 10px"></div>
+    <details><summary style="cursor:pointer;font-size:13px;color:var(--gold)">Recent emails (last 40)</summary>
+      <div id="mailLogList" style="max-height:260px;overflow:auto;font-size:12px;margin-top:8px"></div></details>
     <div style="height:1px;background:var(--line);margin:18px 0"></div>`;
   const dbSection = (role==="super_admin" || role==="md_admin") ? `
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
@@ -12289,6 +12373,214 @@ function openSettings(){
     ${role !== "validator" ? alertToneSettingsHtml() : ""}
     ${(role==="super_admin" || role==="md_admin") ? stageRemSettingsHtml() : ""}
     ${dbSection}`);
+  if(isAdmin) loadMailStatus();
+}
+/* ================= MY PROFILE (every dashboard) =================
+   Everyone opens "My profile" from the sidebar and can update it any time.
+   Team members: manager-set details (name, ID, role, team...) are shown read-only;
+   they edit contact + personal details. Department logins fill in who is using the
+   login. Clients update their contact details (phone stays read-only - it's their
+   sign-in). */
+let myProfile = null, myProfileChecked = false, myProfilePhotoDraft = null;
+const PROFILE_GENDERS = ["", "Female", "Male", "Other", "Prefer not to say"];
+const PROFILE_BLOOD = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+
+function profileMissing(p){
+  if(!p) return [];
+  if(p.kind === "client") return p.email ? [] : ["email"];
+  const miss = [];
+  if(!p.email) miss.push("email");
+  if(!p.phone) miss.push("phone");
+  if(p.kind === "dept" && !p.fullName) miss.push("your name");
+  return miss;
+}
+function paintProfileNav(){
+  const img = $("navProfilePhoto"), ico = $("navProfileIcon"), dot = $("navProfileDot");
+  if(!img) return;
+  if(myProfile && myProfile.photo){ img.src = myProfile.photo; img.style.display = "block"; ico.style.display = "none"; }
+  else { img.removeAttribute("src"); img.style.display = "none"; ico.style.display = "inline"; }
+  dot.style.display = profileMissing(myProfile).length ? "inline-block" : "none";
+}
+async function checkMyProfileOnce(){
+  if(myProfileChecked) return;
+  myProfileChecked = true;
+  try{ myProfile = (await api("get_my_profile")).profile; }catch(e){ return; }
+  paintProfileNav();
+  const miss = profileMissing(myProfile);
+  if(miss.length && !sessionStorage.getItem("profileNudged")){
+    sessionStorage.setItem("profileNudged", "1");
+    setTimeout(()=>toast("Please complete your profile (" + miss.join(", ") + ") — open My profile in the menu."), 1200);
+  }
+}
+function pfRow(label, value){
+  return `<div class="adm-profile-row"><label>${esc(label)}</label><p>${esc(value || "—")}</p></div>`;
+}
+function pfSelect(id, opts, val){
+  return `<select id="${id}">${opts.map(o=>`<option value="${esc(o)}" ${o===val?"selected":""}>${esc(o||"— Select —")}</option>`).join("")}</select>`;
+}
+async function openMyProfile(){
+  try{ myProfile = (await api("get_my_profile")).profile; }catch(e){ toast(e.message); return; }
+  myProfilePhotoDraft = null;
+  paintProfileNav();
+  const p = myProfile, isClient = p.kind === "client", isEmp = p.kind === "employee";
+  const initials = ((isEmp||isClient ? p.name : (p.fullName || p.loginLabel)) || "?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  const photoBlock = `
+    <div style="display:flex;align-items:center;gap:14px;margin:6px 0 14px">
+      <div id="pfPhotoBox" style="width:76px;height:76px;border-radius:50%;overflow:hidden;flex:0 0 76px;background:var(--line);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:var(--muted)">
+        ${p.photo ? `<img src="${p.photo}" alt="" style="width:100%;height:100%;object-fit:cover">` : esc(initials)}
+      </div>
+      <div>
+        <label class="btn ghost small" style="cursor:pointer">Upload photo<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="pickProfilePhoto(this)"></label>
+        <button class="btn ghost small" type="button" onclick="removeProfilePhoto()">Remove</button>
+        <p style="font-size:11.5px;color:var(--muted);margin-top:6px">PNG / JPG / WEBP. It's resized automatically.</p>
+      </div>
+    </div>`;
+  const miss = profileMissing(p);
+  const nudge = miss.length ? `<p style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(201,164,76,.14);font-size:13px">Please add: <b>${esc(miss.join(", "))}</b>.</p>` : "";
+  let fixed = "", editable = "";
+  if(isClient){
+    fixed = pfRow("Name", p.name) + pfRow("Client ID", p.clientId) + pfRow("Registered phone (sign-in)", p.phone) +
+            pfRow("Service", p.service) + pfRow("Registered on", fmtDate(p.regDate));
+    editable = `
+      <div class="grid2">
+        <div class="field"><label>Email</label><input id="pf_email" type="email" value="${esc(p.email)}"></div>
+        <div class="field"><label>Alternate mobile</label><input id="pf_altMobile" value="${esc(p.altMobile)}"></div>
+        <div class="field"><label>Designation</label><input id="pf_designation" value="${esc(p.designation)}"></div>
+        <div class="field"><label>Department</label><input id="pf_department" value="${esc(p.department)}"></div>
+        <div class="field"><label>University / College / Company</label><input id="pf_institution" value="${esc(p.institution)}"></div>
+        <div class="field"><label>Institutional email</label><input id="pf_institutionalEmail" type="email" value="${esc(p.institutionalEmail)}"></div>
+      </div>
+      <div class="field"><label>Address</label><textarea id="pf_address" rows="2">${esc(p.address)}</textarea></div>`;
+  } else {
+    if(isEmp){
+      fixed = pfRow("Name", p.name) + pfRow("Employee ID", p.empUid) +
+              pfRow("Role", p.roleLabel + (p.teamType ? " — " + p.teamType : "") + (p.isCoordinator ? " (Coordinator)" : "")) +
+              (p.reportsTo ? pfRow("Reports to", p.reportsTo) : "") + pfRow("Designation", p.designation) +
+              pfRow("Department", p.department) + pfRow("Branch", p.branch) + pfRow("Joining date", fmtDate(p.joiningDate));
+    } else {
+      fixed = pfRow("Login", p.loginLabel);
+    }
+    editable = `
+      <div class="grid2">
+        ${isEmp ? "" : `<div class="field"><label>Your full name</label><input id="pf_full_name" value="${esc(p.fullName)}"></div>
+        <div class="field"><label>Designation</label><input id="pf_designation" value="${esc(p.designation)}"></div>`}
+        <div class="field"><label>Email <span style="font-weight:400;color:var(--muted)">(work is emailed here)</span></label><input id="pf_email" type="email" value="${esc(p.email)}"></div>
+        <div class="field"><label>Phone</label><input id="pf_phone" value="${esc(p.phone)}" placeholder="e.g. 98765 43210"></div>
+        <div class="field"><label>Date of birth</label><input id="pf_date_of_birth" type="date" value="${esc(p.dateOfBirth)}"></div>
+        <div class="field"><label>Gender</label>${pfSelect("pf_gender", PROFILE_GENDERS, p.gender)}</div>
+        <div class="field"><label>Blood group</label>${pfSelect("pf_blood_group", PROFILE_BLOOD, p.bloodGroup)}</div>
+        <div class="field"><label>Emergency contact name</label><input id="pf_emergency_name" value="${esc(p.emergencyName)}"></div>
+        <div class="field"><label>Emergency contact phone</label><input id="pf_emergency_phone" value="${esc(p.emergencyPhone)}"></div>
+      </div>
+      <div class="field"><label>Address</label><textarea id="pf_address" rows="2">${esc(p.address)}</textarea></div>
+      <div class="field"><label>About me / skills</label><textarea id="pf_about" rows="3" placeholder="Skills, tools, languages, anything your team should know">${esc(p.about)}</textarea></div>`;
+  }
+  openModal(`
+    <h3>My profile</h3>
+    <p class="msub">Keep your details up to date — you can change them any time.${isEmp ? " Items at the top are set by your manager; ask them if something there is wrong." : ""}</p>
+    ${nudge}
+    ${photoBlock}
+    <div style="margin-bottom:14px">${fixed}</div>
+    ${editable}
+    ${p.updatedAt ? `<p style="font-size:11.5px;color:var(--muted)">Last updated ${esc(p.updatedAt)}</p>` : ""}
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="pfSaveBtn" onclick="saveMyProfile()">Save profile</button></div>`);
+}
+function pickProfilePhoto(input){
+  const f = input.files && input.files[0];
+  if(!f) return;
+  if(!/^image\/(png|jpeg|webp)$/.test(f.type)){ toast("Pick a PNG, JPG or WEBP image"); return; }
+  if(f.size > 15 * 1024 * 1024){ toast("That image is too large"); return; }
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const img = new Image();
+    img.onload = ()=>{
+      // centre-crop to a square and shrink to 256px so the saved photo stays small
+      const side = Math.min(img.width, img.height), size = 256;
+      const cv = document.createElement("canvas"); cv.width = cv.height = size;
+      cv.getContext("2d").drawImage(img, (img.width-side)/2, (img.height-side)/2, side, side, 0, 0, size, size);
+      myProfilePhotoDraft = cv.toDataURL("image/jpeg", 0.85);
+      $("pfPhotoBox").innerHTML = `<img src="${myProfilePhotoDraft}" alt="" style="width:100%;height:100%;object-fit:cover">`;
+    };
+    img.onerror = ()=>toast("Couldn't read that image");
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+}
+function removeProfilePhoto(){
+  myProfilePhotoDraft = "";
+  $("pfPhotoBox").textContent = "—";
+}
+async function saveMyProfile(){
+  const p = myProfile, prof = {};
+  const val = id => { const el = $(id); return el ? el.value.trim() : undefined; };
+  const keys = p.kind === "client"
+    ? ["email","altMobile","designation","department","institution","institutionalEmail","address"]
+    : ["full_name","designation","email","phone","date_of_birth","gender","blood_group","emergency_name","emergency_phone","address","about"];
+  keys.forEach(k=>{ const v = val("pf_" + k); if(v !== undefined) prof[k] = v; });
+  if(prof.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prof.email)){ toast("Enter a valid email address"); return; }
+  if(myProfilePhotoDraft !== null) prof.photo = myProfilePhotoDraft;
+  const btn = $("pfSaveBtn"); btn.disabled = true; btn.textContent = "Saving...";
+  let out;
+  try{ out = await api("save_my_profile", {profile: prof}); }
+  catch(e){ toast(e.message); btn.disabled = false; btn.textContent = "Save profile"; return; }
+  myProfile = out.profile;
+  if(myProfile.kind !== "client") myEmail = myProfile.email || "";
+  if(myProfile.kind === "dept" && roleEmails && role in roleEmails) roleEmails[role] = myEmail;
+  paintProfileNav();
+  closeModal();
+  toast("Profile saved");
+}
+async function loadMemberProfile(empIdToLoad){
+  const box = $("memberProfileSec-" + empIdToLoad);
+  if(!box) return;
+  let p;
+  try{ p = (await api("get_member_profile", {targetEmpId: empIdToLoad})).profile; }
+  catch(e){ box.remove(); return; }       // not a manager of this person - just hide the section
+  const rows = [["Phone", p.phone], ["Gender", p.gender], ["Blood group", p.bloodGroup],
+                ["Address", p.address], ["Emergency contact", [p.emergencyName, p.emergencyPhone].filter(Boolean).join(" — ")],
+                ["About / skills", p.about]].filter(r=>r[1]);
+  box.innerHTML = `<h4>Profile (filled in by ${esc(p.name)})</h4>
+    <div style="display:flex;gap:14px;align-items:flex-start">
+      ${p.photo ? `<img src="${p.photo}" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;flex:0 0 64px">` : ""}
+      <div style="flex:1">${rows.length ? rows.map(r=>pfRow(r[0], r[1])).join("") : `<p style="color:var(--muted);font-size:13px">They haven't filled in their profile yet.</p>`}
+      ${p.updatedAt ? `<p style="font-size:11.5px;color:var(--muted);margin-top:6px">Updated ${esc(p.updatedAt)}</p>` : ""}</div>
+    </div>`;
+}
+/* ---- Admin: Settings -> Email sending check ---- */
+const MAIL_METHOD_LABEL = {gmail_api:"Gmail API (works on Render's free plan)", smtp:"Gmail SMTP (app password)"};
+async function loadMailStatus(){
+  const box = $("mailCheckStatus"); if(!box) return;
+  let out;
+  try{ out = await api("mail_status"); }catch(e){ box.textContent = e.message; return; }
+  if(!out.method){
+    box.innerHTML = `<b style="color:#d9534f">Not configured.</b> Set the Gmail API variables (see README &rarr; GMAIL API) in Render &rarr; Environment, then redeploy.`;
+  } else {
+    box.innerHTML = `Sending from <b>${esc(out.sender||"(GMAIL_USER not set)")}</b> via <b>${esc(MAIL_METHOD_LABEL[out.method]||out.method)}</b>.` +
+      (out.method==="smtp" ? `<br><span style="color:var(--muted)">Note: Render's free plan blocks SMTP. If the test below times out, set up the Gmail API.</span>` : "");
+  }
+  const list = $("mailLogList");
+  if(list){
+    list.innerHTML = (out.log||[]).length ? out.log.map(x=>`
+      <div style="padding:6px 0;border-bottom:1px solid var(--line)">
+        <b style="color:${x.ok?'#3f9a57':'#d9534f'}">${x.ok?"SENT":"NOT SENT"}</b>
+        <span style="color:var(--muted)">${esc(x.at)} &middot; ${esc(x.method)}${x.note?" &middot; "+esc(x.note):""}</span><br>
+        ${esc(x.subject)} &rarr; ${esc(x.to||"—")}
+        ${x.error?`<br><span style="color:#d9534f">${esc(x.error)}</span>`:""}
+      </div>`).join("") : `<p style="color:var(--muted)">Nothing sent since the server last started.</p>`;
+  }
+}
+async function runMailTest(){
+  const to = $("mailTestTo").value.trim(), res = $("mailTestResult"), btn = $("mailTestBtn");
+  if(!to){ toast("Enter an email address"); return; }
+  btn.disabled = true; res.innerHTML = "Sending… (this can take up to 30 seconds)";
+  try{
+    const out = await api("mail_test", {to});
+    res.innerHTML = `<b style="color:#3f9a57">Sent.</b> Check ${esc(to)} (and Spam).`;
+  }catch(e){
+    res.innerHTML = `<b style="color:#d9534f">Failed:</b> ${esc(e.message)}`;
+  }
+  btn.disabled = false;
+  loadMailStatus();
 }
 async function saveMyPassword(){
   const currentPassword = $("s_curpwd").value.trim();
@@ -13232,6 +13524,8 @@ async function refreshValidator(){
   $("rolePill").textContent = roleTitle();
   $("whoAmI").textContent = "Signed in as " + roleTitle();
   ["navInbox","navDash","navSettings","navHelp"].forEach(id=>{ const el=$(id); if(el) el.style.display="none"; });
+  $("navProfile").style.display = "flex";   // the Validation login gets a profile too
+  checkMyProfileOnce();
   document.getElementById("appView").classList.remove("tc-theme");
   document.getElementById("appView").classList.add("admin-theme");
   await loadValidationData();

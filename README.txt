@@ -22,9 +22,36 @@ DEPLOY (Render)
   SECRET_KEY is generated automatically. TZ=Asia/Kolkata keeps times (and AI
   reminders) on Indian time. Database tables are created/updated automatically.
 
+GMAIL API  (needed on Render's FREE plan)
+  Render's free web services block Gmail SMTP (ports 465/587), so emails silently
+  time out there. The Gmail API sends from the SAME Gmail account over HTTPS,
+  which is allowed. One-time setup (about 10 minutes):
+   1. https://console.cloud.google.com -> create a project (e.g. "iMatiz Mail").
+   2. APIs & Services -> Library -> search "Gmail API" -> Enable.
+   3. APIs & Services -> OAuth consent screen (Google Auth Platform):
+        User type External; app name "iMatiz"; your email as support/contact.
+        Audience -> add santhoshimatiz@gmail.com as a test user, then click
+        "Publish app" (In production). Otherwise the token dies every 7 days.
+   4. Credentials (Clients) -> Create client -> OAuth client ID ->
+        Application type "Desktop app" -> Create. Copy Client ID + Client secret.
+   5. On your own computer:  python get_gmail_token.py
+        paste the ID + secret, sign in as santhoshimatiz@gmail.com, allow
+        "Send email on your behalf". (Unverified-app warning: Advanced -> Go to.)
+   6. Render -> your web service -> Environment -> add the 3 printed values:
+        GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
+      Keep GMAIL_USER=santhoshimatiz@gmail.com. Save -> it redeploys.
+   7. Sign in as Super Admin -> Settings -> "Email sending check" -> Send test.
+  When these 3 are set the app uses the Gmail API; otherwise it uses SMTP below.
+  Optional: MAIL_FROM_NAME (default "iMatiz Technology") = the sender's display name.
+
+  TROUBLESHOOTING: Settings -> Email sending check lists the last 40 emails with
+  the exact reason any failed (also printed in Render -> Logs as "[email] ...").
+  Forgot-password requests appear there too, e.g. "No valid email saved in this
+  person's profile".
+
 AUTOMATIC EMAILS (optional)
   GMAIL_USER=<gmail address>
-  GMAIL_APP_PASSWORD=<16-character Google app password>
+  GMAIL_APP_PASSWORD=<16-character Google app password>   (SMTP: local / paid Render only)
   DEFAULT_FROM_EMAIL / DEFAULT_TO_EMAIL  (optional defaults)
   Without these, hand-off steps still open a ready email in your mail app.
 
@@ -58,6 +85,19 @@ AI ASSISTANT (optional key)
       HELP_AI_MODEL=deepseek-chat
   The key stays on the server. The data shown always comes from the database,
   limited to what that login can see on its own dashboard.
+
+MY PROFILE (every dashboard)
+  Everyone has "My profile" in the sidebar and can update it any time.
+    - Team members: name, Employee ID, role, team, designation, department, branch
+      and joining date are set by their manager (read-only). They fill in email,
+      phone, date of birth, gender, blood group, address, emergency contact,
+      about/skills and a photo. Managers see this on the person's Team card.
+    - Department logins: the person using the login fills in their name,
+      designation, contact and personal details. Email = where hand-offs go.
+    - Clients: update email, alternate mobile, address, designation, institution,
+      institutional email and department (registered phone stays read-only - it's
+      their sign-in). Each change is logged in that client's history.
+  A dot on "My profile" and a one-time reminder appear until email/phone are filled.
 
 REMINDER TONE
   Reminder pop-ups (AI reminders + overdue steps) play a loud tone for 3 seconds.

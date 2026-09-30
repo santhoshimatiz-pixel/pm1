@@ -25,6 +25,8 @@ from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 import urllib.request
+import urllib.parse
+import urllib.error
 from urllib.request import Request
 
 import help_assistant   # Help -> "Ask AI" chat (answers only questions about this PM tool)
@@ -641,6 +643,7 @@ CLIENT_ALLOWED_ACTIONS = {
     "help_chat",
     "ai_reminder_save", "ai_reminder_list", "ai_reminder_delete", "ai_reminders_poll", "ai_reminder_ack",
     "alert_tone_get", "alert_tone_set",
+    "get_my_profile", "save_my_profile",
     "client_approve_proposal", "client_approve_paper", "client_approve_implementation",
     "client_request_correction_proposal", "client_request_correction_paper",
     "client_request_correction_implementation",
@@ -856,7 +859,13 @@ ACTION_ROLES = {
     "admin_import_summary": _R_ADMIN,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
     "save_my_email": _R_ALL_STAFF,
+    # My profile: every login, including the Validation login (clients: CLIENT_ALLOWED_ACTIONS).
+    "get_my_profile": _R_ALL_STAFF + ("validator",),
+    "save_my_profile": _R_ALL_STAFF + ("validator",),
+    "get_member_profile": _R_STAFF_MGMT,
     "save_role_emails": _R_ADMIN,
+    "mail_status": _R_ADMIN,
+    "mail_test": _R_ADMIN,
 
     # ---- Validation folders (AI Check / Plagiarism Check / Test Paper) ----
     # "validator" is the dedicated Validation login (an employee whose Technical
@@ -945,6 +954,54 @@ def session_identity(session):
             "label": STAFF_ROLE_LABELS.get(role, role.replace("_", " ").title())}
 
 
+# Individually-added BDC staff (employee role TELECALLER) sign in with "BDC Login",
+# so their session role is "employee". These are the lead-handling actions the shared
+# "telecaller" login may do; BDC staff get them too, but only on their OWN leads
+# (see bdc_owns_client). Technical-pipeline steps are deliberately not included.
+BDC_EMPLOYEE_ACTIONS = frozenset({
+    "add_client", "update_client", "add_call", "add_client_referral",
+    "add_service_item", "delete_service_item", "schedule_demo", "cancel_demo_schedule",
+    "import_clients", "import_clients_from_url", "bulk_import", "bulk_import_from_url",
+    "send_to_tl", "send_client_invite", "create_invite_link", "admin_reset_client_password",
+    "mark_paid", "mark_installment_paid", "add_client_installments", "delete_client_installment",
+})
+# Actions that create new clients rather than acting on an existing one.
+_BDC_CREATE_ACTIONS = {"add_client", "import_clients", "import_clients_from_url",
+                       "bulk_import", "bulk_import_from_url"}
+
+
+def is_bdc_employee(session):
+    return bool(session) and session["kind"] == "employee" and (session["emp_role"] or "") == "TELECALLER"
+
+
+def bdc_owns_client(con, emp_name, client_id):
+    """A BDC's own lead: they added it, or they are named as its BDC."""
+    name = (emp_name or "").strip()
+    if not name or not client_id:
+        return False
+    c = con.execute("SELECT bdc FROM clients WHERE id=?", (client_id,)).fetchone()
+    if not c:
+        return False
+    if (c["bdc"] or "").strip().lower() == name.lower():
+        return True
+    h = con.execute("""SELECT actor FROM history WHERE client_id=? AND stage='NEW'
+                       ORDER BY id ASC LIMIT 1""", (client_id,)).fetchone()
+    return bool(h and (h["actor"] or "").strip() == name)
+
+
+def bdc_target_client(con, action, d):
+    """The client a BDC action touches (some actions pass an item id instead)."""
+    if d.get("clientId"):
+        return str(d.get("clientId")).strip()
+    if action in ("mark_installment_paid", "delete_client_installment") and d.get("installmentId"):
+        r = con.execute("SELECT client_id FROM client_installments WHERE id=?", (d.get("installmentId"),)).fetchone()
+        return r["client_id"] if r else ""
+    if action == "delete_service_item" and d.get("itemId"):
+        r = con.execute("SELECT client_id FROM service_items WHERE id=?", (d.get("itemId"),)).fetchone()
+        return r["client_id"] if r else ""
+    return ""
+
+
 def authorize(action, session):
     """Deny-by-default gate. Raises ApiError; returns nothing on success.
 
@@ -973,6 +1030,8 @@ def authorize(action, session):
         return
     if role in allowed:
         return
+    if action in BDC_EMPLOYEE_ACTIONS and is_bdc_employee(session):
+        return          # own-lead check happens in the request binding
     raise ApiError("You don't have permission to do that.", 403)
 
 
@@ -1203,6 +1262,16 @@ STAFF_MGMT_TEAM_ROLES = {
 }
 # SECURITY: roles allowed to administer logins/employees system-wide (Team & Access screen).
 ADMIN_ROLES = ("md_admin", "super_admin")
+
+
+def require_team_scope(actor_role, emp_role):
+    """A department manager may add/edit/remove only their own department's staff
+    (Marketing -> BDC, Technical -> Programmers/Paper Writers, Journal -> Journal team).
+    Super Admin / MD Admin may manage anyone."""
+    if actor_role in ADMIN_ROLES:
+        return
+    if emp_role not in STAFF_MGMT_TEAM_ROLES.get(actor_role, ()):
+        raise ApiError("That person isn't part of your department's team.", 403)
 # FEATURE: roles allowed to change a client's SERVICE and TOTAL AMOUNT after the client has
 # already been registered — a tighter set than "who can edit a client at all" (update_client
 # below), since the service drives the whole payment schedule.
@@ -1892,6 +1961,14 @@ def init_db():
     # ----- Validation folders (AI Check / Plagiarism Check / Test Paper) -----
     # validation_access: comma list of folder keys the Technical Manager granted.
     con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS validation_access TEXT DEFAULT ''")
+    # "My profile": personal details each login fills in itself. Keyed by the same
+    # identity key the DM/audit code uses: "EMP:<employee id>" or "ROLE:<login role>".
+    con.execute("""CREATE TABLE IF NOT EXISTS user_profiles (
+        owner_key TEXT PRIMARY KEY,
+        full_name TEXT DEFAULT '', phone TEXT DEFAULT '', date_of_birth TEXT DEFAULT '',
+        designation TEXT DEFAULT '', gender TEXT DEFAULT '', blood_group TEXT DEFAULT '',
+        address TEXT DEFAULT '', emergency_name TEXT DEFAULT '', emergency_phone TEXT DEFAULT '',
+        about TEXT DEFAULT '', photo TEXT DEFAULT '', updated_at TEXT DEFAULT '')""")
     # Forgot password: only a hash of the emailed reset code is stored, with an expiry.
     con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_code_hash TEXT DEFAULT ''")
     con.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS reset_code_expires TEXT DEFAULT ''")
@@ -2749,22 +2826,10 @@ def deleted_employees(con):
 
 
 def try_auto_email(con, client, subject, body):
-    """Best-effort automated handoff email. Silently records a history note either
-    way; never blocks the pipeline transition if Gmail isn't configured or fails."""
-    pwd = GMAIL_APP_PASSWORD.replace(" ", "")
+    """Best-effort handoff email to the default To address (kept for compatibility)."""
     to = get_settings(con)["toEmail"]
-    if not pwd or not to:
-        return
-    try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = subject
-        msg["From"] = GMAIL_USER
-        msg["To"] = to
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
-            smtp.login(GMAIL_USER, pwd)
-            smtp.sendmail(GMAIL_USER, [to], msg.as_string())
-    except Exception:
-        pass
+    if to:
+        send_mail_async([to], subject, body)
 
 
 def get_settings(con):
@@ -2821,11 +2886,12 @@ STAGE_EMAIL_CC_ROLES = {"TL_REVIEW": ("marketing_manager",)}
 # Actions that never move work between people - skip the before/after snapshot.
 _NOTIFY_SKIP_PREFIXES = ("get_", "list_", "ai_", "help_", "alert_tone", "login", "logout",
                          "session", "bootstrap", "chat_typing", "dm_", "export", "download",
-                         "send_email", "save_settings", "save_my_email", "save_role_emails")
+                         "send_email", "save_settings", "save_my_email", "save_role_emails", "mail_status", "mail_test",
+                         "get_my_profile", "save_my_profile", "get_member_profile")
 
 
 def _mail_configured():
-    return bool(GMAIL_USER and GMAIL_APP_PASSWORD.replace(" ", ""))
+    return bool(mail_method())
 
 
 def _valid_email_list(raw):
@@ -2857,31 +2923,202 @@ def employee_email_map(con, names_):
     return out
 
 
-def send_mail_async(to_list, subject, body, cc_list=None):
-    """Send one plain-text mail from the company account in a background thread,
-    so a slow SMTP server never holds up the button the user clicked."""
-    pwd = GMAIL_APP_PASSWORD.replace(" ", "")
-    to_list = [t for t in (to_list or []) if EMAIL_RE.match(t or "")]
-    cc_list = [t for t in (cc_list or []) if EMAIL_RE.match(t or "") and t not in to_list]
-    if not pwd or not GMAIL_USER or not to_list:
-        return False
-    subject = re.sub(r"[\r\n]+", " ", str(subject))[:200]
+# =====================================================================
+# MAIL TRANSPORT - every email the app sends goes through deliver_mail().
+#
+# Why: Render's FREE web services block outbound SMTP (ports 25/465/587) since
+# Sept 2025, so smtp.gmail.com just times out there. The Gmail API sends the
+# same mail, from the same Gmail account, over normal HTTPS (port 443), which
+# is not blocked. Order used:
+#   1. Gmail API   - when GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN
+#                    are set (see README "GMAIL API"). Works on Render free.
+#   2. Gmail SMTP  - GMAIL_USER + GMAIL_APP_PASSWORD (works locally and on paid
+#                    Render instances). Tries port 465, then 587.
+# Every attempt is recorded (admin: Settings -> Email sending check) and printed
+# to the server log, so a failure is never silent.
+# =====================================================================
+GMAIL_CLIENT_ID = _env("GMAIL_CLIENT_ID", "").strip()
+GMAIL_CLIENT_SECRET = _env("GMAIL_CLIENT_SECRET", "").strip()
+GMAIL_REFRESH_TOKEN = _env("GMAIL_REFRESH_TOKEN", "").strip()
+MAIL_FROM_NAME = _env("MAIL_FROM_NAME", "iMatiz Technology").strip()
 
-    def _go():
+_GMAIL_TOKEN = {"value": "", "expires": 0.0}
+_GMAIL_TOKEN_LOCK = threading.Lock()
+_MAIL_LOG = []                     # newest last; capped
+_MAIL_LOG_LOCK = threading.Lock()
+
+
+def _gmail_api_configured():
+    return bool(GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN)
+
+
+def _smtp_configured():
+    return bool(GMAIL_USER and GMAIL_APP_PASSWORD.replace(" ", ""))
+
+
+def mail_method():
+    if _gmail_api_configured():
+        return "gmail_api"
+    if _smtp_configured():
+        return "smtp"
+    return ""
+
+
+def mail_sender():
+    return (GMAIL_USER or DEFAULT_FROM_EMAIL or "").strip()
+
+
+def mail_log(to_list, subject, ok, method, error="", note=""):
+    entry = {"at": now_str() if "now_str" in globals() else time.strftime("%Y-%m-%d %H:%M:%S"),
+             "to": ", ".join(to_list or []), "subject": str(subject)[:120], "ok": bool(ok),
+             "method": method or "-", "error": str(error)[:400], "note": note}
+    with _MAIL_LOG_LOCK:
+        _MAIL_LOG.append(entry)
+        del _MAIL_LOG[:-40]
+    print("[email] %s %s -> %s | %s%s" % ("SENT" if ok else "FAILED", method or "-", entry["to"] or "-",
+          entry["subject"], (" | " + entry["error"]) if error else (" | " + note if note else "")),
+          file=sys.stderr, flush=True)
+
+
+def _http_json(url, data=None, headers=None, form=False, timeout=20):
+    body = None
+    hdrs = dict(headers or {})
+    if data is not None:
+        if form:
+            body = urllib.parse.urlencode(data).encode("utf-8")
+            hdrs["Content-Type"] = "application/x-www-form-urlencoded"
+        else:
+            body = json.dumps(data).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+    req = Request(url, data=body, headers=hdrs, method="POST" if body is not None else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
         try:
-            msg = MIMEText(str(body)[:20000], "plain", "utf-8")
-            msg["Subject"] = subject
-            msg["From"] = GMAIL_USER
-            msg["To"] = ", ".join(to_list)
-            if cc_list:
-                msg["Cc"] = ", ".join(cc_list)
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
-                smtp.login(GMAIL_USER, pwd)
-                smtp.sendmail(GMAIL_USER, to_list + cc_list, msg.as_string())
-        except Exception as e:
-            print("[email] could not send %r to %s: %s" % (subject, to_list, e))
+            detail = json.loads(e.read().decode("utf-8") or "{}")
+        except Exception:
+            detail = {}
+        err = detail.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message") or str(err)
+        else:
+            msg = (detail.get("error_description") or err or str(e))
+        raise RuntimeError("HTTP %s: %s" % (e.code, msg))
 
-    threading.Thread(target=_go, daemon=True).start()
+
+def _gmail_access_token():
+    with _GMAIL_TOKEN_LOCK:
+        if _GMAIL_TOKEN["value"] and _GMAIL_TOKEN["expires"] - 60 > time.time():
+            return _GMAIL_TOKEN["value"]
+        try:
+            out = _http_json("https://oauth2.googleapis.com/token", {
+                "client_id": GMAIL_CLIENT_ID, "client_secret": GMAIL_CLIENT_SECRET,
+                "refresh_token": GMAIL_REFRESH_TOKEN, "grant_type": "refresh_token"}, form=True)
+        except RuntimeError as e:
+            if "invalid_grant" in str(e) or "expired or revoked" in str(e):
+                raise RuntimeError("Google refused the refresh token (%s). Run get_gmail_token.py again "
+                                   "and update GMAIL_REFRESH_TOKEN. If it stops working every 7 days, set the "
+                                   "OAuth consent screen's publishing status to 'In production'." % e)
+            raise
+        _GMAIL_TOKEN["value"] = out.get("access_token", "")
+        _GMAIL_TOKEN["expires"] = time.time() + int(out.get("expires_in") or 3000)
+        if not _GMAIL_TOKEN["value"]:
+            raise RuntimeError("Google did not return an access token.")
+        return _GMAIL_TOKEN["value"]
+
+
+def _build_message(to_list, subject, body, cc_list=None, html=None):
+    from email.utils import formataddr
+    from email.header import Header
+    if html:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(str(body)[:20000], "plain", "utf-8"))
+        msg.attach(MIMEText(str(html)[:200000], "html", "utf-8"))
+    else:
+        msg = MIMEText(str(body)[:20000], "plain", "utf-8")
+    msg["Subject"] = str(Header(subject, "utf-8"))
+    sender = mail_sender()
+    msg["From"] = formataddr((str(Header(MAIL_FROM_NAME, "utf-8")), sender)) if MAIL_FROM_NAME else sender
+    msg["To"] = ", ".join(to_list)
+    if cc_list:
+        msg["Cc"] = ", ".join(cc_list)
+    return msg
+
+
+def _send_gmail_api(msg):
+    token = _gmail_access_token()
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+    _http_json("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {"raw": raw},
+               headers={"Authorization": "Bearer " + token})
+
+
+def _send_smtp(msg, rcpts):
+    pwd = GMAIL_APP_PASSWORD.replace(" ", "")
+    user = GMAIL_USER.strip()
+    last = None
+    for port in (465, 587):
+        try:
+            if port == 465:
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+                    smtp.login(user, pwd)
+                    smtp.sendmail(user, rcpts, msg.as_string())
+            else:
+                with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
+                    smtp.starttls()
+                    smtp.login(user, pwd)
+                    smtp.sendmail(user, rcpts, msg.as_string())
+            return
+        except smtplib.SMTPAuthenticationError as e:
+            raise RuntimeError("Gmail rejected the login (%s). Check GMAIL_USER is exactly the Gmail address "
+                               "the app password belongs to, the 16-letter app password has no typos, and "
+                               "2-Step Verification is ON." % (e.smtp_code,))
+        except (socket.timeout, TimeoutError, OSError) as e:
+            last = e
+            continue
+    raise RuntimeError("Could not connect to smtp.gmail.com on port 465 or 587 (%s). Render's FREE plan blocks "
+                       "outbound SMTP - set up the Gmail API (README: GMAIL API) or use a paid Render instance."
+                       % (last,))
+
+
+def deliver_mail(to_list, subject, body, cc_list=None, html=None, note=""):
+    """Send now (blocking). Returns (ok, error_message)."""
+    to_list = [t.strip() for t in (to_list or []) if t and EMAIL_RE.match(t.strip())]
+    cc_list = [t.strip() for t in (cc_list or []) if t and EMAIL_RE.match(t.strip()) and t.strip() not in to_list]
+    subject = re.sub(r"[\r\n]+", " ", str(subject or ""))[:200]
+    method = mail_method()
+    if not to_list:
+        mail_log(to_list, subject, False, method, "No valid recipient address.", note)
+        return False, "No valid recipient address."
+    if not method:
+        err = "Email sending isn't configured on the server."
+        mail_log(to_list, subject, False, "", err, note)
+        return False, err
+    if not mail_sender():
+        err = "GMAIL_USER (the sending Gmail address) is not set."
+        mail_log(to_list, subject, False, method, err, note)
+        return False, err
+    try:
+        msg = _build_message(to_list, subject, body, cc_list, html)
+        if method == "gmail_api":
+            _send_gmail_api(msg)
+        else:
+            _send_smtp(msg, to_list + cc_list)
+    except Exception as e:
+        mail_log(to_list + cc_list, subject, False, method, str(e), note)
+        return False, str(e)
+    mail_log(to_list + cc_list, subject, True, method, "", note)
+    return True, ""
+
+
+def send_mail_async(to_list, subject, body, cc_list=None, note=""):
+    """Send in a background thread so the button the user clicked never waits on
+    the mail server. The result (sent or the exact error) goes to the mail log."""
+    to_list = [t for t in (to_list or []) if EMAIL_RE.match(t or "")]
+    if not mail_method() or not to_list:
+        return False
+    threading.Thread(target=deliver_mail, args=(to_list, subject, body, cc_list),
+                     kwargs={"note": note}, daemon=True).start()
     return True
 
 
@@ -3026,7 +3263,7 @@ def collect_notifications(con, action, d, before):
     """Compare before/after and queue an email for everyone who just got work."""
     actor = (d.get("_principal_label") or d.get("actorLabel") or "Someone").strip()
     actor_email = ""
-    if (d.get("role") or "") == "employee" and d.get("empId"):
+    if d.get("empId"):
         r = con.execute("SELECT email FROM employees WHERE id=?", (d.get("empId"),)).fetchone()
         actor_email = (r["email"] or "") if r else ""
     elif d.get("role"):
@@ -4328,6 +4565,143 @@ def handle_action(action, d, ip=""):
 
 
 # =====================================================================
+# MY PROFILE - every dashboard can open "My profile" and update it any time.
+#   * Team members (employee / Validation login): name, Employee ID, role, team,
+#     designation, department, branch and joining date are set by their manager and
+#     shown read-only (names are how work is assigned, so they can't be renamed
+#     from here). They edit their own email, phone, date of birth and the personal
+#     details below. Email/phone/DOB stay in the employees table, so the Team view
+#     and assignment emails use exactly what they typed.
+#   * Department logins (Marketing TL, Technical Manager, ...): the person using the
+#     login fills in their name, designation, contact details etc. Email is the
+#     same address hand-off emails go to.
+#   * Clients: see their details; can update email, alternate mobile, address,
+#     designation, institution, institutional email and department. Phone stays
+#     read-only because it is their sign-in. Every client change is logged in the
+#     client's history so staff can see it.
+# =====================================================================
+PROFILE_TEXT_LIMITS = {"full_name": 80, "phone": 20, "designation": 80, "gender": 20,
+                       "blood_group": 5, "address": 400, "emergency_name": 80,
+                       "emergency_phone": 20, "about": 800}
+PROFILE_GENDERS = ("", "Female", "Male", "Other", "Prefer not to say")
+PROFILE_BLOOD_GROUPS = ("", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
+PROFILE_PHOTO_MAX = 400_000          # characters of data: URL (~290 KB image)
+_PHONE_RE = re.compile(r"^\+?[0-9 ()-]{6,20}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_PHOTO_RE = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
+
+
+def _profile_row(con, key):
+    r = con.execute("SELECT * FROM user_profiles WHERE owner_key=?", (key,)).fetchone()
+    return dict(r) if r else {}
+
+
+def _clean_profile_input(d):
+    """Validate the editable personal fields; raises ApiError with a clear message."""
+    p = d.get("profile") if isinstance(d.get("profile"), dict) else {}
+    out = {}
+    for k, limit in PROFILE_TEXT_LIMITS.items():
+        if k in p:
+            v = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(p.get(k) or "")).strip()
+            if len(v) > limit:
+                raise ApiError("%s is too long (max %d characters)." % (k.replace("_", " ").capitalize(), limit))
+            out[k] = v
+    for k in ("phone", "emergency_phone"):
+        if out.get(k) and not _PHONE_RE.match(out[k]):
+            raise ApiError("Enter a valid %s number." % ("emergency contact" if k == "emergency_phone" else "phone"))
+    if out.get("gender", "") not in PROFILE_GENDERS:
+        raise ApiError("Pick a gender from the list.")
+    if out.get("blood_group", "") not in PROFILE_BLOOD_GROUPS:
+        raise ApiError("Pick a blood group from the list.")
+    if "date_of_birth" in p:
+        dob = str(p.get("date_of_birth") or "").strip()
+        if dob:
+            if not _DATE_RE.match(dob):
+                raise ApiError("Enter a valid date of birth.")
+            try:
+                dt = datetime.strptime(dob, "%Y-%m-%d")
+            except ValueError:
+                raise ApiError("Enter a valid date of birth.")
+            if dt > datetime.now() or dt.year < 1920:
+                raise ApiError("Enter a valid date of birth.")
+        out["date_of_birth"] = dob
+    if "email" in p:
+        em = str(p.get("email") or "").strip()
+        if em and not EMAIL_RE.match(em):
+            raise ApiError("That doesn't look like a valid email address.")
+        out["email"] = em
+    if "photo" in p:
+        ph = str(p.get("photo") or "")
+        if ph and (len(ph) > PROFILE_PHOTO_MAX or not _PHOTO_RE.match(ph)):
+            raise ApiError("The photo must be a PNG, JPG or WEBP image under about 290 KB.")
+        out["photo"] = ph
+    return out
+
+
+def _save_profile_row(con, key, fields):
+    cols = [c for c in ("full_name", "phone", "date_of_birth", "designation", "gender", "blood_group",
+                        "address", "emergency_name", "emergency_phone", "about", "photo") if c in fields]
+    if not cols:
+        return
+    con.execute("INSERT INTO user_profiles (owner_key) VALUES (?) ON CONFLICT (owner_key) DO NOTHING", (key,))
+    con.execute("UPDATE user_profiles SET %s, updated_at=? WHERE owner_key=?" %
+                ", ".join("%s=?" % c for c in cols),
+                [fields[c] for c in cols] + [now_str(), key])
+
+
+def _personal_out(prof):
+    return {"gender": prof.get("gender") or "", "bloodGroup": prof.get("blood_group") or "",
+            "address": prof.get("address") or "", "emergencyName": prof.get("emergency_name") or "",
+            "emergencyPhone": prof.get("emergency_phone") or "", "about": prof.get("about") or "",
+            "photo": prof.get("photo") or "", "updatedAt": prof.get("updated_at") or ""}
+
+
+def employee_profile_out(con, e):
+    prof = _profile_row(con, "EMP:%s" % e["id"])
+    coord = ""
+    if e.get("coordinator_id"):
+        r = con.execute("SELECT name FROM employees WHERE id=?", (e["coordinator_id"],)).fetchone()
+        coord = r["name"] if r else ""
+    role_label = {"PROGRAMMER": "Programmer", "PAPER_WRITER": "Paper Writer",
+                  "TELECALLER": "BDC", "JOURNAL_EMPLOYEE": "Journal Team"}.get(e["role"], e["role"])
+    out = {"kind": "employee", "name": e["name"], "empUid": e["emp_uid"] or "", "roleLabel": role_label,
+           "teamType": (e.get("team_type") or "").replace("_", " ").title(),
+           "isCoordinator": bool(e.get("is_coordinator")), "reportsTo": coord,
+           "designation": e.get("designation") or "", "department": e.get("department") or "",
+           "branch": e.get("branch") or "", "joiningDate": e.get("joining_date") or "",
+           "email": e.get("email") or "", "phone": e.get("phone") or "",
+           "dateOfBirth": e.get("date_of_birth") or ""}
+    out.update(_personal_out(prof))
+    return out
+
+
+def dept_profile_out(con, role_):
+    prof = _profile_row(con, "ROLE:%s" % role_)
+    out = {"kind": "dept", "loginLabel": ROLE_EMAIL_LABELS.get(role_, STAFF_ROLE_LABELS.get(role_, role_)),
+           "fullName": prof.get("full_name") or "", "designation": prof.get("designation") or "",
+           "email": role_email_map(con).get(role_, ""), "phone": prof.get("phone") or "",
+           "dateOfBirth": prof.get("date_of_birth") or ""}
+    out.update(_personal_out(prof))
+    return out
+
+
+CLIENT_PROFILE_FIELDS = {"email": ("email", 120), "altMobile": ("alt_mobile", 20),
+                         "address": ("address", 400), "designation": ("designation", 80),
+                         "institution": ("institution", 160), "institutionalEmail": ("institutional_email", 120),
+                         "department": ("department", 120)}
+
+
+def client_profile_out(con, c):
+    out = {"kind": "client", "name": c["name"], "clientId": c["display_id"] or c["id"],
+           "phone": c["phone"] or "", "service": SERVICES.get(c["service_key"] or "", {}).get("label", ""),
+           "regDate": c["reg_date"] or ""}
+    for k, (col, _) in CLIENT_PROFILE_FIELDS.items():
+        out[k] = (c[col] or "") if col in c.keys() else ""
+    prof = _profile_row(con, "CLIENT:%s" % c["id"])
+    out["photo"] = prof.get("photo") or ""
+    return out
+
+# =====================================================================
 # EMPLOYEE "FORGOT PASSWORD"
 # The employee types their Employee ID; a one-time reset code (and a link, when
 # APP_BASE_URL is set) is emailed to the Mail ID saved in their profile. Only an
@@ -4530,13 +4904,9 @@ def _handle_action_core(action, d, ip=""):
             c = get_client(con, client_id)
             if not c["email"]:
                 raise ApiError("This client doesn't have an email on file yet — add one first.")
-            pwd = GMAIL_APP_PASSWORD.replace(" ", "")
-            sender = GMAIL_USER.strip()
-            if not sender or not pwd:
-                raise ApiError("Email isn't set up yet. Set GMAIL_USER and GMAIL_APP_PASSWORD in the server's environment (.env), then restart. See README.txt."
-                               "GMAIL_USER and GMAIL_APP_PASSWORD in the environment (.env), then restart the "
-                               "server (stop it with Ctrl+C and run 'python server.py' again). Steps are in "
-                               "README.txt under 'AUTOMATIC EMAILS'.")
+            if not _mail_configured():
+                raise ApiError("Email isn't set up yet. Set the Gmail API variables (or GMAIL_USER and "
+                               "GMAIL_APP_PASSWORD) in the server's environment, then restart. See README.txt.")
             token = c["invite_token"] or secrets.token_hex(4).upper()
             display_id = c["display_id"] or c["id"]
             origin = (d.get("origin") or "").strip()
@@ -4554,23 +4924,10 @@ def _handle_action_core(action, d, ip=""):
                     f"Keep your Client ID and password safe — you'll use them every time you log in.\n\n"
                     f"— iMatiz Technology")
             html_body = invite_email_html(c["name"], display_id, token, link)
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = "Your iMatiz client portal is ready"
-            msg["From"] = sender
-            msg["To"] = c["email"]
-            msg.attach(MIMEText(plain_body, "plain", "utf-8"))
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
-            try:
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
-                    smtp.login(sender, pwd)
-                    smtp.sendmail(sender, [c["email"]], msg.as_string())
-            except smtplib.SMTPAuthenticationError:
-                raise ApiError("Gmail rejected the login. Double-check GMAIL_USER is the exact Gmail "
-                               "address the app password belongs to, that the app password has no typos "
-                               "or extra spaces, and that 2-Step Verification is ON for this Gmail account.")
-            except (smtplib.SMTPException, OSError, TimeoutError) as e:
-                raise ApiError("Could not reach Gmail to send the email (" + str(e) + "). "
-                               "Check your internet connection and try again.")
+            ok, err = deliver_mail([c["email"]], "Your iMatiz client portal is ready", plain_body,
+                                   html=html_body, note="client invite")
+            if not ok:
+                raise ApiError("Could not send the invitation email: " + err)
             # Only mark the invite as sent once the email genuinely went out.
             con.execute("UPDATE clients SET invite_token=?, invite_sent_at=? WHERE id=?",
                         (token, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), c["id"]))
@@ -4616,9 +4973,24 @@ def _handle_action_core(action, d, ip=""):
                        "a reset code has been sent to it. It can take a minute to arrive - check Spam too."}
             e = con.execute("""SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?)
                                AND deleted_at IS NULL""", (uid,)).fetchone()
-            if not e or not e["active"] or not EMAIL_RE.match((e["email"] or "").strip()):
-                return generic       # same answer either way: don't reveal which IDs exist
+            # The caller always gets the same answer (so IDs can't be probed); the real
+            # reason is written to the admin-only mail log for troubleshooting.
+            if not e:
+                mail_log([], "Password reset for %s" % uid[:30], False, mail_method(),
+                         "No active employee with that ID.", "password reset")
+                return generic
+            if not e["active"]:
+                mail_log([], "Password reset for %s" % e["emp_uid"], False, mail_method(),
+                         "This employee's access is disabled.", "password reset")
+                return generic
+            if not EMAIL_RE.match((e["email"] or "").strip()):
+                mail_log([], "Password reset for %s (%s)" % (e["emp_uid"], e["name"]), False, mail_method(),
+                         "No valid email saved in this person's profile - add it in Team or My profile.",
+                         "password reset")
+                return generic
             if _rate_limited(e["emp_uid"].upper(), "emp_reset_per_id", limit=3, window_seconds=900):
+                mail_log([e["email"].strip()], "Password reset for %s" % e["emp_uid"], False, mail_method(),
+                         "Skipped: more than 3 reset requests for this ID in 15 minutes.", "password reset")
                 return generic       # stop anyone flooding one person's inbox
             code = _new_reset_code()
             expires = (datetime.now() + timedelta(minutes=RESET_CODE_MINUTES)).strftime(_TS_FMT)
@@ -4626,7 +4998,7 @@ def _handle_action_core(action, d, ip=""):
                            WHERE id=?""", (_reset_code_hash(e["id"], code), expires, e["id"]))
             con.commit()
             send_mail_async([e["email"].strip()], "iMatiz: reset your password",
-                            employee_reset_email_body(e["name"], e["emp_uid"], code))
+                            employee_reset_email_body(e["name"], e["emp_uid"], code), note="password reset")
             return generic
 
         if action == "employee_reset_with_code":
@@ -4853,8 +5225,19 @@ def _handle_action_core(action, d, ip=""):
                 emp_name = (d.get("empName") or "").strip()
                 emp_id = d.get("empId")
                 visible = employee_visible_client_ids(con, emp_id, emp_name, tasks, queries)
-                clients_out = [scrub_client_for_employee(c) for c in clients_out
-                               if c["id"] in visible]
+                # BDC staff: their own leads (added by them, or they're named as the BDC)
+                # show in full - payments, contact details, invite - exactly as the shared
+                # BDC login sees them, because working those leads is their job.
+                own_leads = set()
+                if (d.get("empRole") or "") == "TELECALLER" and emp_name:
+                    for r in con.execute("""SELECT DISTINCT client_id FROM history
+                                            WHERE stage='NEW' AND actor=?""", (emp_name,)):
+                        own_leads.add(r["client_id"])
+                    for r in con.execute("SELECT id FROM clients WHERE LOWER(TRIM(bdc))=LOWER(?)", (emp_name,)):
+                        own_leads.add(r["id"])
+                    visible |= own_leads
+                clients_out = [(c if c["id"] in own_leads else scrub_client_for_employee(c))
+                               for c in clients_out if c["id"] in visible]
                 queries = [q for q in queries if q["client_id"] in visible]
                 # An employee's own tasks always show, including ones with no client.
                 tasks = [t for t in tasks if t.get("client_id") in visible or task_assigned_to(t, emp_name)]
@@ -5886,7 +6269,7 @@ def _handle_action_core(action, d, ip=""):
             calls = con.execute("SELECT COUNT(*) c FROM calls WHERE client_id=?", (c["id"],)).fetchone()["c"]
             if not calls:
                 raise ApiError("Log at least one call before sending to the Marketing TL.")
-            move_stage(con, c["id"], "TL_REVIEW", "Telecaller")
+            move_stage(con, c["id"], "TL_REVIEW", (d.get("actorLabel") or "").strip() or "Telecaller")
             con.commit()
             return {"ok": True}
 
@@ -7135,6 +7518,11 @@ def _handle_action_core(action, d, ip=""):
                 raise ApiError("Name is required.")
             if role not in ("PROGRAMMER", "PAPER_WRITER", "JOURNAL_EMPLOYEE", "TELECALLER"):
                 raise ApiError("Unknown team role.")
+            require_team_scope(actor_role, role)
+            if email and not EMAIL_RE.match(email):
+                raise ApiError("That Mail ID doesn't look like a valid email address.")
+            if phone and not re.match(r"^\d{10}$", phone):
+                raise ApiError("Enter a 10-digit phone number.")
             if role == "JOURNAL_EMPLOYEE" and team_type not in (
                     "PROOFREAD_COORDINATOR", "PROOFREADER", "FORMAT_COORDINATOR", "FORMATTER", "SUBMISSION"):
                 raise ApiError("Pick a journal team type (proofreading, formatting, or submission).")
@@ -7190,6 +7578,9 @@ def _handle_action_core(action, d, ip=""):
             e = con.execute("SELECT * FROM employees WHERE id=? AND deleted_at IS NULL", (emp_id,)).fetchone()
             if not e:
                 raise ApiError("Employee not found.")
+            require_team_scope((d.get("role") or "").strip(), e["role"])
+            if (d.get("email") or "").strip() and not EMAIL_RE.match((d.get("email") or "").strip()):
+                raise ApiError("That Mail ID doesn't look like a valid email address.")
             col_map = {"name": "name", "email": "email", "branch": "branch", "department": "department",
                        "phone": "phone", "designation": "designation", "joiningDate": "joining_date",
                        "dateOfBirth": "date_of_birth"}
@@ -7216,6 +7607,7 @@ def _handle_action_core(action, d, ip=""):
             e = con.execute("SELECT * FROM employees WHERE id=? AND deleted_at IS NULL", (emp_id,)).fetchone()
             if not e:
                 raise ApiError("Employee not found.")
+            require_team_scope((d.get("role") or "").strip(), e["role"])
             if e["role"] not in ("PROGRAMMER", "PAPER_WRITER"):
                 raise ApiError("Only Paper Writers and Programmers have a coordinator team.")
             is_coordinator = 1 if d.get("isCoordinator") else 0
@@ -7243,6 +7635,7 @@ def _handle_action_core(action, d, ip=""):
             e = con.execute("SELECT * FROM employees WHERE id=? AND deleted_at IS NULL", (emp_id,)).fetchone()
             if not e:
                 raise ApiError("Employee not found.")
+            require_team_scope((d.get("role") or "").strip(), e["role"])
             con.execute("UPDATE employees SET deleted_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?", (emp_id,))
             # anyone reporting to a deleted coordinator becomes independent, rather than orphaned
             con.execute("UPDATE employees SET coordinator_id=NULL WHERE coordinator_id=?", (emp_id,))
@@ -7813,26 +8206,116 @@ def _handle_action_core(action, d, ip=""):
             # (Bcc:, Content-Type:, ...) into the outgoing message.
             subject = re.sub(r"[\r\n]+", " ", str(subject))[:200]
             body = str(body)[:20000]
-            pwd = GMAIL_APP_PASSWORD.replace(" ", "")
-            if not pwd or not GMAIL_USER:
-                raise ApiError("Email sending isn't configured. Set MAIL/GMAIL credentials in "
-                               "the server's environment (.env), then restart. See README.txt.")
-            msg = MIMEText(body, "plain", "utf-8")
-            msg["Subject"] = subject
-            msg["From"] = GMAIL_USER
-            msg["To"] = to
-            try:
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
-                    smtp.login(GMAIL_USER, pwd)
-                    smtp.sendmail(GMAIL_USER, to_list, msg.as_string())
-            except smtplib.SMTPAuthenticationError:
-                raise ApiError("The mail account rejected the login. Check the app password in "
-                               "the server environment and that 2-Step Verification is on.")
-            except ApiError:
-                raise
-            except Exception:
-                raise ApiError("Could not send the email. Please try again.")
+            if not _mail_configured():
+                raise ApiError("Email sending isn't configured. Set the Gmail API variables (or GMAIL_USER and "
+                               "GMAIL_APP_PASSWORD) in the server's environment, then restart. See README.txt.")
+            ok, err = deliver_mail(to_list, subject, body, note="manual send")
+            if not ok:
+                raise ApiError("Could not send the email: " + err)
             return {"ok": True, "to": to}
+
+        # ----- Admin: is email actually working? (Settings -> Email sending check) -----
+        if action == "mail_status":
+            with _MAIL_LOG_LOCK:
+                log = list(reversed(_MAIL_LOG))
+            return {"ok": True, "method": mail_method(), "sender": mail_sender(),
+                    "gmailApi": _gmail_api_configured(), "smtp": _smtp_configured(), "log": log}
+
+        if action == "mail_test":
+            if _rate_limited(ip, "mail_test", limit=10, window_seconds=600):
+                raise ApiError("Too many test emails - wait a few minutes.")
+            to = (d.get("to") or "").strip()
+            if not EMAIL_RE.match(to):
+                raise ApiError("Enter a valid email address to send the test to.")
+            ok, err = deliver_mail([to], "iMatiz test email",
+                                   "This is a test email from your iMatiz PM tool.\n\n"
+                                   "If you can read this, email sending works. Sent via: %s\n\nRegards,\n%s"
+                                   % ({"gmail_api": "Gmail API", "smtp": "Gmail SMTP"}.get(mail_method(), "-"),
+                                      MAIL_FROM_NAME or "iMatiz"), note="test")
+            return {"ok": ok, "error": err, "method": mail_method(), "sender": mail_sender()}
+
+        # ----- My profile (every dashboard) -----
+        if action == "get_my_profile":
+            caller = (d.get("role") or "").strip()
+            if caller in ("employee", "validator"):
+                e = con.execute("SELECT * FROM employees WHERE id=?", (d.get("empId"),)).fetchone()
+                if not e:
+                    raise ApiError("Unknown employee.")
+                return {"ok": True, "profile": employee_profile_out(con, dict(e))}
+            if caller == "client":
+                return {"ok": True, "profile": client_profile_out(con, get_client(con, d.get("clientId") or ""))}
+            return {"ok": True, "profile": dept_profile_out(con, caller)}
+
+        if action == "save_my_profile":
+            if _rate_limited(d.get("_principal_key") or ip, "save_my_profile", limit=30, window_seconds=600):
+                raise ApiError("You're saving very quickly - please wait a minute and try again.")
+            caller = (d.get("role") or "").strip()
+            if caller == "client":
+                c = get_client(con, d.get("clientId") or "")
+                p = d.get("profile") if isinstance(d.get("profile"), dict) else {}
+                sets, vals, changed = [], [], []
+                for k, (col, limit) in CLIENT_PROFILE_FIELDS.items():
+                    if k not in p:
+                        continue
+                    v = re.sub(r"[\x00-\x1f]", " ", str(p.get(k) or "")).strip()
+                    if len(v) > limit:
+                        raise ApiError("%s is too long." % k)
+                    if k in ("email", "institutionalEmail") and v and not EMAIL_RE.match(v):
+                        raise ApiError("Enter a valid email address.")
+                    if k == "altMobile" and v and not _PHONE_RE.match(v):
+                        raise ApiError("Enter a valid alternate mobile number.")
+                    if (c[col] or "") != v:
+                        sets.append("%s=?" % col); vals.append(v); changed.append(k)
+                if "photo" in p:
+                    _save_profile_row(con, "CLIENT:%s" % c["id"], {"photo": _clean_profile_input(
+                        {"profile": {"photo": p.get("photo")}})["photo"]})
+                if sets:
+                    con.execute("UPDATE clients SET %s WHERE id=?" % ", ".join(sets), vals + [c["id"]])
+                    labels = {"email": "email", "altMobile": "alternate mobile", "address": "address",
+                              "designation": "designation", "institution": "institution",
+                              "institutionalEmail": "institutional email", "department": "department"}
+                    con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                                (c["id"], c["stage"], c["name"], "Client updated their profile: " +
+                                 ", ".join(labels[x] for x in changed) + "."))
+                con.commit()
+                c = get_client(con, c["id"])
+                return {"ok": True, "profile": client_profile_out(con, c)}
+
+            f = _clean_profile_input(d)
+            if caller in ("employee", "validator"):
+                emp_id = d.get("empId")
+                e = con.execute("SELECT * FROM employees WHERE id=? AND deleted_at IS NULL", (emp_id,)).fetchone()
+                if not e:
+                    raise ApiError("Unknown employee.")
+                own_cols = {"email": "email", "phone": "phone", "date_of_birth": "date_of_birth"}
+                sets = [(col, f[k]) for k, col in own_cols.items() if k in f]
+                if sets:
+                    con.execute("UPDATE employees SET %s WHERE id=?" % ", ".join("%s=?" % c for c, _ in sets),
+                                [v for _, v in sets] + [e["id"]])
+                # name / designation belong to the manager's record - never taken from here
+                personal = {k: v for k, v in f.items() if k not in own_cols and k not in ("full_name", "designation", "email")}
+                _save_profile_row(con, "EMP:%s" % e["id"], personal)
+                con.commit()
+                e = con.execute("SELECT * FROM employees WHERE id=?", (e["id"],)).fetchone()
+                return {"ok": True, "profile": employee_profile_out(con, dict(e))}
+
+            if caller not in ROLE_EMAIL_LABELS:
+                raise ApiError("This login can't save a profile.")
+            if "email" in f:
+                con.execute("UPDATE users SET email=? WHERE role=?", (f["email"], caller))
+            _save_profile_row(con, "ROLE:%s" % caller, {k: v for k, v in f.items() if k != "email"})
+            con.commit()
+            return {"ok": True, "profile": dept_profile_out(con, caller)}
+
+        # ----- A manager opening a team member's card sees what they filled in -----
+        if action == "get_member_profile":
+            caller = (d.get("role") or "").strip()
+            e = con.execute("SELECT * FROM employees WHERE id=? AND deleted_at IS NULL", (d.get("targetEmpId"),)).fetchone()
+            if not e:
+                raise ApiError("Employee not found.")
+            if caller not in ADMIN_ROLES and e["role"] not in STAFF_MGMT_TEAM_ROLES.get(caller, ()):
+                raise ApiError("That person isn't on your team.", 403)
+            return {"ok": True, "profile": employee_profile_out(con, dict(e))}
 
         # ----- My email: where MY notifications go. An individual login updates its own
         #       employee profile; a department login (Marketing TL, Technical Manager, ...)
@@ -8876,6 +9359,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if action not in PUBLIC_ACTIONS:
             data["role"] = session["kind"] if session["kind"] == "employee" else session["role"]
+            if action in BDC_EMPLOYEE_ACTIONS and is_bdc_employee(session):
+                # Individual BDC staff do exactly what the shared BDC login does...
+                data["role"] = "telecaller"
+                # ...but only on their own leads (new clients are theirs by definition).
+                if action not in _BDC_CREATE_ACTIONS:
+                    con3 = db()
+                    try:
+                        target = bdc_target_client(con3, action, data)
+                        owns = bool(target) and bdc_owns_client(con3, session["emp_name"], target)
+                    finally:
+                        con3.close()
+                    if not owns:
+                        return self._json({"error": "You can only work on your own leads. Ask your "
+                                           "Marketing TL if this client should be yours."}, 403)
             if session["kind"] in ("employee", "validator"):
                 data["empId"] = session["emp_id"]
                 data["empUid"] = session["emp_uid"]
