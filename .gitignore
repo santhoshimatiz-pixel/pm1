@@ -30,3 +30,7 @@ Thumbs.db
 *.env
 !.env.example
 .session_secret
+
+tests/e2e/out/
+tests/e2e/node_modules/
+tests/unit/node_modules/

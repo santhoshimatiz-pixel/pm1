@@ -1422,6 +1422,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
       </button>
       <button class="navbtn" id="navSettings" onclick="openSettings()">&#9881;&nbsp; Settings</button>
       <button class="navbtn" id="navHelp" onclick="openHelp()">&#128172;&nbsp; Help</button>
+      <button class="navbtn" id="navNewTab" onclick="openAnotherDashboard()" title="Opens a new tab with the login screen - sign in there with any other dashboard. This tab stays as it is.">&#10133;&nbsp; Open another dashboard</button>
       <div class="side-foot">
         <div class="who" id="whoAmI"></div>
         <button class="navbtn" id="themeToggleBtn" onclick="toggleTheme()" style="margin-bottom:8px">&#127769;&nbsp; Dark mode</button>
@@ -1647,6 +1648,7 @@ function mailAlreadySent(out){
 function handleSessionExpired(){
   if(!role) return;
   try{ myProfile = null; myProfileChecked = false; sessionStorage.removeItem("profileNudged"); paintProfileNav(); }catch(_){}
+  try{ pingBaseTitle = document.title = "iMatiz Technology"; }catch(_){}
   try{ if(typeof stopRefreshLoop === "function") stopRefreshLoop(); }catch(e){}
   try{ stopPingListener(); }catch(e){}
   csrfToken = "";
@@ -2355,6 +2357,14 @@ async function restoreSession(){
   // The token is dropped rather than reused so that logging in here can never
   // affect the session of the tab it may have been copied from.
   if(!isPageRefresh()) setTabToken("");
+  try{
+    const u = new URL(location.href);
+    if(u.searchParams.has("newlogin")){          // "Open another dashboard" - always a fresh login
+      setTabToken("");
+      u.searchParams.delete("newlogin");
+      history.replaceState(null, "", u.pathname + (u.search || "") + u.hash);
+    }
+  }catch(e){}
   if(!getTabToken()) return false;
   // A page refresh fires this the instant the page loads — sometimes before the
   // connection is fully warmed up, over a slightly slower network than usual, or
@@ -2396,6 +2406,7 @@ function logout(){
   // tab token even though clearSession() below removes it straight away.
   api("logout", {}).catch(()=>{ /* best effort — still clear locally */ });
   try{ myProfile = null; myProfileChecked = false; sessionStorage.removeItem("profileNudged"); paintProfileNav(); }catch(_){}
+  try{ pingBaseTitle = document.title = "iMatiz Technology"; }catch(_){}
   stopPingListener(); pingUnseen = []; $("pingAlert").classList.remove("show");
   csrfToken = "";
   role = null; clientSelf = null; selectedRole = null; selectedEmpId = null; empName = empRole = empId = empTeamType = null; tmTab='work'; clientView='overview';
@@ -2455,6 +2466,7 @@ async function refresh(){
   if(needsValidationData()) await loadValidationData();
   $("rolePill").textContent = roleTitle();
   $("whoAmI").textContent = "Signed in as " + roleTitle();
+  setTabTitle();
   $("navSettings").style.display = "flex";
   $("navProfile").style.display = "flex";
   checkMyProfileOnce();
@@ -7333,7 +7345,7 @@ async function admSendProjMessage(clientId){
 function admProjNotesTab(c){
   return `<div class="adm-panel"><div class="adm-panel-head"><h3>Notes</h3></div>
     <div class="adm-panel-body">
-      <textarea id="proj_notes" rows="8" style="width:100%">${esc(c.notes||"")}</textarea>
+      <textarea id="proj_notes" rows="8" style="width:100%" ${canEditClient()?"":"readonly"}>${esc(c.notes||"")}</textarea>
       <button class="btn small" style="margin-top:10px" onclick="admSaveProjNotes(${jsq(c.id)})">Save notes</button>
     </div>
   </div>`;
@@ -10831,7 +10843,7 @@ function staffChatPanelForClient(c){
     const label = (contacts.find(ct=>ct.key===k)||{}).label || k;
     const t = threadFor(c, k);
     const unread = t ? unreadForViewer(t, myViewerKey()) : 0;
-    return `<button type="button" class="btn ghost small" style="margin:0 8px 8px 0" onclick="openChat(${jsq(c.id)},${jsq(k)},${jsq(c.name)} — ${esc(label)})">
+    return `<button type="button" class="btn ghost small" style="margin:0 8px 8px 0" onclick="openChat(${jsq(c.id)},${jsq(k)},${jsq(c.name + ' — ' + label)})">
       &#128172; ${esc(label)} ${unread?`<span class="badge b-bad" style="margin-left:6px">${unread}</span>`:""}</button>`;
   }).join("");
   return `<div class="sec" style="margin-top:10px"><h4>Chat</h4><div style="margin-top:6px">${rows}</div></div>`;
@@ -12582,6 +12594,65 @@ async function runMailTest(){
   btn.disabled = false;
   loadMailStatus();
 }
+/* ================= WHO MAY USE WHICH BUTTON =================
+   Mirrors the server's permission lists (ACTION_ROLES / BULK_IMPORT_ROLES in server.py),
+   so a button is only shown to logins that are allowed to use it - nobody should ever
+   click something and get "You don't have permission". The server still enforces every
+   rule; this only keeps the screens honest. */
+function permRole(){
+  // individual BDC staff (BDC Login) have the same lead-handling rights as the BDC role
+  return (role === "employee" && empRole === "TELECALLER") ? "telecaller" : role;
+}
+function isAdminRole(){ return role === "super_admin" || role === "md_admin"; }
+const PERM_ADD_CLIENT = ["telecaller", "marketing_tl", "marketing_manager"];
+const PERM_EDIT_CLIENT = ["telecaller", "marketing_tl", "marketing_manager", "account_team", "technical_manager",
+                          "technical_tl", "content_coordinator", "journal_manager", "journal_tl"];
+const PERM_IMPORT = (function(){
+  const mkt = ["telecaller", "marketing_tl", "marketing_manager"], tech = ["technical_manager", "technical_tl"],
+        jrn = ["journal_manager", "journal_tl"];
+  return { clients: mkt, referrals: mkt, payments: mkt.concat(["account_team"]),
+           notes: mkt.concat(["account_team"], tech, jrn), queries: mkt.concat(tech, jrn),
+           tasks: ["marketing_tl", "marketing_manager"].concat(tech, jrn),
+           team: ["marketing_tl", "marketing_manager"].concat(tech, jrn) };
+})();
+function canAddClient(){ return isAdminRole() || PERM_ADD_CLIENT.includes(permRole()); }
+function canEditClient(){ return isAdminRole() || PERM_EDIT_CLIENT.includes(permRole()); }
+function canImport(kind){ return isAdminRole() || (PERM_IMPORT[kind] || []).includes(permRole()); }
+const PERM_BUTTON_RULES = [
+  [/admOpenBulkImport\(\s*['"](\w+)['"]/, m => canImport(m[1])],
+  [/\bopenAddClient\(/, () => canAddClient()],
+  [/\badmSaveProjNotes\(/, () => canEditClient()],
+];
+function applyButtonPermissions(root){
+  if(!role || !root || !root.querySelectorAll) return;
+  root.querySelectorAll("[onclick]").forEach(el => {
+    const oc = el.getAttribute("onclick") || "";
+    for(const [re, ok] of PERM_BUTTON_RULES){
+      const m = oc.match(re);
+      if(m && !ok(m)){ el.style.display = "none"; el.setAttribute("data-perm-hidden", "1"); break; }
+    }
+  });
+}
+new MutationObserver(muts => {
+  if(!role) return;
+  for(const mu of muts) mu.addedNodes.forEach(n => {
+    if(n.nodeType !== 1) return;
+    if(n.hasAttribute && n.hasAttribute("onclick")) applyButtonPermissions(n.parentNode || n);
+    else applyButtonPermissions(n);
+  });
+}).observe(document.documentElement, {childList: true, subtree: true});
+/* ---- Several dashboards in one browser ----
+   Every tab keeps its own login (sessionStorage + a per-tab server session), so one
+   Chrome window can have e.g. Admin in one tab and Marketing Manager in another.
+   This button opens a new tab straight at the login screen; the tab title shows
+   which dashboard each tab is signed in to. */
+function openAnotherDashboard(){
+  const w = window.open(location.origin + location.pathname + "?newlogin=1", "_blank", "noopener");
+  if(!w) toast("Your browser blocked the new tab - allow pop-ups for this site, or open a new tab and paste the address.");
+}
+function setTabTitle(){
+  try{ pingBaseTitle = document.title = roleTitle() + " · iMatiz"; }catch(e){}
+}
 async function saveMyPassword(){
   const currentPassword = $("s_curpwd").value.trim();
   const newPassword = $("s_newpwd").value.trim();
@@ -12846,7 +12917,7 @@ async function confirmClearData(){
 let pingModalTimer = null, pingListenTimer = null, pingTitleTimer = null, pingLastOnline = null;
 let pingUnseen = [];
 const PING_POLL_MS = 10000;
-const pingBaseTitle = document.title;
+let pingBaseTitle = document.title;
 
 function pingRoleLabel(e){ return (EMP_ROLE_LABEL[e.role] || e.role || "") + (e.teamType ? " · " + e.teamType.replace(/_/g," ") : ""); }
 
@@ -13523,6 +13594,7 @@ function valFilterBar(folderKeys, list, pendingIsWaitingForMe){
 async function refreshValidator(){
   $("rolePill").textContent = roleTitle();
   $("whoAmI").textContent = "Signed in as " + roleTitle();
+  setTabTitle();
   ["navInbox","navDash","navSettings","navHelp"].forEach(id=>{ const el=$(id); if(el) el.style.display="none"; });
   $("navProfile").style.display = "flex";   // the Validation login gets a profile too
   checkMyProfileOnce();

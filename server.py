@@ -728,10 +728,12 @@ ACTION_ROLES = {
     # "Import file" there got a silent 403. Matches add_client's roles.
     "import_clients": _R_MARKETING,
     "import_clients_from_url": _R_MARKETING,
-    "bulk_import": _R_MARKETING,
-    "bulk_import_from_url": _R_MARKETING,
+    # Who may import which kind is decided per kind (BULK_IMPORT_ROLES) inside the handler.
+    "bulk_import": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
+    "bulk_import_from_url": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
     "assign_proposal_writer": _R_MARKETING + ("technical_manager", "technical_tl"),
-    "send_to_client": _R_MARKETING,
+    # Delivering the approved paper to the client is the Technical Manager/TL's step.
+    "send_to_client": _R_TECH_MGMT + _R_MARKETING,
     "send_to_tl": _R_MARKETING + ("technical_manager", "technical_tl"),
 
     # ---- client portal administration (invitations / portal passwords) ----
@@ -770,8 +772,10 @@ ACTION_ROLES = {
     "reorder_task_stage": _R_ALL_STAFF,
     "assign_programmers": _R_TECH,
     "assign_writers": _R_TECH,
-    "assign_formatters": _R_TECH + ("journal_manager", "journal_tl"),
-    "assign_proofreaders": _R_TECH + ("journal_manager", "journal_tl"),
+    # + the client's own Formatting Coordinator (a team member) - see the handler.
+    "assign_formatters": _R_TECH + ("journal_manager", "journal_tl", "employee"),
+    # + the client's own Proofreading Coordinator (a team member) - see the handler.
+    "assign_proofreaders": _R_TECH + ("journal_manager", "journal_tl", "employee"),
     "assign_format_coordinator": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
     "assign_proofread_coordinator": _R_TECH_MGMT + ("journal_manager", "journal_tl"),
     "coordinator_take_proposal": _R_ALL_STAFF,
@@ -826,10 +830,12 @@ ACTION_ROLES = {
     "add_target_journal": _R_JOURNAL,
     "delete_target_journal": _R_JOURNAL,
     "update_target_journal_status": _R_JOURNAL,
-    "select_journal": _R_JOURNAL,
+    # Sending an approved paper to the Journal team is the Technical Manager/TL's step.
+    "select_journal": _R_TECH_MGMT + _R_JOURNAL,
     "set_journal_name": _R_JOURNAL,
-    "submit_to_journal": _R_JOURNAL,
-    "update_journal_status": _R_JOURNAL,
+    # + Submission-team members (checked in the handlers) - it's their step.
+    "submit_to_journal": _R_JOURNAL + ("employee",),
+    "update_journal_status": _R_JOURNAL + ("employee",),
 
     # ---- team / employee management ----
     "employee_create": _R_STAFF_MGMT,
@@ -4269,7 +4275,7 @@ def _next_emp_uid(con):
     return f"EMP-{n}"
 
 
-def _import_team_rows(con, rows):
+def _import_team_rows(con, rows, actor_role=""):
     parsed = _rows_to_dicts(rows, TEAM_ALIASES)
     if not parsed:
         raise ApiError("No data rows found in that sheet.")
@@ -4292,6 +4298,10 @@ def _import_team_rows(con, rows):
             continue
         if role != "JOURNAL_EMPLOYEE":
             team_type = ""
+        if actor_role not in ADMIN_ROLES and role not in STAFF_MGMT_TEAM_ROLES.get(actor_role, ()):
+            skipped += 1
+            errors.append(f"Row {idx}: {name} isn't part of your department's team, skipped.")
+            continue
         dup = con.execute("SELECT id FROM employees WHERE LOWER(name)=LOWER(?) AND active=1 AND deleted_at IS NULL",
                           (name,)).fetchone()
         if dup:
@@ -4376,6 +4386,34 @@ def _import_queries_rows(con, rows, default_client_id="", actor=""):
 
 
 BULK_IMPORT_KINDS = {"clients", "notes", "referrals", "tasks", "team", "payments", "queries"}
+# Which logins may import each kind (Super Admin / MD Admin may import anything). The page
+# shows an Import button only where the login is on this list (see canImport in index.html).
+_IMP_MKT = ("telecaller", "marketing_tl", "marketing_manager")
+_IMP_TECH = ("technical_manager", "technical_tl")
+_IMP_JRN = ("journal_manager", "journal_tl")
+BULK_IMPORT_ROLES = {
+    "clients": _IMP_MKT,
+    "referrals": _IMP_MKT,
+    "payments": _IMP_MKT + ("account_team",),
+    "notes": _IMP_MKT + ("account_team",) + _IMP_TECH + _IMP_JRN,
+    "queries": _IMP_MKT + _IMP_TECH + _IMP_JRN,
+    "tasks": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,
+    "team": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,   # own department only
+}
+
+
+def require_submission_team(d):
+    """Team members may do the journal-submission steps only if they're on the Submission team."""
+    if (d.get("role") or "") == "employee" and not (
+            (d.get("empRole") or "") == "JOURNAL_EMPLOYEE" and (d.get("empTeamType") or "") == "SUBMISSION"):
+        raise ApiError("Only the Submission team can do this.", 403)
+
+
+def require_import_role(role_, kind):
+    if role_ in ADMIN_ROLES:
+        return
+    if role_ not in BULK_IMPORT_ROLES.get(kind, ()):
+        raise ApiError("Your login can't import %s." % kind, 403)
 
 
 def _dispatch_bulk_import(con, kind, rows, d):
@@ -4390,7 +4428,7 @@ def _dispatch_bulk_import(con, kind, rows, d):
     if kind == "tasks":
         return _import_tasks_rows(con, rows, default_client_id, actor)
     if kind == "team":
-        return _import_team_rows(con, rows)
+        return _import_team_rows(con, rows, (d.get("role") or "").strip())
     if kind == "payments":
         return _import_payments_rows(con, rows)
     if kind == "queries":
@@ -5236,6 +5274,11 @@ def _handle_action_core(action, d, ip=""):
                     for r in con.execute("SELECT id FROM clients WHERE LOWER(TRIM(bdc))=LOWER(?)", (emp_name,)):
                         own_leads.add(r["id"])
                     visible |= own_leads
+                # Submission team: every paper waiting to be submitted, and the ones they submitted.
+                if (d.get("empRole") or "") == "JOURNAL_EMPLOYEE" and (d.get("empTeamType") or "") == "SUBMISSION":
+                    for r in con.execute("""SELECT id FROM clients WHERE stage IN ('SUBMISSION','JOURNAL_SUBMITTED')
+                                            OR submission_person=?""", (emp_name,)):
+                        visible.add(r["id"])
                 clients_out = [(c if c["id"] in own_leads else scrub_client_for_employee(c))
                                for c in clients_out if c["id"] in visible]
                 queries = [q for q in queries if q["client_id"] in visible]
@@ -5633,6 +5676,7 @@ def _handle_action_core(action, d, ip=""):
             kind = (d.get("kind") or "").strip()
             if kind not in BULK_IMPORT_KINDS:
                 raise ApiError("Unknown import type.")
+            require_import_role((d.get("role") or "").strip(), kind)
             rows = _rows_from_upload(d.get("filename"), d.get("contentBase64"), d.get("csvText"))
             return _dispatch_bulk_import(con, kind, rows, d)
 
@@ -5640,6 +5684,7 @@ def _handle_action_core(action, d, ip=""):
             kind = (d.get("kind") or "").strip()
             if kind not in BULK_IMPORT_KINDS:
                 raise ApiError("Unknown import type.")
+            require_import_role((d.get("role") or "").strip(), kind)
             rows = _fetch_sheet_rows(d.get("url"))
             return _dispatch_bulk_import(con, kind, rows, d)
 
@@ -7354,6 +7399,9 @@ def _handle_action_core(action, d, ip=""):
 
         if action == "assign_proofreaders":
             c = get_client(con, d.get("clientId") or "")
+            if (d.get("role") or "") == "employee" and \
+                    (d.get("empName") or "").strip() != (c["proofread_coordinator"] or "").strip():
+                raise ApiError("Only this client's Proofreading Coordinator can assign the proofreaders.", 403)
             require_stage(c, "PROOFREAD_COORD_ASSIGNED")
             valid = active_names(con, "JOURNAL_EMPLOYEE", "PROOFREADER")
             picked = [p for p in (d.get("proofreaders") or []) if p in valid]
@@ -7416,6 +7464,9 @@ def _handle_action_core(action, d, ip=""):
 
         if action == "assign_formatters":
             c = get_client(con, d.get("clientId") or "")
+            if (d.get("role") or "") == "employee" and \
+                    (d.get("empName") or "").strip() != (c["format_coordinator"] or "").strip():
+                raise ApiError("Only this client's Formatting Coordinator can assign the formatters.", 403)
             require_stage(c, "FORMATTING_ASSIGNED")
             valid = active_names(con, "JOURNAL_EMPLOYEE", "FORMATTER")
             picked = [p for p in (d.get("formatters") or []) if p in valid]
@@ -7465,6 +7516,7 @@ def _handle_action_core(action, d, ip=""):
             return {"ok": True}
 
         if action == "submit_to_journal":
+            require_submission_team(d)
             c = get_client(con, d.get("clientId") or "")
             require_stage(c, "SUBMISSION")
             who = (d.get("empName") or "").strip() or "Submission Team"
@@ -7475,6 +7527,7 @@ def _handle_action_core(action, d, ip=""):
             return {"ok": True}
 
         if action == "update_journal_status":
+            require_submission_team(d)
             c = get_client(con, d.get("clientId") or "")
             require_stage(c, "JOURNAL_SUBMITTED")
             status = (d.get("status") or "").strip().upper()
@@ -7482,10 +7535,12 @@ def _handle_action_core(action, d, ip=""):
                 raise ApiError("Unknown journal status.")
             con.execute("UPDATE clients SET journal_status=? WHERE id=?", (status, c["id"]))
             if status in ("ACCEPTED", "PUBLISHED"):
-                move_stage(con, c["id"], "COMPLETED", "Submission Team", f"Journal status: {status}")
+                move_stage(con, c["id"], "COMPLETED", (d.get("empName") or "").strip() or "Submission Team",
+                           f"Journal status: {status}")
             else:
                 con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                            (c["id"], c["stage"], "Submission Team", f"Journal status: {status}"))
+                            (c["id"], c["stage"], (d.get("empName") or "").strip() or "Submission Team",
+                             f"Journal status: {status}"))
             con.commit()
             return {"ok": True}
 

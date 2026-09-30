@@ -86,6 +86,15 @@ AI ASSISTANT (optional key)
   The key stays on the server. The data shown always comes from the database,
   limited to what that login can see on its own dashboard.
 
+SEVERAL DASHBOARDS IN ONE BROWSER
+  Each tab has its own login. Sidebar -> "Open another dashboard" opens a new tab at
+  the login screen; the tab title shows who is signed in (e.g. "Marketing Manager · iMatiz").
+  Refreshing a tab keeps it signed in. Note: pasting the SAME address into the SAME tab is
+  treated by Chrome as a refresh, so that tab stays signed in - use a new tab instead.
+
+TESTS
+  See tests/README.md (quick checks: ./tests/run_unit.sh; full browser tests: ./tests/run_e2e.sh).
+
 MY PROFILE (every dashboard)
   Everyone has "My profile" in the sidebar and can update it any time.
     - Team members: name, Employee ID, role, team, designation, department, branch
