@@ -836,6 +836,12 @@ ACTION_ROLES = {
     # + Submission-team members (checked in the handlers) - it's their step.
     "submit_to_journal": _R_JOURNAL + ("employee",),
     "update_journal_status": _R_JOURNAL + ("employee",),
+    "set_journal_target_status": _R_JOURNAL + ("employee",),
+    "revision_assign": _R_TECH_MGMT,
+    "revision_review": _R_TECH_MGMT,
+    "revision_submit": ("employee",),
+    "revision_push_submission": _R_JOURNAL,
+    "revision_resubmit": _R_JOURNAL + ("employee",),
 
     # ---- team / employee management ----
     "employee_create": _R_STAFF_MGMT,
@@ -1531,7 +1537,7 @@ _INSERT_TABLE_RE = re.compile(r"(?is)^\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*
 # Tables with a SERIAL id column whose INSERTs rely on cur.lastrowid.
 _SERIAL_ID_TABLES = {
     "employees", "calls", "payments", "history", "work_updates", "service_items",
-    "client_installments", "journal_targets", "messages", "thread_reads",
+    "client_installments", "journal_targets", "journal_revisions", "messages", "thread_reads",
     "dm_messages", "dm_reads", "calendar_events", "client_queries", "tasks",
     "task_comments", "client_documents", "client_notes_v2", "client_referrals",
     "task_stages", "validation_papers", "validation_events", "task_handoffs",
@@ -1711,6 +1717,33 @@ def init_db():
         status TEXT NOT NULL DEFAULT '',
         added_by TEXT DEFAULT '',
         created_at TEXT DEFAULT ({_NOW_SQL})
+    );
+    CREATE TABLE IF NOT EXISTS journal_revisions (
+        id SERIAL PRIMARY KEY,
+        client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        target_id INTEGER,
+        journal_name TEXT DEFAULT '',
+        round INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'TECH_PENDING',
+        reviewer_comments TEXT DEFAULT '',
+        comments_doc_id INTEGER,
+        requested_by TEXT DEFAULT '',
+        assignees TEXT DEFAULT '',
+        assigned_by TEXT DEFAULT '',
+        start_date TEXT DEFAULT '',
+        deadline TEXT DEFAULT '',
+        submitted_by TEXT DEFAULT '',
+        submit_note TEXT DEFAULT '',
+        revised_doc_id INTEGER,
+        review_note TEXT DEFAULT '',
+        tl_approved_by TEXT DEFAULT '',
+        approved_by TEXT DEFAULT '',
+        pushed_by TEXT DEFAULT '',
+        push_note TEXT DEFAULT '',
+        resubmitted_by TEXT DEFAULT '',
+        resubmit_status TEXT DEFAULT '',
+        created_at TEXT DEFAULT ({_NOW_SQL}),
+        updated_at TEXT DEFAULT ({_NOW_SQL})
     );
     CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
@@ -2576,6 +2609,103 @@ def _save_proofread_doc(con, c, d, actor, label, required):
     con.execute("""INSERT INTO client_documents (client_id, file_name, file_type, file_data, uploaded_by)
                    VALUES (?,?,?,?,?)""", (c["id"], name, file_type, file_data, actor))
     return name
+
+
+def _split_journal_names(text):
+    """'IEEE Access, Elsevier XYZ; Springer ABC' -> ['IEEE Access', 'Elsevier XYZ', 'Springer ABC']."""
+    out, seen = [], set()
+    for part in re.split(r"[,;\n]+", text or ""):
+        name = part.strip(" .\t\r")
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def _sync_journal_targets(con, c, default_status, actor):
+    """Make sure every journal in the client's target-journal text has its own row in
+    journal_targets (so each one can carry its own status)."""
+    have = {(r["name"] or "").strip().lower() for r in
+            con.execute("SELECT name FROM journal_targets WHERE client_id=?", (c["id"],))}
+    for name in _split_journal_names(c["journal_name"]):
+        if name.lower() not in have:
+            con.execute("INSERT INTO journal_targets (client_id, name, status, added_by) VALUES (?,?,?,?)",
+                        (c["id"], name, default_status, actor))
+            have.add(name.lower())
+
+
+# Overall paper status from each journal's status: any acceptance wins; otherwise the
+# most "alive" one (revision > under review > submitted); rejected only if all rejected.
+_JOURNAL_ROLLUP_ORDER = ["PUBLISHED", "ACCEPTED", "REVISION_REQUESTED", "UNDER_REVIEW", "SUBMITTED", "REJECTED"]
+
+
+def _rollup_journal_status(con, c, actor):
+    rows = [r["status"] or "" for r in
+            con.execute("SELECT status FROM journal_targets WHERE client_id=?", (c["id"],))]
+    live = [s_ for s_ in rows if s_ in _JOURNAL_ROLLUP_ORDER]
+    if not live:
+        return
+    overall = min(live, key=_JOURNAL_ROLLUP_ORDER.index)
+    con.execute("UPDATE clients SET journal_status=? WHERE id=?", (overall, c["id"]))
+    if overall in ("ACCEPTED", "PUBLISHED") and c["stage"] == "JOURNAL_SUBMITTED":
+        move_stage(con, c["id"], "COMPLETED", actor, f"Journal status: {overall}")
+
+
+def _revision_json(rv):
+    return {"id": rv["id"], "targetId": rv["target_id"], "journalName": rv["journal_name"] or "",
+            "round": rv["round"] or 1, "status": rv["status"] or "",
+            "reviewerComments": rv["reviewer_comments"] or "", "commentsDocId": rv["comments_doc_id"],
+            "requestedBy": rv["requested_by"] or "",
+            "assignees": [x.strip() for x in (rv["assignees"] or "").split(",") if x.strip()],
+            "assignedBy": rv["assigned_by"] or "", "startDate": rv["start_date"] or "",
+            "deadline": rv["deadline"] or "", "submittedBy": rv["submitted_by"] or "",
+            "submitNote": rv["submit_note"] or "", "revisedDocId": rv["revised_doc_id"],
+            "reviewNote": rv["review_note"] or "", "tlApprovedBy": rv["tl_approved_by"] or "",
+            "approvedBy": rv["approved_by"] or "", "pushedBy": rv["pushed_by"] or "",
+            "pushNote": rv["push_note"] or "", "resubmittedBy": rv["resubmitted_by"] or "",
+            "resubmitStatus": rv["resubmit_status"] or "",
+            "createdAt": iso(rv["created_at"]), "updatedAt": iso(rv["updated_at"])}
+
+
+def _save_client_file(con, client_id, d, label, actor, required, missing_msg):
+    """Save an uploaded file (fileData/fileName/fileType in d) to the client's Documents.
+    Returns (doc_id, stored_name) or (None, '') when nothing was attached."""
+    file_data = d.get("fileData") or ""
+    if not file_data:
+        if required:
+            raise ApiError(missing_msg)
+        return None, ""
+    original = sanitize_upload_filename(d.get("fileName")) or "document"
+    file_data = check_base64_payload(file_data, MAX_UPLOAD_BYTES, "document")
+    file_type = sanitize_upload_filetype(d.get("fileType"))
+    name = sanitize_upload_filename(f"{label} — {original}") or original
+    cur = con.execute("""INSERT INTO client_documents (client_id, file_name, file_type, file_data, uploaded_by)
+                         VALUES (?,?,?,?,?)""", (client_id, name, file_type, file_data, actor))
+    return cur.lastrowid, name
+
+
+def _get_revision(con, d):
+    rid = d.get("revisionId")
+    if not rid:
+        raise ApiError("Missing revision.")
+    rv = con.execute("SELECT * FROM journal_revisions WHERE id=?", (rid,)).fetchone()
+    if not rv:
+        raise ApiError("That revision no longer exists.", 404)
+    get_client(con, rv["client_id"])          # visibility check
+    return rv
+
+
+def _revision_log(con, rv, actor, note):
+    stage = con.execute("SELECT stage FROM clients WHERE id=?", (rv["client_id"],)).fetchone()
+    con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                (rv["client_id"], stage["stage"] if stage else "", actor,
+                 f"Journal revision ({rv['journal_name']}, round {rv['round']}): {note}"))
+
+
+def _revision_set(con, rv_id, **cols):
+    cols["updated_at"] = now_str()
+    sets = ", ".join(f"{k}=?" for k in cols)
+    con.execute(f"UPDATE journal_revisions SET {sets} WHERE id=?", (*cols.values(), rv_id))
 
 
 def _journal_assign_dates(d):
@@ -3817,6 +3947,9 @@ def all_clients(con):
     jt_by = {}
     for r in con.execute("SELECT * FROM journal_targets ORDER BY created_at ASC, id ASC"):
         jt_by.setdefault(r["client_id"], []).append(r)
+    rev_by = {}
+    for r in con.execute("SELECT * FROM journal_revisions ORDER BY created_at ASC, id ASC"):
+        rev_by.setdefault(r["client_id"], []).append(r)
     msgs_by = {}
     for r in con.execute("""SELECT id, client_id, thread_with, sender_type, body, file_name,
                                     read_by_client, read_by_staff, created_at
@@ -3841,6 +3974,7 @@ def all_clients(con):
         journal_targets = [{"id": jt["id"], "name": jt["name"], "status": jt["status"] or "",
                              "addedBy": jt["added_by"] or "", "addedAt": iso(jt["created_at"])}
                             for jt in jt_by.get(cid, [])]
+        journal_revisions = [_revision_json(rv) for rv in rev_by.get(cid, [])]
         message_threads = []
         for tw, msgs in msgs_by.get(cid, {}).items():
             unread_client = sum(1 for m in msgs if m["sender_type"] == "staff" and not m["read_by_client"])
@@ -3945,6 +4079,7 @@ def all_clients(con):
             "clientApprovedAt": iso(r["client_approved_at"]) if r["client_approved_at"] else None,
             "journalName": r["journal_name"] or "",
             "journalTargets": journal_targets,
+            "journalRevisions": journal_revisions,
             "proofreadCoordinator": r["proofread_coordinator"] or "",
             "assignedProofreaders": names(r["assigned_proofreaders"]),
             "proofreadRounds": r["proofread_rounds"],
@@ -7614,6 +7749,10 @@ def _handle_action_core(action, d, ip=""):
             con.execute("UPDATE clients SET submission_person=?, journal_status='SUBMITTED' WHERE id=?",
                         (who, c["id"]))
             move_stage(con, c["id"], "JOURNAL_SUBMITTED", who)
+            _sync_journal_targets(con, c, "SUBMITTED", who)
+            # Journals that were already listed but never marked count as submitted now.
+            con.execute("UPDATE journal_targets SET status='SUBMITTED' WHERE client_id=? AND COALESCE(status,'')=''",
+                        (c["id"],))
             con.commit()
             return {"ok": True}
 
@@ -7632,6 +7771,166 @@ def _handle_action_core(action, d, ip=""):
                 con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
                             (c["id"], c["stage"], (d.get("empName") or "").strip() or "Submission Team",
                              f"Journal status: {status}"))
+            con.commit()
+            return {"ok": True}
+
+        # ----- One status per target journal. A paper is often sent to several journals;
+        #       the Submission team updates each one separately (by row id, or by name to
+        #       add a journal they also applied to). The client's overall journal status is
+        #       rolled up from all of them.
+        if action == "set_journal_target_status":
+            require_submission_team(d)
+            c = get_client(con, d.get("clientId") or "")
+            if c["stage"] not in ("JOURNAL_SUBMITTED", "SUBMISSION"):
+                raise ApiError("This paper isn't with the journal yet.")
+            status = (d.get("status") or "").strip().upper()
+            if status not in JOURNAL_STATUSES:
+                raise ApiError("Unknown journal status.")
+            who = (d.get("empName") or "").strip() or "Submission Team"
+            _sync_journal_targets(con, c, "SUBMITTED", who)
+            item_id = d.get("id")
+            name = (d.get("name") or "").strip()
+            target_id = None
+            if item_id:
+                row = con.execute("SELECT id, name FROM journal_targets WHERE id=? AND client_id=?",
+                                  (item_id, c["id"])).fetchone()
+                if not row:
+                    raise ApiError("That journal is no longer on this paper.")
+                name, target_id = row["name"], row["id"]
+            elif name:
+                row = con.execute("SELECT id FROM journal_targets WHERE client_id=? AND LOWER(name)=LOWER(?)",
+                                  (c["id"], name)).fetchone()
+                if row:
+                    target_id = row["id"]
+                else:
+                    cur = con.execute("INSERT INTO journal_targets (client_id, name, status, added_by) VALUES (?,?,?,?)",
+                                      (c["id"], name, "SUBMITTED", who))
+                    target_id = cur.lastrowid
+            else:
+                raise ApiError("Pick the journal to update.")
+            open_rev = con.execute("""SELECT id FROM journal_revisions WHERE target_id=? AND status<>'DONE'""",
+                                   (target_id,)).fetchone()
+            if status == "REVISION_REQUESTED":
+                if open_rev:
+                    raise ApiError("A revision for this journal is already in progress.")
+                comments = (d.get("revisionComments") or "").strip()
+                if not comments:
+                    raise ApiError("Add the journal's revision comments so the Technical team knows what to change.")
+                doc_id, _n = _save_client_file(con, c["id"], d, f"Journal revision — {name} — reviewer comments",
+                                               who, False, "")
+                rnd = (con.execute("SELECT COUNT(*) AS n FROM journal_revisions WHERE target_id=?",
+                                   (target_id,)).fetchone()["n"] or 0) + 1
+                con.execute("""INSERT INTO journal_revisions (client_id, target_id, journal_name, round, status,
+                               reviewer_comments, comments_doc_id, requested_by) VALUES (?,?,?,?,?,?,?,?)""",
+                            (c["id"], target_id, name, rnd, "TECH_PENDING", comments, doc_id, who))
+            elif open_rev:
+                raise ApiError("This journal has a revision in progress — it gets its new status when the "
+                               "Submission team resubmits the revised paper.")
+            con.execute("UPDATE journal_targets SET status=? WHERE id=?", (status, target_id))
+            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                        (c["id"], c["stage"], who, f"{name}: {status}"))
+            _rollup_journal_status(con, c, who)
+            con.commit()
+            return {"ok": True}
+
+        # ----- Journal revision loop:
+        #   Submission team marks a journal "Revision requested" (+ reviewer comments/file)
+        #   -> Technical Manager / TL assign one or more employees (writer / programmer)
+        #   -> employee uploads the revised paper -> TL approves -> Manager approves
+        #      (a Manager's approval goes straight through) -> Journal Manager
+        #   -> Journal Manager pushes it to the Submission team -> Submission team
+        #      resubmits to that journal and sets its new status.
+        if action == "revision_assign":
+            rv = _get_revision(con, d)
+            if rv["status"] not in ("TECH_PENDING", "ASSIGNED"):
+                raise ApiError("This revision isn't waiting for an assignment.")
+            valid = set(active_names(con, "PAPER_WRITER")) | set(active_names(con, "PROGRAMMER"))
+            picked = []
+            for n in (d.get("assignees") or []):
+                n = (n or "").strip()
+                if n in valid and n not in picked:
+                    picked.append(n)
+            if not picked:
+                raise ApiError("Pick at least one team member for the revision.")
+            start, deadline = _journal_assign_dates(d)
+            if not deadline:
+                raise ApiError("Set a deadline for the revision.")
+            actor = (d.get("actorLabel") or "").strip() or ("Technical TL" if d.get("role") == "technical_tl" else "Technical Manager")
+            _revision_set(con, rv["id"], status="ASSIGNED", assignees=",".join(picked), assigned_by=actor,
+                          start_date=start, deadline=deadline)
+            _revision_log(con, rv, actor, ("Reassigned" if rv["status"] == "ASSIGNED" else "Assigned")
+                          + f" to {', '.join(picked)} — due {deadline}.")
+            con.commit()
+            return {"ok": True}
+
+        if action == "revision_submit":
+            rv = _get_revision(con, d)
+            me = (d.get("empName") or "").strip()
+            team = [x.strip() for x in (rv["assignees"] or "").split(",") if x.strip()]
+            if me not in team:
+                raise ApiError("Only the people assigned to this revision can submit it.", 403)
+            if rv["status"] != "ASSIGNED":
+                raise ApiError("This revision isn't open for submission right now.")
+            doc_id, fname = _save_client_file(con, rv["client_id"], d,
+                                              f"Journal revision — {rv['journal_name']} — revised paper (round {rv['round']})",
+                                              me, True, "Attach the revised paper before submitting.")
+            note = (d.get("note") or "").strip()
+            _revision_set(con, rv["id"], status="TECH_REVIEW", submitted_by=me, submit_note=note,
+                          revised_doc_id=doc_id, review_note="")
+            _revision_log(con, rv, me, f"Revised paper submitted for approval ({fname}).")
+            con.commit()
+            return {"ok": True}
+
+        if action == "revision_review":
+            rv = _get_revision(con, d)
+            role_ = d.get("role") or ""
+            approve = bool(d.get("approve"))
+            note = (d.get("note") or "").strip()
+            actor = (d.get("actorLabel") or "").strip() or ("Technical TL" if role_ == "technical_tl" else "Technical Manager")
+            if rv["status"] not in ("TECH_REVIEW", "MANAGER_REVIEW"):
+                raise ApiError("This revision isn't waiting for approval.")
+            if rv["status"] == "MANAGER_REVIEW" and role_ == "technical_tl":
+                raise ApiError("The Technical TL already approved this — it's waiting for the Technical Manager.")
+            if not approve:
+                if not note:
+                    raise ApiError("Add a note telling the team what to fix.")
+                _revision_set(con, rv["id"], status="ASSIGNED", review_note=note)
+                _revision_log(con, rv, actor, f"Sent back to the team: {note}")
+            elif role_ == "technical_tl":
+                _revision_set(con, rv["id"], status="MANAGER_REVIEW", tl_approved_by=actor, review_note=note)
+                _revision_log(con, rv, actor, "Approved by the Technical TL — sent to the Technical Manager.")
+            else:
+                _revision_set(con, rv["id"], status="JM_PENDING", approved_by=actor, review_note=note)
+                _revision_log(con, rv, actor, "Approved by the Technical Manager — sent to the Journal Manager.")
+            con.commit()
+            return {"ok": True}
+
+        if action == "revision_push_submission":
+            rv = _get_revision(con, d)
+            if rv["status"] != "JM_PENDING":
+                raise ApiError("This revision isn't with the Journal Manager.")
+            actor = "Journal TL" if d.get("role") == "journal_tl" else "Journal Manager"
+            note = (d.get("note") or "").strip()
+            _revision_set(con, rv["id"], status="SUBMISSION_PENDING", pushed_by=actor, push_note=note)
+            _revision_log(con, rv, actor, "Sent to the Submission team to resubmit." + (f" Note: {note}" if note else ""))
+            con.commit()
+            return {"ok": True}
+
+        if action == "revision_resubmit":
+            require_submission_team(d)
+            rv = _get_revision(con, d)
+            if rv["status"] != "SUBMISSION_PENDING":
+                raise ApiError("This revision isn't ready to resubmit yet.")
+            status = (d.get("status") or "SUBMITTED").strip().upper()
+            if status not in JOURNAL_STATUSES or status == "REVISION_REQUESTED":
+                raise ApiError("Pick the journal's status after resubmitting.")
+            who = (d.get("empName") or "").strip() or ("Journal TL" if d.get("role") == "journal_tl" else "Journal Manager")
+            _revision_set(con, rv["id"], status="DONE", resubmitted_by=who, resubmit_status=status)
+            if rv["target_id"]:
+                con.execute("UPDATE journal_targets SET status=? WHERE id=?", (status, rv["target_id"]))
+            _revision_log(con, rv, who, f"Revised paper resubmitted — journal status now {status}.")
+            c = get_client(con, rv["client_id"])
+            _rollup_journal_status(con, c, who)
             con.commit()
             return {"ok": True}
 
@@ -8988,6 +9287,7 @@ def _handle_action_core(action, d, ip=""):
                 "service_items": rows_for("service_items"),
                 "client_installments": rows_for("client_installments"),
                 "journal_targets": rows_for("journal_targets"),
+                "journal_revisions": rows_for("journal_revisions"),
                 "messages": rows_for("messages"),
                 "client_queries": rows_for("client_queries"),
                 "tasks": rows_for("tasks"),
@@ -9131,6 +9431,7 @@ _IMPORT_TABLES = {
     "service_items":       ("client_id", "pay_key", "name", "created_at"),
     "client_installments": ("client_id", "title", "sort_order", "created_at"),
     "journal_targets":     ("client_id", "name", "created_at"),
+    "journal_revisions":   ("client_id", "journal_name", "round", "created_at"),
     "messages":            ("client_id", "thread_with", "sender_name", "body", "created_at"),
     "thread_reads":        ("client_id", "thread_with", "viewer_key"),
     "client_queries":      ("client_id", "query_text", "query_date", "created_at"),

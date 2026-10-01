@@ -1110,6 +1110,26 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .aw-chip.active{background:var(--text);color:var(--card);border-color:var(--text)}
 @media (max-width:900px){ .aw-boxes{grid-template-columns:1fr} }
 
+/* ---- journal revisions ---- */
+.rev-card{border-left:3px solid var(--gold,#b8860b)}
+.rev-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.rev-comments{margin-top:8px;padding:9px 11px;border-radius:8px;background:var(--card);border:1px dashed var(--line);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.rev-note{margin-top:8px;font-size:12.5px;padding:7px 10px;border-radius:8px;background:var(--card);border:1px solid var(--line)}
+.rev-note.bad{color:var(--bad,#c0392b);border-color:rgba(192,57,43,.35)}
+.rev-act{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.rev-act textarea{margin:0}
+/* ---- target journals: one row per journal ---- */
+.jt-box{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)}
+.jt-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.jt-row{display:grid;grid-template-columns:minmax(180px,2fr) auto minmax(220px,1.2fr);gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.jt-name{display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere;font-size:13.5px}
+.jt-num{flex:0 0 22px;height:22px;border-radius:50%;background:var(--card2);border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted)}
+.jt-edit{display:flex;gap:6px;align-items:center}
+.jt-edit select{margin:0;flex:1;min-width:0}
+.jt-add{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+.jt-add input{flex:1 1 220px;margin:0}
+.jt-add select{flex:0 0 170px;margin:0}
+@media (max-width:720px){ .jt-row{grid-template-columns:1fr} }
 /* ---- paper review checklist ---- */
 .pr-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .pr-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--card)}
@@ -4549,6 +4569,13 @@ function tmAwBoxCounts(type){
     + (type==="PROPOSAL" ? clients.filter(c=>c.stage==="PROPOSAL_SUBMITTED" && !tasks.some(t=>t.client_id===c.id && t.task_type==="PROPOSAL" && t.status==="SUBMITTED")).length : 0);
   const deliver = tmDeliveryQueue().filter(r=>r.type===type).length;
   const withClient = tmAwaitingClientQueue().filter(r=>r.type===type).length;
+  if(type==="PAPER_WRITING"){
+    // Journal revisions count as paper-writing work for the Technical team.
+    return {newW: newW + allRevisions(rv=>rv.status==="TECH_PENDING").length,
+            inProg: inProg + allRevisions(rv=>rv.status==="ASSIGNED").length,
+            waiting: waiting + allRevisions(rv=>rv.status==="TECH_REVIEW"||rv.status==="MANAGER_REVIEW").length,
+            deliver, withClient};
+  }
   return {newW, inProg, waiting, deliver, withClient};
 }
 function tmAwBoxesHtml(){
@@ -4767,7 +4794,7 @@ function tmAssignWorkHtml(){
   // Apply the current search once the HTML is in the page (after refreshes too).
   setTimeout(()=>tmAwApplySearch(), 0);
 
-  return `${tmAwBoxesHtml()}${searchBar}
+  return `${tmAwBoxesHtml()}${searchBar}${tmRevisionsHtml()}
   <div class="adm-panel" data-aw-section>
     <div class="adm-panel-head"><h3>New work needing assignment</h3><span class="badge ${rows.length?'b-bad':'b-purp'}" data-aw-count>${rows.length}</span></div>
     <div class="adm-panel-body">
@@ -5198,7 +5225,7 @@ function jmAwStepperHtml(type){
   }).join(`<span class="wk-sep">&#8250;</span>`)}</div>`;
 }
 function jmAwHay(c, extra){
-  return [c.name, c.phone, c.id, c.displayId, c.projectId, c.email, c.institution, c.topic, c.journalName,
+  return [c.name, c.phone, c.id, c.displayId, c.projectId, c.email, c.institution, c.topic, c.journalName, (c.journalTargets||[]).map(t=>t.name).join(" "),
           c.proofreadCoordinator, (c.assignedProofreaders||[]).join(" "), c.formatCoordinator,
           (c.assignedFormatters||[]).join(" "), c.submissionPerson, extra]
     .filter(Boolean).join(" ").toLowerCase();
@@ -5450,7 +5477,7 @@ function jmAssignWorkHtml(){
           <div class="aw-ip-top">${jmAwIdBadges(c)} <span class="badge b-purp">Submission</span>
             <span class="badge ${cls}">${esc(JOURNAL_STATUS_LABEL[st]||st)}</span></div>
           <div class="aw-ip-grid">
-            <div><span class="aw-field-lbl">Target journal</span><div>${esc(c.journalName||"—")}</div></div>
+            <div><span class="aw-field-lbl">Journals (${journalList(c).length})</span><div style="display:flex;flex-direction:column;gap:4px">${journalList(c).map(t=>`<span>${esc(t.name)} ${journalStatusBadge(t.status)}</span>`).join("")||"—"}</div></div>
             <div><span class="aw-field-lbl">Submitted by</span><div>${esc(c.submissionPerson||"—")}</div></div>
             <div><span class="aw-field-lbl">Client deadline</span><div>${c.deadlineDate?fmtDate(c.deadlineDate):"—"}</div></div>
             <div><span class="aw-field-lbl">Journal status</span><div>${esc(JOURNAL_STATUS_LABEL[st]||st)}</div></div>
@@ -5471,7 +5498,7 @@ function jmAssignWorkHtml(){
 
   setTimeout(()=>jmAwApplySearch(), 0);
 
-  return `${jmAwBoxesHtml()}${searchBar}
+  return `${jmAwBoxesHtml()}${searchBar}${jmRevisionsHtml()}
   <div class="adm-panel" data-aw-section>
     <div class="adm-panel-head"><h3>New work needing assignment</h3><span class="badge ${newRows.length?'b-bad':'b-purp'}" data-aw-count>${newRows.length}</span></div>
     <div class="adm-panel-body">
@@ -5700,7 +5727,7 @@ function renderJournalEmployee(){
   else if(tt==='PROOFREADER') body = journalWorkerWorkHtml('PROOFREADING','assignedProofreaders',"proofreading");
   else if(tt==='FORMATTER') body = journalWorkerWorkHtml('FORMATTING_IN_PROGRESS','assignedFormatters',"formatting");
   else body = submissionWorkHtml();
-  let html = myAssignedTasksHtml(empName) + myClientQueriesHtml(empName) + body;
+  let html = (tt==='SUBMISSION' ? submissionRevisionsHtml() : "") + myAssignedTasksHtml(empName) + myClientQueriesHtml(empName) + body;
   const myMsgThreads = clients.map(c=>({c, t:threadFor(c,empName)})).filter(x=>x.t);
   if(myMsgThreads.length){
     myMsgThreads.sort((a,b)=> new Date(b.t.lastAt||0) - new Date(a.t.lastAt||0));
@@ -5823,19 +5850,357 @@ function submissionWorkHtml(){
   let html = sectionHead("Ready to submit", toSubmit.length);
   if(!toSubmit.length) html += emptyBox("No paper is waiting to be submitted.");
   toSubmit.forEach(c=> html += pipeCard(c, `<button class="btn gold small" onclick="submitToJournalNow(${jsq(c.id)})">Submit to journal &#8594;</button>`,
-    c.journalName?`<div class="pc-meta">Target journal: <b>${esc(c.journalName)}</b></div>`:""));
+    journalChipsHtml(c, "Target journals")));
   html += sectionHead("Awaiting journal decision", submitted.length);
   if(!submitted.length) html += emptyBox("Nothing is waiting on a journal decision.");
   submitted.forEach(c=>{
-    const opts = JOURNAL_STATUSES.map(s=>`<option value="${s}" ${c.journalStatus===s?"selected":""}>${JOURNAL_STATUS_LABEL[s]}</option>`).join("");
-    html += pipeCard(c, "",
-      `${c.journalName?`<div class="pc-meta">Target journal: <b>${esc(c.journalName)}</b> &bull; Submitted by ${esc(c.submissionPerson||"—")}</div>`:""}
-       <div onclick="event.stopPropagation()"><select id="jst-${c.id}">${opts}</select>
-       <button class="btn small" style="margin-top:8px" onclick="updateJournalStatusNow(${jsq(c.id)})">Update status</button></div>`);
+    html += pipeCard(c, "", `<div class="pc-meta">Submitted by ${esc(c.submissionPerson||"—")}</div>` + journalTargetsEditorHtml(c));
   });
   return html + jeDoneHtml(done);
 }
 
+
+// ---------------------------------------------------------------------------
+// Target journals: a paper is often sent to several journals. Each journal is
+// its own row with its own status (journal_targets). Names typed into the single
+// "target journal" box (comma / semicolon / new line separated) are split so every
+// journal shows separately, even before the server has a row for it.
+// ---------------------------------------------------------------------------
+function splitJournalNames(text){
+  const out = [], seen = new Set();
+  String(text||"").split(/[,;\n]+/).forEach(p=>{
+    const n = p.replace(/^[\s.]+|[\s.]+$/g,"");
+    if(n && !seen.has(n.toLowerCase())){ seen.add(n.toLowerCase()); out.push(n); }
+  });
+  return out;
+}
+function journalList(c){
+  const list = (c.journalTargets||[]).map(t=>({id:t.id, name:t.name, status:t.status||"", addedBy:t.addedBy, addedAt:t.addedAt}));
+  const have = new Set(list.map(t=>(t.name||"").toLowerCase()));
+  splitJournalNames(c.journalName).forEach(n=>{
+    if(!have.has(n.toLowerCase())){
+      list.unshift({id:null, name:n, status: c.stage==="JOURNAL_SUBMITTED" ? (c.journalStatus||"SUBMITTED") : ""});
+      have.add(n.toLowerCase());
+    }
+  });
+  return list;
+}
+function journalStatusBadge(st){
+  if(!st) return `<span class="badge b-dim">Not yet submitted</span>`;
+  const cls = st==="REJECTED" ? "b-bad" : (st==="REVISION_REQUESTED" ? "b-wait" : (["ACCEPTED","PUBLISHED"].includes(st) ? "b-paid" : "b-purp"));
+  return `<span class="badge ${cls}">${esc(JOURNAL_STATUS_LABEL[st]||st)}</span>`;
+}
+function journalChipsHtml(c, label){
+  const list = journalList(c);
+  if(!list.length) return "";
+  return `<div class="pc-meta" style="margin-top:6px">${esc(label||"Journals")} (${list.length}):</div>
+    <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px">
+      ${list.map((t,i)=>`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px">
+        <span style="color:var(--muted);min-width:18px">${i+1}.</span><b style="overflow-wrap:anywhere">${esc(t.name)}</b>${journalStatusBadge(t.status)}</div>`).join("")}
+    </div>`;
+}
+function journalTargetsEditorHtml(c){
+  const list = journalList(c);
+  const opts = st => JOURNAL_STATUSES.map(x=>`<option value="${x}" ${st===x?"selected":""}>${esc(JOURNAL_STATUS_LABEL[x]||x)}</option>`).join("");
+  const rows = list.map((t,i)=>{
+    const key = `${c.id}-${i}`;
+    const rv = t.id!=null ? openRevisionForTarget(c, t.id) : null;
+    if(rv) return `<div class="jt-row">
+      <div class="jt-name"><span class="jt-num">${i+1}</span><b>${esc(t.name)}</b></div>
+      <div class="jt-status">${journalStatusBadge(t.status)}</div>
+      <div class="jt-edit" style="font-size:12.5px">&#128260; ${esc(REV_STATUS_LABEL[rv.status]||rv.status)}</div>
+    </div>`;
+    return `<div class="jt-row">
+      <div class="jt-name"><span class="jt-num">${i+1}</span><b>${esc(t.name)}</b></div>
+      <div class="jt-status">${journalStatusBadge(t.status)}</div>
+      <div class="jt-edit">
+        <select id="jtst-${key}">${opts(t.status||"SUBMITTED")}</select>
+        <button class="btn small" onclick="saveJournalTargetStatus(${jsq(c.id)}, ${t.id==null?"null":t.id}, ${jsq(t.name)}, ${jsq(key)})">Update</button>
+      </div>
+    </div>`;
+  }).join("");
+  const counts = {};
+  list.forEach(t=>{ const k=t.status||"NONE"; counts[k]=(counts[k]||0)+1; });
+  const summary = Object.entries(counts).map(([k,n])=>`${n} ${k==="NONE"?"not submitted":(JOURNAL_STATUS_LABEL[k]||k).toLowerCase()}`).join(" &bull; ");
+  return `<div class="jt-box" onclick="event.stopPropagation()">
+    <div class="jt-head"><b>Journals applied to (${list.length})</b>${list.length?`<span class="pc-meta" style="margin:0">${summary}</span>`:""}</div>
+    ${rows || `<div class="pc-meta">No journal recorded yet — add the journals you applied to below.</div>`}
+    <div class="jt-add">
+      <input id="jtadd-${esc(String(c.id))}" placeholder="Applied to another journal? Type its name…">
+      <select id="jtaddst-${esc(String(c.id))}">${opts("SUBMITTED")}</select>
+      <button class="btn ghost small" onclick="addJournalTargetForSubmission(${jsq(c.id)})">+ Add journal</button>
+    </div>
+    <div class="pc-meta" style="margin-top:6px">The paper's overall status follows the journals: <b>Accepted / Published</b> at any journal completes the project.</div>
+  </div>`;
+}
+async function saveJournalTargetStatus(clientId, id, name, key){
+  const status = ($("jtst-"+key)||{}).value || "";
+  if(!status){ toast("Pick a status"); return; }
+  if(status==="REVISION_REQUESTED"){ openRevisionRequestModal(clientId, id, name); return; }
+  if(["ACCEPTED","PUBLISHED"].includes(status) && !confirm(`Mark "${name}" as ${JOURNAL_STATUS_LABEL[status]}? This completes the project.`)) return;
+  const payload = {clientId, status, empName};
+  if(id!=null) payload.id = id; else payload.name = name;
+  try{ await api("set_journal_target_status", payload); }catch(e){ toast(e.message); await refresh(); return; }
+  await refresh();
+  toast(`${name}: ${JOURNAL_STATUS_LABEL[status]||status}`);
+}
+async function addJournalTargetForSubmission(clientId){
+  const name = (($("jtadd-"+clientId)||{}).value || "").trim();
+  const status = ($("jtaddst-"+clientId)||{}).value || "SUBMITTED";
+  if(!name){ toast("Type the journal name"); return; }
+  if(status==="REVISION_REQUESTED"){ openRevisionRequestModal(clientId, null, name); return; }
+  try{ await api("set_journal_target_status", {clientId, name, status, empName}); }catch(e){ toast(e.message); return; }
+  await refresh();
+  toast("Journal added");
+}
+// ===========================================================================
+// JOURNAL REVISIONS — when a journal asks for a revision:
+//   Submission team (comments + file) -> Technical Manager / TL assign 1+ people
+//   -> they upload the revised paper -> TL approves -> Technical Manager approves
+//   (a Manager's approval goes straight through) -> Journal Manager pushes it to
+//   the Submission team -> they resubmit and set that journal's new status.
+// ===========================================================================
+const REV_STATUS_LABEL = {
+  TECH_PENDING:"With Technical team — needs assigning", ASSIGNED:"Team is revising the paper",
+  TECH_REVIEW:"Revised — waiting for TL / Manager approval", MANAGER_REVIEW:"TL approved — waiting for Technical Manager",
+  JM_PENDING:"Approved — with Journal Manager", SUBMISSION_PENDING:"With Submission team to resubmit",
+  DONE:"Resubmitted to the journal"};
+const REV_STEPS = [["TECH_PENDING","Technical team"],["ASSIGNED","Revising"],["TECH_REVIEW","Approval"],["JM_PENDING","Journal Manager"],["SUBMISSION_PENDING","Resubmit"]];
+function revStepIndex(st){ return st==="MANAGER_REVIEW" ? 2 : (st==="DONE" ? 5 : REV_STEPS.findIndex(x=>x[0]===st)); }
+function revStepperHtml(rv){
+  const cur = revStepIndex(rv.status);
+  return `<div class="wk-steps">${REV_STEPS.map(([k,l],i)=>{
+    const st = i<cur ? "done" : (i===cur ? "cur" : "next");
+    return `<span class="wk-step ${st}"><span class="wk-dot">${st==="done"?"&#10003;":(i+1)}</span>${l}</span>`;
+  }).join(`<span class="wk-sep">&#8250;</span>`)}</div>`;
+}
+function allRevisions(filterFn){
+  const out = [];
+  clients.forEach(c=>(c.journalRevisions||[]).forEach(rv=>{ if(!filterFn || filterFn(rv,c)) out.push({c, rv}); }));
+  return out.sort((a,b)=> new Date(a.rv.createdAt||0) - new Date(b.rv.createdAt||0));
+}
+function openRevisionForTarget(c, targetId){
+  return (c.journalRevisions||[]).find(r=>r.targetId===targetId && r.status!=="DONE") || null;
+}
+function revStatusBadge(rv){
+  const cls = rv.status==="DONE" ? "b-paid" : (["TECH_PENDING","JM_PENDING","SUBMISSION_PENDING"].includes(rv.status) ? "b-bad" : "b-wait");
+  return `<span class="badge ${cls}">${esc(REV_STATUS_LABEL[rv.status]||rv.status)}</span>`;
+}
+function revDocBtn(id, label){
+  return id ? `<button class="btn ghost small" onclick="event.stopPropagation();admDownloadDocument(${id})">&#128206; ${label}</button>` : "";
+}
+// The shared card body every team sees for one revision.
+function revInfoHtml(c, rv){
+  const notes = [];
+  if(rv.reviewNote && rv.status==="ASSIGNED") notes.push(`<div class="rev-note bad">&#8617; Sent back: ${esc(rv.reviewNote)}</div>`);
+  if(rv.submitNote && rv.status!=="ASSIGNED") notes.push(`<div class="rev-note">Team note: ${esc(rv.submitNote)}</div>`);
+  if(rv.pushNote) notes.push(`<div class="rev-note">Journal Manager: ${esc(rv.pushNote)}</div>`);
+  return `<div class="rev-top">
+      <b class="aw-name">${esc(c.name)}</b> <span class="badge b-dim" title="Project ID">${esc(c.projectId||c.id)}</span>
+      <span class="badge b-purp">&#128221; ${esc(rv.journalName)}</span><span class="badge b-dim">Revision ${rv.round}</span>
+      ${revStatusBadge(rv)}
+    </div>
+    ${revStepperHtml(rv)}
+    <div class="rev-comments"><span class="aw-field-lbl">Journal's revision comments</span><div>${esc(rv.reviewerComments||"—")}</div></div>
+    <div class="aw-ip-grid" style="margin-top:8px">
+      <div><span class="aw-field-lbl">Assigned to</span><div>${rv.assignees.length?rv.assignees.map(esc).join(", "):'<span style="color:var(--faint)">Not assigned yet</span>'}</div></div>
+      <div><span class="aw-field-lbl">Start date</span><div>${rv.startDate?fmtDate(rv.startDate):"—"}</div></div>
+      <div><span class="aw-field-lbl">Deadline</span><div>${rv.deadline?fmtDate(rv.deadline):"—"}</div></div>
+      <div><span class="aw-field-lbl">Status</span><div>${rv.status==="ASSIGNED"&&rv.deadline?tmAwDaysInfo(rv.deadline):(rv.tlApprovedBy&&rv.status==="MANAGER_REVIEW"?"TL approved":"—")}</div></div>
+    </div>
+    ${notes.join("")}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${revDocBtn(rv.commentsDocId,"Journal's comments")}${revDocBtn(rv.revisedDocId,"Revised paper")}</div>`;
+}
+async function revFilePayload(inputId, required, missingMsg){
+  const el = $(inputId);
+  const file = el && el.files ? el.files[0] : null;
+  if(!file){ if(required){ toast(missingMsg); return null; } return {}; }
+  if(file.size > 6_000_000){ toast("That file is too large (max ~6MB)"); return null; }
+  try{ return {fileData: await readFileAsBase64(file), fileName: file.name, fileType: file.type}; }
+  catch(e){ toast("Could not read that file"); return null; }
+}
+
+/* ---- Submission team: mark a journal "Revision requested" ---- */
+function openRevisionRequestModal(clientId, targetId, name){
+  openModal(`<h3>Revision requested</h3>
+    <p class="msub">${esc(name)} &mdash; this goes to the Technical Manager / TL, who assign someone to revise the paper.</p>
+    <div class="field"><label>Journal's revision comments *</label><textarea id="revc_text" rows="5" placeholder="Paste or summarise what the reviewers asked to change…"></textarea></div>
+    <div class="field"><label>Attach the journal's comments / decision letter <small style="color:var(--muted);font-weight:500">(optional)</small></label><input type="file" id="revc_file"></div>
+    <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn gold" onclick="submitRevisionRequest(${jsq(clientId)}, ${targetId==null?"null":targetId}, ${jsq(name)})">Send to Technical team &#8594;</button></div>`);
+}
+async function submitRevisionRequest(clientId, targetId, name){
+  const comments = (($("revc_text")||{}).value || "").trim();
+  if(!comments){ toast("Add the journal's revision comments"); return; }
+  const f = await revFilePayload("revc_file", false); if(f===null) return;
+  const payload = Object.assign({clientId, status:"REVISION_REQUESTED", revisionComments:comments, empName}, f);
+  if(targetId!=null) payload.id = targetId; else payload.name = name;
+  try{ await api("set_journal_target_status", payload); }catch(e){ toast(e.message); return; }
+  closeModal(); await refresh();
+  toast("Sent to the Technical Manager / TL for revision");
+}
+function submissionRevisionsHtml(){
+  const ready = allRevisions(rv=>rv.status==="SUBMISSION_PENDING");
+  const inFlight = allRevisions(rv=>!["SUBMISSION_PENDING","DONE"].includes(rv.status));
+  const opts = JOURNAL_STATUSES.filter(x=>x!=="REVISION_REQUESTED").map(x=>`<option value="${x}">${esc(JOURNAL_STATUS_LABEL[x]||x)}</option>`).join("");
+  let html = sectionHead("Revised papers — resubmit to the journal", ready.length);
+  if(!ready.length) html += emptyBox("No revised paper is waiting to be resubmitted.");
+  ready.forEach(({c,rv})=>{
+    html += `<div class="aw-ip rev-card" style="cursor:default">${revInfoHtml(c, rv)}
+      <div class="rev-act">
+        <div class="field" style="margin:0;flex:1 1 220px"><label>Journal status after resubmitting</label><select id="revst-${rv.id}">${opts}</select></div>
+        <button class="btn gold small" onclick="revisionResubmitNow(${rv.id}, ${jsq(rv.journalName)})">Resubmitted &mdash; update status &#8594;</button>
+      </div></div>`;
+  });
+  if(inFlight.length){
+    html += sectionHead("Revisions in progress (Technical team / Journal Manager)", inFlight.length);
+    inFlight.forEach(({c,rv})=> html += `<div class="aw-ip rev-card" style="cursor:default">${revInfoHtml(c, rv)}</div>`);
+  }
+  return html;
+}
+async function revisionResubmitNow(id, name){
+  const status = ($("revst-"+id)||{}).value || "SUBMITTED";
+  if(["ACCEPTED","PUBLISHED"].includes(status) && !confirm(`Mark "${name}" as ${JOURNAL_STATUS_LABEL[status]}? This completes the project.`)) return;
+  try{ await api("revision_resubmit", {revisionId:id, status, empName}); }catch(e){ toast(e.message); await refresh(); return; }
+  await refresh();
+  toast(`${name}: resubmitted — ${JOURNAL_STATUS_LABEL[status]||status}`);
+}
+
+/* ---- Technical Manager / TL: assign + approve ---- */
+let revAwOpen = new Set();
+function revAssignFormHtml(rv){
+  const people = [...writerNames().map(n=>({n, t:"Paper Writer", l:writerLabel(n)})), ...programmerNames().map(n=>({n, t:"Programmer", l:programmerLabel(n)}))];
+  const boxes = people.map(p=>`<label class="ms-select-opt"><input type="checkbox" data-rev-pick="${rv.id}" value="${esc(p.n)}" ${rv.assignees.includes(p.n)?"checked":""} onchange="msUpdateDisplay(this)"> ${esc(p.l)} <small style="color:var(--muted)">&middot; ${p.t}</small></label>`).join("");
+  const sd = rv.startDate && rv.startDate>=todayISO() ? rv.startDate : todayISO();
+  const dl = rv.deadline && rv.deadline>=todayISO() ? rv.deadline : "";
+  const picker = people.length ? `<div class="ms-select">
+      <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
+        <span class="ms-select-display" data-placeholder="Select one or more people…">${rv.assignees.length?rv.assignees.map(esc).join(", "):"Select one or more people…"}</span>
+        <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="ms-select-pop" onclick="event.stopPropagation()">${boxes}</div>
+    </div>` : `<span style="color:var(--muted);font-size:13px">No paper writers or programmers yet — add them in the Team tab.</span>`;
+  return `<div class="aw-grid">
+      ${tmAwField("Assign to (one or more)", picker)}
+      ${tmAwField("Start date", `<input type="date" class="mini-date" id="revsd-${rv.id}" value="${sd}">`)}
+      ${tmAwField("Deadline", `<input type="date" class="mini-date" min="${todayISO()}" id="revdl-${rv.id}" value="${dl}">`)}
+    </div>
+    <div class="aw-actions"><button class="btn gold small" onclick="revisionAssignNow(${rv.id})">${rv.status==="ASSIGNED"?"Reassign":"Assign revision"} &#8594;</button></div>`;
+}
+async function revisionAssignNow(id){
+  const assignees = [...document.querySelectorAll(`input[data-rev-pick="${id}"]:checked`)].map(x=>x.value);
+  const startDate = ($("revsd-"+id)||{}).value || "";
+  const deadline = ($("revdl-"+id)||{}).value || "";
+  if(!assignees.length || !deadline){ toast("Pick at least one person and a deadline"); return; }
+  if(startDate && startDate > deadline){ toast("Start date can't be after the deadline"); return; }
+  try{ await api("revision_assign", {revisionId:id, assignees, startDate, deadline, actorLabel: role==="technical_tl"?"Technical TL":"Technical Manager"}); }
+  catch(e){ toast(e.message); await refresh(); return; }
+  revAwOpen.delete(String(id)); msCloseAllPops && msCloseAllPops();
+  await refresh(); toast("Revision assigned to " + assignees.join(", "));
+}
+function revToggle(id){
+  const key = String(id);
+  if(revAwOpen.has(key)) revAwOpen.delete(key); else revAwOpen.add(key);
+  const el = document.querySelector(`[data-rev-row="${key}"]`);
+  if(el) el.classList.toggle("aw-open", revAwOpen.has(key));
+}
+async function revisionReviewNow(id, approve){
+  const note = (($("revnote-"+id)||{}).value || "").trim();
+  if(!approve && !note){ toast("Add a note telling the team what to fix"); return; }
+  const who = role==="technical_tl" ? "Technical TL" : "Technical Manager";
+  if(approve && !confirm(role==="technical_tl" ? "Approve and send to the Technical Manager?" : "Approve and send to the Journal Manager?")) return;
+  try{ await api("revision_review", {revisionId:id, approve, note, actorLabel: who}); }catch(e){ toast(e.message); await refresh(); return; }
+  await refresh();
+  toast(approve ? (role==="technical_tl" ? "Approved — sent to the Technical Manager" : "Approved — sent to the Journal Manager") : "Sent back to the team");
+}
+function tmRevisionsHtml(){
+  const list = allRevisions(rv=>rv.status!=="DONE");
+  if(!list.length) return "";
+  const rows = list.map(({c,rv})=>{
+    const hay = esc(tmAwSearchHay(c, "revision journal "+rv.journalName+" "+rv.assignees.join(" ")));
+    let action = "";
+    if(["TECH_PENDING","ASSIGNED"].includes(rv.status)){
+      const open = revAwOpen.has(String(rv.id)) || rv.status==="TECH_PENDING";
+      action = `<div class="aw-row ${open?'aw-open':''}" data-rev-row="${rv.id}" style="margin-top:10px">
+        <div class="aw-head" onclick="revToggle(${rv.id})"><div class="aw-head-main"><b class="aw-name">${rv.status==="TECH_PENDING"?"Assign this revision":"Change who is working on it"}</b></div>
+          <div class="aw-head-side"><span class="aw-toggle"><span class="aw-toggle-txt-closed">${rv.status==="TECH_PENDING"?"Assign":"Reassign"}</span><span class="aw-toggle-txt-open">Close</span> <span class="aw-chev">&#9662;</span></span></div></div>
+        <div class="aw-body" onclick="event.stopPropagation()">${revAssignFormHtml(rv)}</div></div>`;
+    } else if(rv.status==="TECH_REVIEW" || (rv.status==="MANAGER_REVIEW" && role!=="technical_tl")){
+      action = `<div class="rev-act" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch">
+        <textarea id="revnote-${rv.id}" rows="2" placeholder="Note (required to send it back; optional when approving)"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn gold small" onclick="revisionReviewNow(${rv.id}, true)">&#10003; Approve &amp; send to ${role==="technical_tl"?"Technical Manager":"Journal Manager"} &#8594;</button>
+          <button class="btn ghost small" onclick="revisionReviewNow(${rv.id}, false)">&#8617; Send back to the team</button>
+        </div></div>`;
+    } else if(rv.status==="MANAGER_REVIEW"){
+      action = `<div class="pc-meta" style="margin-top:8px">You approved this &mdash; waiting for the Technical Manager.</div>`;
+    } else {
+      action = `<div class="pc-meta" style="margin-top:8px">With the Journal team now &mdash; nothing to do here.</div>`;
+    }
+    return `<div class="aw-ip rev-card" style="cursor:default" data-aw-type="PAPER_WRITING" data-aw-search="${hay}">${revInfoHtml(c, rv)}${action}</div>`;
+  }).join("");
+  const needs = list.filter(({rv})=>rv.status==="TECH_PENDING" || rv.status==="TECH_REVIEW" || (rv.status==="MANAGER_REVIEW" && role!=="technical_tl")).length;
+  return `<div class="adm-panel" data-aw-section style="margin-bottom:16px">
+    <div class="adm-panel-head"><h3>&#128260; Journal revisions</h3><span class="badge ${needs?'b-bad':'b-purp'}" data-aw-count>${list.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">A journal asked for changes. Assign one or more people, then approve their revised paper &mdash; the Technical TL's approval goes to the Technical Manager, and the Manager's approval sends it to the Journal Manager.</p>
+      ${rows}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div></div>`;
+}
+
+/* ---- Assigned employee (Paper Writer / Programmer) ---- */
+function myRevisionsHtml(){
+  const mine = allRevisions(rv=>rv.assignees.includes(empName) && rv.status!=="DONE");
+  if(!mine.length) return "";
+  let html = sectionHead("Journal revisions assigned to me", mine.length);
+  mine.forEach(({c,rv})=>{
+    let act = "";
+    if(rv.status==="ASSIGNED"){
+      act = `<div class="rev-act" onclick="event.stopPropagation()" style="flex-direction:column;align-items:stretch">
+        <div class="field" style="margin:0"><label>Upload the revised paper *</label><input type="file" id="revfile-${rv.id}" accept=".doc,.docx,.pdf,.odt,.rtf,.tex,.zip"></div>
+        <textarea id="revsub-${rv.id}" rows="2" placeholder="What did you change? (optional)"></textarea>
+        <div><button class="btn gold small" onclick="revisionSubmitNow(${rv.id})">Submit revised paper for approval &#8594;</button></div>
+      </div>`;
+    } else {
+      act = `<div class="pc-meta" style="margin-top:8px">${esc(REV_STATUS_LABEL[rv.status]||rv.status)}${rv.submittedBy?` &mdash; submitted by ${esc(rv.submittedBy)}`:""}.</div>`;
+    }
+    html += `<div class="aw-ip rev-card" style="cursor:default;background:var(--card)">${revInfoHtml(c, rv)}${act}</div>`;
+  });
+  return html;
+}
+async function revisionSubmitNow(id){
+  const f = await revFilePayload("revfile-"+id, true, "Attach the revised paper before submitting"); if(f===null) return;
+  const note = (($("revsub-"+id)||{}).value || "").trim();
+  try{ await api("revision_submit", Object.assign({revisionId:id, note, empName}, f)); }catch(e){ toast(e.message); await refresh(); return; }
+  await refresh(); toast("Revised paper submitted — waiting for TL / Manager approval");
+}
+
+/* ---- Journal Manager / TL: push to Submission ---- */
+async function revisionPushNow(id){
+  const note = (($("revpush-"+id)||{}).value || "").trim();
+  try{ await api("revision_push_submission", {revisionId:id, note}); }catch(e){ toast(e.message); await refresh(); return; }
+  await refresh(); toast("Sent to the Submission team to resubmit");
+}
+function jmRevisionsHtml(){
+  const list = allRevisions(rv=>rv.status!=="DONE");
+  if(!list.length) return "";
+  const rows = list.map(({c,rv})=>{
+    const act = rv.status==="JM_PENDING" ? `<div class="rev-act" onclick="event.stopPropagation()">
+        <input id="revpush-${rv.id}" placeholder="Note for the Submission team (optional)" style="flex:1 1 240px;margin:0">
+        <button class="btn gold small" onclick="revisionPushNow(${rv.id})">Send to Submission team &#8594;</button></div>`
+      : `<div class="pc-meta" style="margin-top:8px">${rv.status==="SUBMISSION_PENDING"?"Waiting for the Submission team to resubmit.":"With the Technical team &mdash; it comes to you once the Technical Manager approves the revised paper."}</div>`;
+    return `<div class="aw-ip rev-card" style="cursor:default" data-aw-type="SUBMISSION" data-aw-search="${esc(jmAwHay(c,"revision "+rv.journalName))}">${revInfoHtml(c, rv)}${act}</div>`;
+  }).join("");
+  const mine = list.filter(({rv})=>rv.status==="JM_PENDING").length;
+  return `<div class="adm-panel" data-aw-section style="margin-bottom:16px">
+    <div class="adm-panel-head"><h3>&#128260; Journal revisions</h3><span class="badge ${mine?'b-bad':'b-purp'}" data-aw-count>${list.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Papers a journal sent back for changes. Once the Technical Manager approves the revised paper it lands here &mdash; send it to the Submission team to resubmit.</p>
+      ${rows}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div></div>`;
+}
 // Dashboard tab — same layout as techDashboardPanel().
 function journalEmpDashboardPanel(tt){
   const my = jeMyClients(tt);
@@ -5885,8 +6250,9 @@ function journalEmpDashboardPanel(tt){
     c2Section = "Ready to submit";
     c7Title = "Journal Status";
     bd = [["To submit", c2Pending],["Under review", sub.filter(c=>['SUBMITTED','UNDER_REVIEW',''].includes(c.journalStatus||"")).length],["Revision", sub.filter(c=>c.journalStatus==='REVISION_REQUESTED').length],["Accepted", clients.filter(c=>['ACCEPTED','PUBLISHED'].includes(c.journalStatus)).length],["Rejected", clients.filter(c=>c.journalStatus==='REJECTED').length]];
-    waiting = clients.filter(c=>c.stage==='SUBMISSION');
-    waitSection = "Ready to submit";
+    const revReady = allRevisions(rv=>rv.status==="SUBMISSION_PENDING").map(x=>x.c);
+    waiting = [...revReady, ...clients.filter(c=>c.stage==='SUBMISSION')];
+    waitSection = revReady.length ? "Revised papers — resubmit to the journal" : "Ready to submit";
   }
   const c7Done = bd.find(x=>["Passed","Accepted"].includes(x[0])) ? bd.find(x=>["Passed","Accepted"].includes(x[0]))[1] : 0;
   const c7Pending = bd.reduce((s,[l,v])=> ["Passed","Accepted","Rejected","Overdue"].includes(l) ? s : s+v, 0);
@@ -6184,7 +6550,7 @@ function renderProgrammer(){
   const mine = clients.filter(c=>c.stage==='IMPLEMENTATION_ASSIGNED' && !c.implAwaitingTeamPick && c.assignedProgrammers.includes(empName));
   const doneByMe = clients.filter(c=>stageIdx(c.stage)>=stageIdx('IMPLEMENTATION_COMPLETE') && c.assignedProgrammers.includes(empName));
   $("statsRow").innerHTML = "";
-  let html = coordinatorInboxHtml() + myAssignedTasksHtml(empName);
+  let html = coordinatorInboxHtml() + myRevisionsHtml() + myAssignedTasksHtml(empName);
   html += myClientQueriesHtml(empName);
   html += sectionHead("New proposals to review", toVerify.length);
   if(!toVerify.length) html += emptyBox("No proposal is waiting on verification right now.");
@@ -6387,7 +6753,7 @@ function renderWriter(){
   const doneByMe = clients.filter(c=> c.assignedWriters.includes(empName) && !shownIds.has(c.id));
   $("statsRow").innerHTML = "";
 
-  let html = coordinatorInboxHtml() + myAssignedTasksHtml(empName);
+  let html = coordinatorInboxHtml() + myRevisionsHtml() + myAssignedTasksHtml(empName);
   html += myClientQueriesHtml(empName);
   if(coordReview.length || proposalTeamPick.length || writingTeamPick.length){
     html += sectionHead("Drafts awaiting your review (your team)", coordReview.length);
@@ -8985,7 +9351,7 @@ function admExportTasksCsv(){
   toast("Exported "+rows.length+" tasks");
 }
 let jmTasksTab = "overview";
-function jmToAssignCount(){ return clients.filter(c=>["JOURNAL_MANAGER_REVIEW","JOURNAL_MANAGER_FORMATTING","FORMATTING_MANAGER_REVIEW"].includes(c.stage)).length; }
+function jmToAssignCount(){ return clients.filter(c=>["JOURNAL_MANAGER_REVIEW","JOURNAL_MANAGER_FORMATTING","FORMATTING_MANAGER_REVIEW"].includes(c.stage)).length + allRevisions(rv=>rv.status==="JM_PENDING").length; }
 function renderJMTasks(){
   const wuCount = jmWorkUpdatesQueue().length;
   let html = `<div class="adm-tabbar">
