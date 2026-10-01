@@ -5665,108 +5665,315 @@ function renderJournalTL(){
   $("content").innerHTML = html;
 }
 
+/* ---------- Journal team employees (Proofreading Coordinator, Proofreader, Formatting
+   Coordinator, Formatter, Submission) — same Dashboard / My work layout as the
+   Technical team employees (Programmer / Paper Writer). ---------- */
+let jeTab = 'dashboard';
+const JE_INFO = {
+  PROOFREAD_COORDINATOR:{label:"Proofreading Coordinator", sub:"Assign proofreaders, request corrections, and approve proofread papers"},
+  PROOFREADER:{label:"Proofreader", sub:"Proofread the papers assigned to you"},
+  FORMAT_COORDINATOR:{label:"Formatting Coordinator", sub:"Assign formatters and approve formatted papers"},
+  FORMATTER:{label:"Formatter", sub:"Format the papers assigned to you for the target journal"},
+  SUBMISSION:{label:"Submission Team", sub:"Submit finished papers to the journal and keep the status updated"},
+};
+function jeTabbar(){
+  return `<div class="tabbar">
+    <button class="tab ${jeTab==='dashboard'?'active':''}" onclick="jeTab='dashboard';refresh()">Dashboard</button>
+    <button class="tab ${jeTab==='work'?'active':''}" onclick="jeTab='work';refresh()">My work</button>
+  </div>`;
+}
 function renderJournalEmployee(){
   const tt = empTeamType;
-  if(tt==='PROOFREAD_COORDINATOR') return renderProofreadCoordinator();
-  if(tt==='FORMAT_COORDINATOR') return renderFormatCoordinator();
-  if(tt==='PROOFREADER') return renderJournalWorkerView('PROOFREADING','assignedProofreaders',"Proofreader");
-  if(tt==='FORMATTER') return renderJournalWorkerView('FORMATTING_IN_PROGRESS','assignedFormatters',"Formatter");
-  if(tt==='SUBMISSION') return renderSubmissionTeam();
-  setHead(empName + " — Journal Team","","");
-  $("content").innerHTML = emptyBox("Your journal team role isn't recognised. Ask your Journal Manager to check your account.");
+  const info = JE_INFO[tt];
+  if(!info){
+    setHead(empName + " — Journal Team","","");
+    $("statsRow").innerHTML = "";
+    $("content").innerHTML = emptyBox("Your journal team role isn't recognised. Ask your Journal Manager to check your account.");
+    return;
+  }
+  setHead(empName + " — " + info.label, info.sub, "");
+  $("statsRow").innerHTML = "";
+  if(jeTab==='dashboard'){ $("content").innerHTML = jeTabbar() + journalEmpDashboardPanel(tt); return; }
+  let body = "";
+  if(tt==='PROOFREAD_COORDINATOR') body = proofreadCoordinatorWorkHtml();
+  else if(tt==='FORMAT_COORDINATOR') body = formatCoordinatorWorkHtml();
+  else if(tt==='PROOFREADER') body = journalWorkerWorkHtml('PROOFREADING','assignedProofreaders',"proofreading");
+  else if(tt==='FORMATTER') body = journalWorkerWorkHtml('FORMATTING_IN_PROGRESS','assignedFormatters',"formatting");
+  else body = submissionWorkHtml();
+  let html = myAssignedTasksHtml(empName) + myClientQueriesHtml(empName) + body;
+  const myMsgThreads = clients.map(c=>({c, t:threadFor(c,empName)})).filter(x=>x.t);
+  if(myMsgThreads.length){
+    myMsgThreads.sort((a,b)=> new Date(b.t.lastAt||0) - new Date(a.t.lastAt||0));
+    html += sectionHead("Client messages", myMsgThreads.length);
+    myMsgThreads.forEach(({c,t})=>{
+      html += `<div class="pay-row" style="cursor:pointer" onclick="openChat(${jsq(c.id)},${jsq(empName)},${jsq(c.name)})">
+        <div class="pay-top"><b>${esc(c.name)}</b><span class="badge b-dim">${c.displayId||c.id}</span>${unreadForViewer(t,myViewerKey())?`<span class="badge b-bad">${unreadForViewer(t,myViewerKey())} new</span>`:""}</div>
+        <div class="pay-meta">${esc(t.lastPreview||"")} &bull; ${fmtDateTime(t.lastAt)}</div>
+      </div>`;
+    });
+  }
+  $("content").innerHTML = jeTabbar() + html;
 }
+// Kept so any old reference still works — all go through the tabbed page now.
+function renderProofreadCoordinator(){ renderJournalEmployee(); }
+function renderFormatCoordinator(){ renderJournalEmployee(); }
+function renderSubmissionTeam(){ renderJournalEmployee(); }
+function renderJournalWorkerView(){ renderJournalEmployee(); }
 
-function renderProofreadCoordinator(){
-  setHead(empName + " — Proofreading Coordinator","Assign proofreaders, request corrections, and approve proofread papers","");
+// Clients that belong to this journal employee.
+function jeMyClients(tt){
+  if(tt==='PROOFREAD_COORDINATOR') return clients.filter(c=>c.proofreadCoordinator===empName);
+  if(tt==='PROOFREADER') return clients.filter(c=>(c.assignedProofreaders||[]).includes(empName));
+  if(tt==='FORMAT_COORDINATOR') return clients.filter(c=>c.formatCoordinator===empName);
+  if(tt==='FORMATTER') return clients.filter(c=>(c.assignedFormatters||[]).includes(empName));
+  return clients.filter(c=>['SUBMISSION','JOURNAL_SUBMITTED'].includes(c.stage) || c.submissionPerson===empName);
+}
+// Start date / deadline lines (+ days left) for proofreading or formatting work.
+function jeDatesHtml(c, kind){
+  const sd = kind==='proofreading' ? c.proofreadStartDate : c.formatStartDate;
+  const dl = kind==='proofreading' ? c.proofreadDeadline : c.formatDeadline;
+  let h = "";
+  if(c.journalName) h += `<div class="pc-meta">Target journal: <b>${esc(c.journalName)}</b></div>`;
+  if(sd) h += `<div class="pc-meta">${kind==='proofreading'?'Proofreading':'Formatting'} started: <b>${fmtDate(sd)}</b></div>`;
+  if(dl) h += `<div class="pc-meta">${kind==='proofreading'?'Proofreading':'Formatting'} deadline: <b style="color:var(--gold)">${fmtDate(dl)}</b> ${tmAwDaysInfo(dl)}</div>`;
+  if(c.extRequested) h += `<div class="pc-meta" style="color:var(--gold)">Extension requested (${esc(c.extAmount)}) &mdash; waiting on your Journal Manager/TL.</div>`;
+  return h;
+}
+function jeExtBtn(c){
+  return c.extRequested ? "" : `<button class="btn ghost small" onclick="openExtensionModal(${jsq(c.id)},'${c.stage}')">Request deadline extension</button>`;
+}
+function jeDoneHtml(list){
+  if(!list.length) return "";
+  let html = sectionHead("Completed by me — current status", list.length);
+  list.forEach(c=> html += pipeCard(c, "", `<div class="pc-meta">Now at: ${STAGE_LABEL[c.stage]}</div>`));
+  return html;
+}
+function proofreadCoordinatorWorkHtml(){
   const toAssign = clients.filter(c=>c.stage==='PROOFREAD_COORD_ASSIGNED' && c.proofreadCoordinator===empName);
   const inProgress = clients.filter(c=>c.stage==='PROOFREADING' && c.proofreadCoordinator===empName);
+  const withWriter = clients.filter(c=>c.stage==='PROOFREAD_CORRECTION' && c.proofreadCoordinator===empName);
   const recheck = clients.filter(c=>c.stage==='PROOFREAD_RECHECK' && c.proofreadCoordinator===empName);
-  $("statsRow").innerHTML = statsHtml([[toAssign.length,"Need proofreaders","goldline"],[inProgress.length,"In progress"],[recheck.length,"Ready to re-check","goldline"]]);
   let html = sectionHead("Assign proofreaders", toAssign.length);
+  if(!toAssign.length) html += emptyBox("No new paper is waiting for proofreaders.");
   toAssign.forEach(c=>{
     const boxes = journalNames('PROOFREADER').map(n=>`<label class="check"><input type="checkbox" data-proof="${c.id}" value="${esc(n)}"> ${esc(n)}</label>`).join("")
       || `<span style="color:var(--muted);font-size:13px">No proofreaders yet — leave blank to do it yourself.</span>`;
-    html += pipeCard(c, `<button class="btn gold small" onclick="assignProofreadersNow(${jsq(c.id)})">Assign (or leave blank for yourself) &#8594;</button>`,
-      `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div></div>`);
+    html += pipeCard(c, `<button class="btn gold small" onclick="assignProofreadersNow(${jsq(c.id)})">Assign (or leave blank for yourself) &#8594;</button>${jeExtBtn(c)}`,
+      jeDatesHtml(c,'proofreading') + `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div></div>`);
   });
-  html += sectionHead("In progress", inProgress.length);
-  inProgress.forEach(c=> html += pipeCard(c, "",
-    `<div onclick="event.stopPropagation()" style="margin-top:8px">
+  html += sectionHead("Proofreading in progress", inProgress.length);
+  if(!inProgress.length) html += emptyBox("Nothing is being proofread right now.");
+  inProgress.forEach(c=> html += pipeCard(c, jeExtBtn(c),
+    jeDatesHtml(c,'proofreading') +
+    `<div class="pc-meta">Proofreaders: ${esc((c.assignedProofreaders||[]).join(", ")||"—")}</div>
+     <div onclick="event.stopPropagation()" style="margin-top:8px">
       <textarea id="rvnote-${c.id}" placeholder="Note for the writer" rows="2" style="margin-bottom:8px"></textarea>
       <button class="btn ghost small" onclick="proofreadRequestCorrectionNow(${jsq(c.id)})">Send correction to writer</button>
     </div>`));
   html += sectionHead("Ready to re-check", recheck.length);
-  recheck.forEach(c=> html += pipeCard(c, "", reviewActionHtml('proofread_decision', c.id)));
-  const proofShown = new Set([...toAssign, ...inProgress, ...recheck].map(c=>c.id));
-  const proofDone = clients.filter(c=> c.proofreadCoordinator===empName && !proofShown.has(c.id));
-  if(proofDone.length){
-    html += sectionHead("Handled by me — current status", proofDone.length);
-    proofDone.forEach(c=> html += pipeCard(c, "", `<div class="pc-meta">Now at: ${STAGE_LABEL[c.stage]}</div>`));
+  if(!recheck.length) html += emptyBox("No corrected paper is waiting on your re-check.");
+  recheck.forEach(c=> html += pipeCard(c, "", jeDatesHtml(c,'proofreading') + `<div class="pc-meta">Correction rounds: ${c.proofreadRounds||0}</div>` + reviewActionHtml('proofread_decision', c.id)));
+  if(withWriter.length){
+    html += sectionHead("With the writer — fixing corrections", withWriter.length);
+    withWriter.forEach(c=>{
+      const lastNote = (c.history||[]).find(h=>h.stage==='PROOFREAD_CORRECTION' && h.note);
+      html += pipeCard(c, "", `<div class="pc-meta">Your note: ${lastNote?esc(lastNote.note):"—"}</div>`);
+    });
   }
-  $("content").innerHTML = html;
+  const shown = new Set([...toAssign, ...inProgress, ...withWriter, ...recheck].map(c=>c.id));
+  return html + jeDoneHtml(clients.filter(c=> c.proofreadCoordinator===empName && !shown.has(c.id)));
 }
-
-function renderFormatCoordinator(){
-  setHead(empName + " — Formatting Coordinator","Assign formatters and complete formatting","");
+function formatCoordinatorWorkHtml(){
   const toAssign = clients.filter(c=>c.stage==='FORMATTING_ASSIGNED' && c.formatCoordinator===empName);
   const inProgress = clients.filter(c=>c.stage==='FORMATTING_IN_PROGRESS' && c.formatCoordinator===empName);
-  $("statsRow").innerHTML = statsHtml([[toAssign.length,"Need formatters","goldline"],[inProgress.length,"In progress"]]);
+  const mgrReview = clients.filter(c=>c.stage==='FORMATTING_MANAGER_REVIEW' && c.formatCoordinator===empName);
   let html = sectionHead("Assign formatters", toAssign.length);
+  if(!toAssign.length) html += emptyBox("No new paper is waiting for formatters.");
   toAssign.forEach(c=>{
     const boxes = journalNames('FORMATTER').map(n=>`<label class="check"><input type="checkbox" data-fmt="${c.id}" value="${esc(n)}"> ${esc(n)}</label>`).join("")
       || `<span style="color:var(--muted);font-size:13px">No formatters yet — leave blank to do it yourself.</span>`;
-    html += pipeCard(c, `<button class="btn gold small" onclick="assignFormattersNow(${jsq(c.id)})">Assign (or leave blank for yourself) &#8594;</button>`,
-      `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div></div>`);
+    html += pipeCard(c, `<button class="btn gold small" onclick="assignFormattersNow(${jsq(c.id)})">Assign (or leave blank for yourself) &#8594;</button>${jeExtBtn(c)}`,
+      jeDatesHtml(c,'formatting') + `<div onclick="event.stopPropagation()"><div class="check-row">${boxes}</div></div>`);
   });
-  html += sectionHead("In progress", inProgress.length);
-  inProgress.forEach(c=> html += pipeCard(c, "",
-    `<div class="pc-meta" style="margin-bottom:4px">Approving sends this to the Journal Manager for final sign-off before submission.</div>`
+  html += sectionHead("Formatting in progress — review", inProgress.length);
+  if(!inProgress.length) html += emptyBox("Nothing is being formatted right now.");
+  inProgress.forEach(c=> html += pipeCard(c, jeExtBtn(c),
+    jeDatesHtml(c,'formatting') +
+    `<div class="pc-meta">Formatters: ${esc((c.assignedFormatters||[]).join(", ")||"—")} &bull; Correction rounds: ${c.formatRounds||0}</div>
+     <div class="pc-meta" style="margin-bottom:4px">Approving sends this to the Journal Manager for final sign-off before submission.</div>`
     + reviewActionHtml('format_decision', c.id)));
-  const fmtShown = new Set([...toAssign, ...inProgress].map(c=>c.id));
-  const fmtDone = clients.filter(c=> c.formatCoordinator===empName && !fmtShown.has(c.id));
-  if(fmtDone.length){
-    html += sectionHead("Handled by me — current status", fmtDone.length);
-    fmtDone.forEach(c=> html += pipeCard(c, "", `<div class="pc-meta">Now at: ${STAGE_LABEL[c.stage]}</div>`));
+  if(mgrReview.length){
+    html += sectionHead("With the Journal Manager — final review", mgrReview.length);
+    mgrReview.forEach(c=> html += pipeCard(c, "", jeDatesHtml(c,'formatting')));
   }
-  $("content").innerHTML = html;
+  const shown = new Set([...toAssign, ...inProgress, ...mgrReview].map(c=>c.id));
+  return html + jeDoneHtml(clients.filter(c=> c.formatCoordinator===empName && !shown.has(c.id)));
 }
-
-function renderJournalWorkerView(stage, listField, label){
-  setHead(empName + " — " + label, "Papers currently assigned to you", "");
+function journalWorkerWorkHtml(stage, listField, kind){
   const mine = clients.filter(c=>c.stage===stage && (c[listField]||[]).includes(empName));
   const done = clients.filter(c=>c.stage!==stage && (c[listField]||[]).includes(empName));
-  $("statsRow").innerHTML = statsHtml([[mine.length,"Assigned to me","goldline"],[done.length,"Completed by me"]]);
-  let html = sectionHead("Assigned to me", mine.length);
-  if(!mine.length) html += emptyBox("Nothing assigned to you right now.");
-  mine.forEach(c=> html += pipeCard(c,""));
-  if(done.length){
-    html += sectionHead("Completed by me — current status", done.length);
-    done.forEach(c=> html += pipeCard(c, "", `<div class="pc-meta">Now at: ${STAGE_LABEL[c.stage]}</div>`));
-  }
-  $("content").innerHTML = html;
+  const coordField = kind==='proofreading' ? 'proofreadCoordinator' : 'formatCoordinator';
+  let html = sectionHead(`Assigned to me — ${kind}`, mine.length);
+  if(!mine.length) html += emptyBox(`No ${kind} work assigned to you right now.`);
+  mine.forEach(c=> html += pipeCard(c, jeExtBtn(c),
+    jeDatesHtml(c, kind) + `<div class="pc-meta">Coordinator: <b>${esc(c[coordField]||"—")}</b> &mdash; tell them when you're done so they can review it.</div>`));
+  return html + jeDoneHtml(done);
 }
-
-function renderSubmissionTeam(){
-  setHead(empName + " — Submission Team","Submit finished papers to the journal and keep the status updated","");
+function submissionWorkHtml(){
   const toSubmit = clients.filter(c=>c.stage==='SUBMISSION');
   const submitted = clients.filter(c=>c.stage==='JOURNAL_SUBMITTED');
   const done = clients.filter(c=> c.submissionPerson===empName && c.stage!=='SUBMISSION' && c.stage!=='JOURNAL_SUBMITTED');
-  $("statsRow").innerHTML = statsHtml([[toSubmit.length,"Ready to submit","goldline"],[submitted.length,"Awaiting journal decision"],[done.length,"Completed by me"]]);
   let html = sectionHead("Ready to submit", toSubmit.length);
+  if(!toSubmit.length) html += emptyBox("No paper is waiting to be submitted.");
   toSubmit.forEach(c=> html += pipeCard(c, `<button class="btn gold small" onclick="submitToJournalNow(${jsq(c.id)})">Submit to journal &#8594;</button>`,
-    c.journalName?`<div class="pc-meta">Target journal: ${esc(c.journalName)}</div>`:""));
+    c.journalName?`<div class="pc-meta">Target journal: <b>${esc(c.journalName)}</b></div>`:""));
   html += sectionHead("Awaiting journal decision", submitted.length);
+  if(!submitted.length) html += emptyBox("Nothing is waiting on a journal decision.");
   submitted.forEach(c=>{
     const opts = JOURNAL_STATUSES.map(s=>`<option value="${s}" ${c.journalStatus===s?"selected":""}>${JOURNAL_STATUS_LABEL[s]}</option>`).join("");
     html += pipeCard(c, "",
-      `<div onclick="event.stopPropagation()"><select id="jst-${c.id}">${opts}</select>
+      `${c.journalName?`<div class="pc-meta">Target journal: <b>${esc(c.journalName)}</b> &bull; Submitted by ${esc(c.submissionPerson||"—")}</div>`:""}
+       <div onclick="event.stopPropagation()"><select id="jst-${c.id}">${opts}</select>
        <button class="btn small" style="margin-top:8px" onclick="updateJournalStatusNow(${jsq(c.id)})">Update status</button></div>`);
   });
-  if(done.length){
-    html += sectionHead("Completed by me — current status", done.length);
-    done.forEach(c=> html += pipeCard(c, "", `<div class="pc-meta">Now at: ${STAGE_LABEL[c.stage]}</div>`));
+  return html + jeDoneHtml(done);
+}
+
+// Dashboard tab — same layout as techDashboardPanel().
+function journalEmpDashboardPanel(tt){
+  const my = jeMyClients(tt);
+  const st = list => my.filter(c=>list.includes(c.stage)).length;
+  const past = stage => my.filter(c=>stageIdx(c.stage) > stageIdx(stage)).length;
+  const myTasksAll = tasks.filter(t=>(t.assigned_to||"").split(",").map(s=>s.trim()).filter(Boolean).includes(empName));
+  const myQueries = clientQueries.filter(q=>(q.assigned_to||"").trim()===empName);
+  const openMyQueries = myQueries.filter(q=>q.status!=='RESOLVED');
+  const rejectedTasks = myTasksAll.filter(t=>t.status==='NEEDS_CORRECTION').length;
+  const acceptedTasks = myTasksAll.filter(t=>t.status==='COMPLETED').length;
+  const highPending = myTasksAll.filter(t=>t.priority==='HIGH' && t.status!=='COMPLETED').length;
+  const newTasks = myTasksAll.filter(t=>t.status==='OPEN').sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0)).slice(0,6);
+
+  // Role-specific second card, bottom panel and "waiting on me" list.
+  let c2Title, c2Pending, c2Done, c2Section, c7Title, bd, waiting, waitSection;
+  if(tt==='PROOFREAD_COORDINATOR'){
+    c2Title = "Proofreading Corrections"; c2Pending = st(['PROOFREAD_CORRECTION','PROOFREAD_RECHECK']); c2Done = past('PROOFREAD_RECHECK');
+    c2Section = "Ready to re-check";
+    c7Title = "Proofreading";
+    bd = [["Need proofreaders", st(['PROOFREAD_COORD_ASSIGNED'])],["In progress", st(['PROOFREADING'])],["With writer", st(['PROOFREAD_CORRECTION'])],["Re-check", st(['PROOFREAD_RECHECK'])],["Passed", c2Done]];
+    waiting = my.filter(c=>['PROOFREAD_COORD_ASSIGNED','PROOFREAD_RECHECK'].includes(c.stage));
+    waitSection = "Assign proofreaders";
+  } else if(tt==='PROOFREADER'){
+    c2Title = "Proofreading Work"; c2Pending = st(['PROOFREADING']); c2Done = my.length - c2Pending;
+    c2Section = "Assigned to me — proofreading";
+    c7Title = "My Proofreading";
+    bd = [["Assigned to me", c2Pending],["With writer", st(['PROOFREAD_CORRECTION'])],["Re-check", st(['PROOFREAD_RECHECK'])],["Passed", past('PROOFREAD_RECHECK')],["Overdue", my.filter(c=>c.stage==='PROOFREADING' && c.proofreadDeadline && c.proofreadDeadline<todayISO()).length]];
+    waiting = my.filter(c=>c.stage==='PROOFREADING');
+    waitSection = c2Section;
+  } else if(tt==='FORMAT_COORDINATOR'){
+    c2Title = "Formatting Revisions"; c2Pending = st(['FORMATTING_ASSIGNED','FORMATTING_IN_PROGRESS']); c2Done = past('FORMATTING_MANAGER_REVIEW');
+    c2Section = "Formatting in progress — review";
+    c7Title = "Formatting";
+    bd = [["Need formatters", st(['FORMATTING_ASSIGNED'])],["In progress", st(['FORMATTING_IN_PROGRESS'])],["Corrections", my.filter(c=>c.stage==='FORMATTING_IN_PROGRESS' && (c.formatRounds||0)>0).length],["Manager review", st(['FORMATTING_MANAGER_REVIEW'])],["Passed", c2Done]];
+    waiting = my.filter(c=>['FORMATTING_ASSIGNED','FORMATTING_IN_PROGRESS'].includes(c.stage));
+    waitSection = "Assign formatters";
+  } else if(tt==='FORMATTER'){
+    c2Title = "Formatting Work"; c2Pending = st(['FORMATTING_IN_PROGRESS']); c2Done = my.length - c2Pending;
+    c2Section = "Assigned to me — formatting";
+    c7Title = "My Formatting";
+    bd = [["Assigned to me", c2Pending],["Corrections", my.filter(c=>c.stage==='FORMATTING_IN_PROGRESS' && (c.formatRounds||0)>0).length],["Manager review", st(['FORMATTING_MANAGER_REVIEW'])],["Passed", past('FORMATTING_MANAGER_REVIEW')],["Overdue", my.filter(c=>c.stage==='FORMATTING_IN_PROGRESS' && c.formatDeadline && c.formatDeadline<todayISO()).length]];
+    waiting = my.filter(c=>c.stage==='FORMATTING_IN_PROGRESS');
+    waitSection = c2Section;
+  } else {
+    const sub = clients.filter(c=>c.stage==='JOURNAL_SUBMITTED');
+    c2Title = "Journal Submissions"; c2Pending = clients.filter(c=>c.stage==='SUBMISSION').length; c2Done = clients.filter(c=>c.submissionPerson===empName).length;
+    c2Section = "Ready to submit";
+    c7Title = "Journal Status";
+    bd = [["To submit", c2Pending],["Under review", sub.filter(c=>['SUBMITTED','UNDER_REVIEW',''].includes(c.journalStatus||"")).length],["Revision", sub.filter(c=>c.journalStatus==='REVISION_REQUESTED').length],["Accepted", clients.filter(c=>['ACCEPTED','PUBLISHED'].includes(c.journalStatus)).length],["Rejected", clients.filter(c=>c.journalStatus==='REJECTED').length]];
+    waiting = clients.filter(c=>c.stage==='SUBMISSION');
+    waitSection = "Ready to submit";
   }
-  $("content").innerHTML = html;
+  const c7Done = bd.find(x=>["Passed","Accepted"].includes(x[0])) ? bd.find(x=>["Passed","Accepted"].includes(x[0]))[1] : 0;
+  const c7Pending = bd.reduce((s,[l,v])=> ["Passed","Accepted","Rejected","Overdue"].includes(l) ? s : s+v, 0);
+
+  const statusSegs = [
+    {label:"Open", value: myTasksAll.filter(t=>t.status==='OPEN').length, color:"var(--purple)"},
+    {label:"In progress", value: myTasksAll.filter(t=>t.status==='IN_PROGRESS').length, color:"var(--ok)"},
+    {label:"Awaiting approval", value: myTasksAll.filter(t=>t.status==='SUBMITTED').length, color:"var(--gold)"},
+    {label:"Needs correction", value: myTasksAll.filter(t=>t.status==='NEEDS_CORRECTION').length, color:"var(--bad)"},
+    {label:"Completed", value: acceptedTasks, color:"var(--purple-deep)"},
+  ];
+  const maxBd = Math.max(1, ...bd.map(x=>x[1]));
+  const breakdownHtml = bd.map(([label,val])=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+      <span style="flex:0 0 120px;font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase">${esc(label)}</span>
+      <div style="flex:1;height:8px;border-radius:99px;background:var(--card2);overflow:hidden"><i style="display:block;height:100%;width:${Math.round(val/maxBd*100)}%;background:${label==="Overdue"||label==="Rejected"?"var(--bad)":"var(--purple)"}"></i></div>
+      <b style="flex:0 0 24px;text-align:right">${val}</b>
+    </div>`).join("");
+  const newTasksHtml = newTasks.length ? newTasks.map(t=>`
+    <div style="background:#111;color:#fff;font-weight:700;font-size:12.5px;border-radius:8px;
+      padding:9px 12px;margin-bottom:9px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+      onclick="admOpenTaskDetail(${t.id})" title="${esc(t.title)}">${esc(t.title)}</div>`).join("")
+    : `<div class="adm-empty">No new tasks right now.</div>`;
+
+  // "Work waiting on me" — same idea as the coordinators' "Work Needs to Review" box.
+  const dlOf = c => ['FORMATTING_ASSIGNED','FORMATTING_IN_PROGRESS','FORMATTING_MANAGER_REVIEW'].includes(c.stage) ? c.formatDeadline : c.proofreadDeadline;
+  const waitRows = waiting.slice(0,6).map(c=>`
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:200px">
+        <b>${esc(c.name)}</b> <span class="badge b-dim">${esc(c.projectId||c.id)}</span>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(STAGE_LABEL[c.stage]||c.stage)}${c.journalName?` &bull; ${esc(c.journalName)}`:""}</div>
+      </div>
+      ${tt!=='SUBMISSION' && dlOf(c) ? tmAwDaysInfo(dlOf(c)) : ""}
+      <button class="btn ghost small" onclick="empGoToWorkSection(${jsq(waitSection)})">Open &rarr;</button>
+    </div>`).join("");
+  const waitBox = `<div class="adm-panel" style="margin:14px 0 0">
+    <div class="adm-panel-head"><h3>Work Waiting on Me</h3><span class="badge ${waiting.length?'b-gold':'b-purp'}">${waiting.length}</span></div>
+    <div class="adm-panel-body">
+      ${waiting.length ? waitRows + (waiting.length>6?`<div style="font-size:12px;color:var(--muted);padding-top:8px">+ ${waiting.length-6} more &mdash; open My work to see everything.</div>`:"")
+                       : `<div class="adm-empty">Nothing is waiting on you right now.</div>`}
+      <button class="btn small" style="width:100%;margin-top:12px" onclick="empGoToWorkSection(${jsq(waitSection)})">Open in My work &rarr;</button>
+    </div>
+  </div>`;
+
+  return `
+    <div class="adm-kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+      ${jmStatCard("Work Validation Request", rejectedTasks, "Rejected", acceptedTasks, "Accepted", ['var(--purple)','var(--bad)'], `empGoToWorkSection('My assigned tasks')`)}
+      ${jmStatCard(c2Title, c2Pending, "Pending", c2Done, "Completed", ['var(--gold)','var(--bad)'], `empGoToWorkSection(${jsq(c2Section)})`)}
+      ${jmStatCard("Pending Client Queries", openMyQueries.length, "Open", myQueries.length-openMyQueries.length, "Resolved", ['var(--warn)','var(--ok)'], `empGoToWorkSection('My client queries')`)}
+      ${jmStatCard("Most Prior Task", highPending, "High priority", myTasksAll.length, "All my tasks", ['var(--bad)','var(--purple)'], `empGoToWorkSection('My assigned tasks')`)}
+    </div>
+    <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
+      ${jmDonutCenterHtml("Task Status", statusSegs)}
+      <div class="adm-panel" style="margin:0">
+        <div class="adm-panel-head"><h3>${esc(c7Title)}</h3></div>
+        <div class="adm-panel-body">
+          <div style="display:flex;align-items:baseline;gap:10px;font-family:var(--disp);font-size:28px;font-weight:700;margin-bottom:4px">
+            <span>${c7Pending}</span><span style="color:var(--muted);font-size:16px">/</span><span>${c7Done}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-weight:700;margin-bottom:14px">
+            <span>PENDING</span><span>COMPLETED</span>
+          </div>
+          ${breakdownHtml}
+        </div>
+      </div>
+    </div>
+    ${waitBox}
+    <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1.6fr;align-items:stretch;margin-top:14px">
+      <div class="adm-panel" style="margin:0">
+        <div class="adm-panel-head"><h3>New Tasks</h3><span class="badge b-purp">${newTasks.length}</span></div>
+        <div class="adm-panel-body">${newTasksHtml}</div>
+      </div>
+      ${jmStatCard("Correction Assignment", rejectedTasks, "Pending", acceptedTasks, "Completed", ['var(--purple)','var(--bad)'])}
+      <div class="adm-panel" style="margin:0">
+        <div class="adm-panel-head">
+          ${calendarMonthYearPickerHtml(adminCalYear, adminCalMonth)}
+          <div style="display:flex;gap:8px">
+            <button class="btn ghost small" onclick="admCalToday()">Today</button>
+            <button class="btn small" onclick="admOpenAddEvent()">+ Add event</button>
+          </div>
+        </div>
+        <div class="adm-panel-body">${adminCalendarHtml(adminCalYear, adminCalMonth)}</div>
+      </div>
+    </div>`;
 }
 
 function myTeamMembers(roleKey){
@@ -6107,7 +6314,7 @@ function myAssignedTasksHtml(name){
   const mine = tasks.filter(t=>(t.assigned_to||"").split(",").map(s=>s.trim()).filter(Boolean).includes(name));
   const rows = mine.slice().sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
   let html = sectionHead("My assigned tasks", rows.length);
-  if(!rows.length){ html += emptyBox("No tasks assigned to you yet — your Technical Manager assigns work from the Tasks page."); return html; }
+  if(!rows.length){ html += emptyBox(`No tasks assigned to you yet — your ${(role==="employee" && empRole==="JOURNAL_EMPLOYEE")?"Journal":"Technical"} Manager assigns work from the Tasks page.`); return html; }
   rows.forEach(t=>{
     const c = admTaskClient(t);
     html += `<div class="pay-row" style="cursor:pointer" onclick="admOpenTaskDetail(${t.id})">
@@ -6116,7 +6323,7 @@ function myAssignedTasksHtml(name){
         <span class="adm-status" style="background:#111;color:#fff;border:1px solid #111">${TASK_STATUS_LABEL[t.status]||t.status}</span></div>
       <div class="pay-meta">${c?esc(c.name)+' &bull; ':''}${t.finish_date?('Due '+fmtDate(t.finish_date)):'No deadline'} &bull; Priority: ${esc(t.priority)}</div>
       ${c&&t.task_type&&WORK_TYPE_LABEL[t.task_type] ? `<div style="margin-top:6px">${workNumberBadge(c,t.task_type)}</div>` : ""}
-      ${t.status==='SUBMITTED' ? `<div class="pc-meta" style="margin-top:6px">${isSingleApproval(t) ? (proposalPendingSend(t.id) ? `Submitted to the <b>${esc(proposalPendingSend(t.id).targetLabel)}</b> on ${fmtDateTime(proposalPendingSend(t.id).at)} &mdash; waiting on approval (or rework).` : "Submitted — waiting on Technical Manager / TL approval.") : (canSendWork() ? sendsSummaryLine(t.id) || "Marked done — waiting on review." : "Marked done — waiting on Technical Manager / TL approval.")}</div>` : ""}
+      ${t.status==='SUBMITTED' ? `<div class="pc-meta" style="margin-top:6px">${isSingleApproval(t) ? (proposalPendingSend(t.id) ? `Submitted to the <b>${esc(proposalPendingSend(t.id).targetLabel)}</b> on ${fmtDateTime(proposalPendingSend(t.id).at)} &mdash; waiting on approval (or rework).` : "Submitted — waiting on Technical Manager / TL approval.") : (canSendWork() ? sendsSummaryLine(t.id) || "Marked done — waiting on review." : `Marked done — waiting on ${(role==="employee" && empRole==="JOURNAL_EMPLOYEE")?"Journal":"Technical"} Manager / TL approval.`)}</div>` : ""}
       ${(t.status==='COMPLETED' && isSingleApproval(t)) ? `<div class="pc-meta" style="margin-top:6px;color:var(--good,#1a7f4b)">&#10003; ${t.task_type==='PROPOSAL'?'Proposal':'Code implementation'} approved${proposalApprovedSend(t.id)&&proposalApprovedSend(t.id).resolvedBy?` by ${esc(proposalApprovedSend(t.id).resolvedBy)}`:""} &mdash; completed. Nothing more to send.</div>` : ""}
       ${(t.status!=='COMPLETED' && t.status!=='SUBMITTED') ? `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         ${t.status!=='IN_PROGRESS'?`<button class="btn ghost small" style="background:var(--card);color:var(--text);border:1px solid var(--line-strong)" onclick="admUpdateTaskStatus(${t.id},'IN_PROGRESS')">Start</button>`:""}
@@ -6158,6 +6365,7 @@ function myClientQueriesHtml(name){
 function empGoToWorkSection(sectionTitle){
   if(empRole==='PROGRAMMER') progTab = 'work';
   else if(empRole==='PAPER_WRITER') writerTab = 'work';
+  else if(empRole==='JOURNAL_EMPLOYEE') jeTab = 'work';
   refresh();
   setTimeout(()=>{ const el = document.getElementById(slugify(sectionTitle)); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 60);
 }
