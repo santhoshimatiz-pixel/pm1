@@ -5765,19 +5765,16 @@ function proofreadCoordinatorWorkHtml(){
   if(!inProgress.length) html += emptyBox("Nothing is being proofread right now.");
   inProgress.forEach(c=> html += pipeCard(c, jeExtBtn(c),
     jeDatesHtml(c,'proofreading') +
-    `<div class="pc-meta">Proofreaders: ${esc((c.assignedProofreaders||[]).join(", ")||"—")}</div>
-     <div onclick="event.stopPropagation()" style="margin-top:8px">
-      <textarea id="rvnote-${c.id}" placeholder="Note for the writer" rows="2" style="margin-bottom:8px"></textarea>
-      <button class="btn ghost small" onclick="proofreadRequestCorrectionNow(${jsq(c.id)})">Send correction to writer</button>
-    </div>`));
+    `<div class="pc-meta">Proofreaders: ${esc((c.assignedProofreaders||[]).join(", ")||"—")}</div>` +
+    proofreadActionHtml(c)));
   html += sectionHead("Ready to re-check", recheck.length);
   if(!recheck.length) html += emptyBox("No corrected paper is waiting on your re-check.");
-  recheck.forEach(c=> html += pipeCard(c, "", jeDatesHtml(c,'proofreading') + `<div class="pc-meta">Correction rounds: ${c.proofreadRounds||0}</div>` + reviewActionHtml('proofread_decision', c.id)));
+  recheck.forEach(c=> html += pipeCard(c, "", jeDatesHtml(c,'proofreading') + `<div class="pc-meta">Correction rounds: ${c.proofreadRounds||0}</div>` + proofreadDocsHtml(c) + proofreadActionHtml(c)));
   if(withWriter.length){
     html += sectionHead("With the writer — fixing corrections", withWriter.length);
     withWriter.forEach(c=>{
       const lastNote = (c.history||[]).find(h=>h.stage==='PROOFREAD_CORRECTION' && h.note);
-      html += pipeCard(c, "", `<div class="pc-meta">Your note: ${lastNote?esc(lastNote.note):"—"}</div>`);
+      html += pipeCard(c, "", `<div class="pc-meta">Your note: ${lastNote?esc(lastNote.note):"—"}</div>` + proofreadDocsHtml(c));
     });
   }
   const shown = new Set([...toAssign, ...inProgress, ...withWriter, ...recheck].map(c=>c.id));
@@ -6451,7 +6448,7 @@ function renderWriter(){
   proofFix.forEach(c=>{
     const lastNote = (c.history||[]).find(h=>h.stage==='PROOFREAD_CORRECTION' && h.note);
     html += pipeCard(c, `<button class="btn gold small" onclick="writerResubmitProofread(${jsq(c.id)})">Resubmit correction &#8594;</button>`,
-      `<div class="pc-meta">Proofreading correction ${lastNote?("&mdash; \""+esc(lastNote.note)+"\""):""}</div>`);
+      `<div class="pc-meta">Proofreading correction ${lastNote?("&mdash; \""+esc(lastNote.note)+"\""):""}</div>` + proofreadDocsHtml(c));
   });
 
   html += sectionHead("Assigned to me — not yet submitted", mine.length);
@@ -10779,8 +10776,8 @@ function drawerActions(c){
       || `<span style="color:var(--muted);font-size:13px">Leave blank to do it yourself.</span>`;
     h = `<div class="check-row">${boxes}</div><button class="btn gold" onclick="assignProofreadersNow(${jsq(c.id)})">Assign &#8594;</button>`;
   }
-  if(role==="employee" && empRole==="JOURNAL_EMPLOYEE" && empTeamType==="PROOFREAD_COORDINATOR" && c.stage==="PROOFREAD_RECHECK" && c.proofreadCoordinator===empName)
-    h = reviewActionHtml('proofread_decision', c.id);
+  if(role==="employee" && empRole==="JOURNAL_EMPLOYEE" && empTeamType==="PROOFREAD_COORDINATOR" && ["PROOFREADING","PROOFREAD_RECHECK"].includes(c.stage) && c.proofreadCoordinator===empName)
+    h = proofreadDocsHtml(c) + proofreadActionHtml(c, "dr");
   if(role==="employee" && empRole==="JOURNAL_EMPLOYEE" && empTeamType==="FORMAT_COORDINATOR" && c.stage==="FORMATTING_ASSIGNED" && c.formatCoordinator===empName){
     const boxes = journalNames('FORMATTER').map(n=>`<label class="check"><input type="checkbox" data-fmt="${c.id}" value="${esc(n)}"> ${esc(n)}</label>`).join("")
       || `<span style="color:var(--muted);font-size:13px">Leave blank to do it yourself.</span>`;
@@ -11352,12 +11349,57 @@ async function assignProofreadersNow(id){
   await refresh(); closeDrawer();
   toast("Proofreading assigned");
 }
-async function proofreadRequestCorrectionNow(id){
-  const note = ($("rvnote-"+id)||{}).value || "";
-  if(!note.trim()){ toast("Add a note describing what needs fixing"); return; }
-  try{ await api("proofread_request_correction",{clientId:id, note}); }catch(e){ toast(e.message); await refresh(); return; }
+async function proofreadRequestCorrectionNow(id){ return proofreadSubmit(id, false); }
+// ---------------------------------------------------------------------------
+// Proofreading Coordinator decision: "Approve & send" (to the Journal Manager for
+// formatting) or "Send correction to writer" — a correction must carry the marked-up
+// document, which is saved to the client's Documents so the writer can download it.
+// ---------------------------------------------------------------------------
+function proofreadActionHtml(c, pfx){
+  const k = (pfx||"pr") + "-" + c.id;
+  return `<div class="pr-act" onclick="event.stopPropagation()" style="margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)">
+    <div class="field" style="margin-bottom:8px"><label>Note ${c.stage==="PROOFREAD_RECHECK"?"":"for the writer "}<small style="color:var(--muted);font-weight:500">(required for a correction)</small></label>
+      <textarea id="prnote-${k}" rows="2" placeholder="What needs fixing — or an optional note when approving"></textarea></div>
+    <div class="field" style="margin-bottom:10px"><label>Attach document <small style="color:var(--muted);font-weight:500">(required for a correction &mdash; optional when approving)</small></label>
+      <input type="file" id="prfile-${k}" accept=".doc,.docx,.pdf,.odt,.rtf,.txt,.tex,.zip"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn gold small" onclick="proofreadSubmit(${jsq(c.id)}, true, ${jsq(k)})">&#10003; Approve &amp; send to Journal Manager &#8594;</button>
+      <button class="btn ghost small" onclick="proofreadSubmit(${jsq(c.id)}, false, ${jsq(k)})">&#8617; Send correction to writer</button>
+    </div>
+  </div>`;
+}
+async function proofreadSubmit(id, approve, key){
+  key = key || ("pr-" + id);
+  const note = (($("prnote-"+key)||$("rvnote-"+id)||{}).value || "").trim();
+  const fileEl = $("prfile-"+key);
+  const file = fileEl && fileEl.files ? fileEl.files[0] : null;
+  if(!approve){
+    if(!note){ toast("Add a note describing what the writer needs to fix"); return; }
+    if(!file){ toast("Attach the corrected document before sending it to the writer"); if(fileEl) fileEl.focus(); return; }
+  }
+  if(file && file.size > 6_000_000){ toast("That file is too large (max ~6MB)"); return; }
+  if(approve && !confirm("Approve the proofreading and send this paper to the Journal Manager for formatting?")) return;
+  let payload = {clientId:id, approve, note, empName};
+  if(file){
+    try{ payload.fileData = await readFileAsBase64(file); }catch(e){ toast("Could not read that file"); return; }
+    payload.fileName = file.name; payload.fileType = file.type;
+  }
+  try{ await api("proofread_decision", payload); }catch(e){ toast(e.message); await refresh(); return; }
   await refresh(); closeDrawer();
-  toast("Sent back to the writer");
+  toast(approve ? "Approved — sent to the Journal Manager for formatting" : "Correction sent to the writer with the document");
+}
+// Documents the Proofreading Coordinator attached for this client (newest first).
+function proofreadDocsList(c){
+  return clientDocuments.filter(d=>d.client_id===c.id && /^Proofread/.test(d.file_name||""))
+    .sort((a,b)=> new Date(b.created_at||0) - new Date(a.created_at||0));
+}
+function proofreadDocsHtml(c){
+  const docs = proofreadDocsList(c);
+  if(!docs.length) return "";
+  return `<div onclick="event.stopPropagation()" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <span class="pc-meta" style="margin:0">Proofreading documents:</span>
+    ${docs.slice(0,4).map((d,i)=>`<button class="btn ghost small" title="${esc(d.file_name)} — ${fmtDateTime(d.created_at)}" onclick="admDownloadDocument(${d.id})">&#128206; ${i===0?"Latest: ":""}${esc((d.file_name||"").replace(/^Proofread(ing correction| \(approved\)) — /,""))}</button>`).join("")}
+  </div>`;
 }
 async function assignFormatCoordinatorNow(id){
   const name = ($("fc-"+id)||{}).value || "";

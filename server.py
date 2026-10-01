@@ -2559,6 +2559,25 @@ def require_stage(c, stage):
                        "'. It may already be processed - the page refreshes automatically.")
 
 
+def _save_proofread_doc(con, c, d, actor, label, required):
+    """Store the document the Proofreading Coordinator attaches (corrections marked up
+    for the writer, or the approved proofread copy) in the client's Documents, so the
+    writer / Journal Manager can download it. Returns the stored file name ('' if none)."""
+    file_data = d.get("fileData") or ""
+    if not file_data:
+        if required:
+            raise ApiError("Attach the corrected document before sending it to the writer.")
+        return ""
+    original = sanitize_upload_filename(d.get("fileName")) or "document"
+    file_data = check_base64_payload(file_data, MAX_UPLOAD_BYTES, "document")
+    file_type = sanitize_upload_filetype(d.get("fileType"))
+    round_no = (c["proofread_rounds"] or 0) + (1 if label.startswith("Proofreading correction") else 0)
+    name = sanitize_upload_filename(f"{label} — Round {round_no} — {original}") or original
+    con.execute("""INSERT INTO client_documents (client_id, file_name, file_type, file_data, uploaded_by)
+                   VALUES (?,?,?,?,?)""", (c["id"], name, file_type, file_data, actor))
+    return name
+
+
 def _journal_assign_dates(d):
     """Optional start date / deadline sent with a Journal Team assignment (YYYY-MM-DD).
     Both are optional so older callers (the client drawer) keep working unchanged."""
@@ -7485,9 +7504,10 @@ def _handle_action_core(action, d, ip=""):
             note = (d.get("note") or "").strip()
             if not note:
                 raise ApiError("Add a note describing what the writer needs to fix.")
+            actor = c["proofread_coordinator"] or "Proofreading Coordinator"
+            fname = _save_proofread_doc(con, c, d, actor, "Proofreading correction", required=True)
             con.execute("UPDATE clients SET proofread_rounds=proofread_rounds+1 WHERE id=?", (c["id"],))
-            move_stage(con, c["id"], "PROOFREAD_CORRECTION",
-                       c["proofread_coordinator"] or "Proofreading Coordinator", note)
+            move_stage(con, c["id"], "PROOFREAD_CORRECTION", actor, f"{note} (Attached: {fname})")
             con.commit()
             return {"ok": True}
 
@@ -7500,18 +7520,23 @@ def _handle_action_core(action, d, ip=""):
             return {"ok": True}
 
         if action == "proofread_decision":
+            # The Proofreading Coordinator can decide while proofreading is in progress
+            # (first pass) or after the writer resubmitted a correction (re-check).
             c = get_client(con, d.get("clientId") or "")
-            require_stage(c, "PROOFREAD_RECHECK")
+            if c["stage"] not in ("PROOFREADING", "PROOFREAD_RECHECK"):
+                require_stage(c, "PROOFREAD_RECHECK")
             note = (d.get("note") or "").strip()
+            actor = c["proofread_coordinator"] or "Proofreading Coordinator"
             if bool(d.get("approve")):
-                move_stage(con, c["id"], "JOURNAL_MANAGER_FORMATTING",
-                           c["proofread_coordinator"] or "Proofreading Coordinator", note)
+                fname = _save_proofread_doc(con, c, d, actor, "Proofread (approved)", required=False)
+                move_stage(con, c["id"], "JOURNAL_MANAGER_FORMATTING", actor,
+                           (note + (f" (Attached: {fname})" if fname else "")).strip())
             else:
                 if not note:
                     raise ApiError("Add a correction note for the writer before sending it back.")
+                fname = _save_proofread_doc(con, c, d, actor, "Proofreading correction", required=True)
                 con.execute("UPDATE clients SET proofread_rounds=proofread_rounds+1 WHERE id=?", (c["id"],))
-                move_stage(con, c["id"], "PROOFREAD_CORRECTION",
-                           c["proofread_coordinator"] or "Proofreading Coordinator", note)
+                move_stage(con, c["id"], "PROOFREAD_CORRECTION", actor, f"{note} (Attached: {fname})")
             con.commit()
             return {"ok": True}
 
