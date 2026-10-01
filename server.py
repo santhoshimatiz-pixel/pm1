@@ -2152,6 +2152,12 @@ def init_db():
         #       My assigned tasks: Coordinator / Validation / Technical TL / Manager). -----
         "writing_completed_at": "TEXT DEFAULT ''",
         "writing_completed_by": "TEXT DEFAULT ''",
+        # ----- Journal Team: start date + deadline captured on the Journal Manager's
+        #       Assign Work tab when a proofreading / formatting coordinator is assigned. -----
+        "proofread_start_date": "TEXT DEFAULT ''",
+        "proofread_deadline": "TEXT DEFAULT ''",
+        "format_start_date": "TEXT DEFAULT ''",
+        "format_deadline": "TEXT DEFAULT ''",
     }
     for col, decl in extra_cols.items():
         con.execute(f"ALTER TABLE clients ADD COLUMN IF NOT EXISTS {col} {decl}")
@@ -2551,6 +2557,19 @@ def require_stage(c, stage):
     if c["stage"] != stage:
         raise ApiError("This client is now at '" + STAGE_LABELS.get(c["stage"], c["stage"]) +
                        "'. It may already be processed - the page refreshes automatically.")
+
+
+def _journal_assign_dates(d):
+    """Optional start date / deadline sent with a Journal Team assignment (YYYY-MM-DD).
+    Both are optional so older callers (the client drawer) keep working unchanged."""
+    start = (d.get("startDate") or "").strip()[:10]
+    deadline = (d.get("deadline") or "").strip()[:10]
+    for v in (start, deadline):
+        if v and not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ApiError("Dates must be in YYYY-MM-DD format.")
+    if start and deadline and start > deadline:
+        raise ApiError("The start date can't be after the deadline.")
+    return start, deadline
 
 
 def get_client(con, cid):
@@ -3913,6 +3932,10 @@ def all_clients(con):
             "formatCoordinator": r["format_coordinator"] or "",
             "assignedFormatters": names(r["assigned_formatters"]),
             "formatRounds": r["format_rounds"],
+            "proofreadStartDate": r["proofread_start_date"] or "",
+            "proofreadDeadline": r["proofread_deadline"] or "",
+            "formatStartDate": r["format_start_date"] or "",
+            "formatDeadline": r["format_deadline"] or "",
             "submissionPerson": r["submission_person"] or "",
             "journalStatus": r["journal_status"] or "",
             "serviceKey": r["service_key"] or DEFAULT_SERVICE,
@@ -6851,7 +6874,10 @@ def _handle_action_core(action, d, ip=""):
             "IMPLEMENTATION_ASSIGNED": "implementation_deadline",
             "PAPERWRITER_ASSIGNED": "writing_deadline",
             "WRITER_FIXING": "writing_deadline",
-            "PROOFREAD_COORD_ASSIGNED": "proposal_deadline",  # no dedicated proofreading deadline field yet
+            "PROOFREAD_COORD_ASSIGNED": "proofread_deadline",
+            "PROOFREADING": "proofread_deadline",
+            "FORMATTING_ASSIGNED": "format_deadline",
+            "FORMATTING_IN_PROGRESS": "format_deadline",
         }
 
         if action == "request_deadline_extension":
@@ -7428,7 +7454,9 @@ def _handle_action_core(action, d, ip=""):
             name = (d.get("name") or "").strip()
             if name not in active_names(con, "JOURNAL_EMPLOYEE", "PROOFREAD_COORDINATOR"):
                 raise ApiError("Unknown or inactive proofreading coordinator.")
-            con.execute("UPDATE clients SET proofread_coordinator=? WHERE id=?", (name, c["id"]))
+            p_start, p_dl = _journal_assign_dates(d)
+            con.execute("UPDATE clients SET proofread_coordinator=?, proofread_start_date=?, proofread_deadline=? WHERE id=?",
+                        (name, p_start, p_dl, c["id"]))
             move_stage(con, c["id"], "PROOFREAD_COORD_ASSIGNED", "Journal Manager")
             con.commit()
             return {"ok": True}
@@ -7493,7 +7521,9 @@ def _handle_action_core(action, d, ip=""):
             name = (d.get("name") or "").strip()
             if name not in active_names(con, "JOURNAL_EMPLOYEE", "FORMAT_COORDINATOR"):
                 raise ApiError("Unknown or inactive formatting coordinator.")
-            con.execute("UPDATE clients SET format_coordinator=? WHERE id=?", (name, c["id"]))
+            f_start, f_dl = _journal_assign_dates(d)
+            con.execute("UPDATE clients SET format_coordinator=?, format_start_date=?, format_deadline=? WHERE id=?",
+                        (name, f_start, f_dl, c["id"]))
             move_stage(con, c["id"], "FORMATTING_ASSIGNED", "Journal Manager")
             con.commit()
             return {"ok": True}

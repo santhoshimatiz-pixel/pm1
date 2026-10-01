@@ -5159,36 +5159,327 @@ function journalWorkPanel(){
   // what makes "assigned work" actually show up somewhere validatable, same as the
   // Technical Manager's "Work Updates" queue does for the Technical team.
   let html = jmWorkUpdatesHtml();
-  html += sectionHead("Client accepted — assign a proofreading coordinator", toAssignProof.length);
-  if(!toAssignProof.length) html += emptyBox("Nothing waiting here right now.");
-  toAssignProof.forEach(c=>{
-    const opts = journalNames('PROOFREAD_COORDINATOR').map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("")
-      || `<option value="">No proofreading coordinators yet</option>`;
-    html += pipeCard(c, `<button class="btn gold small" onclick="assignProofreadCoordinatorNow(${jsq(c.id)})">Assign &#8594;</button>`,
-      `<div onclick="event.stopPropagation()"><select id="pc-${c.id}">${opts}</select>
-       ${c.journalName?`<div class="pc-meta">Target journal: ${esc(c.journalName)}</div>`:""}</div>`);
-  });
-
-  html += sectionHead("Proofreading approved — assign a formatting coordinator", toAssignFormat.length);
-  if(!toAssignFormat.length) html += emptyBox("Nothing waiting here right now.");
-  toAssignFormat.forEach(c=>{
-    const opts = journalNames('FORMAT_COORDINATOR').map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("")
-      || `<option value="">No formatting coordinators yet</option>`;
-    html += pipeCard(c, `<button class="btn gold small" onclick="assignFormatCoordinatorNow(${jsq(c.id)})">Assign &#8594;</button>`,
-      `<div onclick="event.stopPropagation()"><select id="fc-${c.id}">${opts}</select></div>`);
-  });
-
-  html += sectionHead("Formatting complete — final review before submission", formatReview.length);
-  if(!formatReview.length) html += emptyBox("Nothing waiting on your formatting review right now.");
-  formatReview.forEach(c=> html += pipeCard(c, "",
-    `<div class="pc-meta" style="margin-bottom:4px">Formatting coordinator: ${esc(c.formatCoordinator||"—")} &bull; Correction rounds: ${c.formatRounds||0}</div>`
-    + reviewActionHtml('format_manager_decision', c.id)));
-
+  const waiting = toAssignProof.length + toAssignFormat.length + formatReview.length;
+  if(waiting) html += `<div class="adm-panel" style="margin-top:14px"><div class="adm-panel-body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="flex:1;font-size:13px">&#128203; <b>${waiting}</b> paper${waiting===1?"":"s"} waiting for a coordinator or your formatting review.</span>
+      <button class="btn gold small" onclick="jmTasksTab='assign';refresh()">Open Assign Work &#8594;</button></div></div>`;
   html += searchBarHtml();
   const rest = inJournal.filter(matchesSearch);
   html += sectionHead("All journal-pipeline clients", rest.length);
   rest.forEach(c=> html += pipeCard(c,"", c.journalStatus?`<div class="pc-meta">Journal status: ${esc(JOURNAL_STATUS_LABEL[c.journalStatus]||c.journalStatus)}</div>`:""));
   return html;
+}
+
+// ---------------------------------------------------------------------------
+// Journal Manager / TL — Assign Work. Same design as the Technical Manager's
+// Assign Work tab: 3 step boxes (Proofreading › Formatting › Submission) that
+// filter the page, "All work" chip, a search bar, compact client rows that open
+// into Assign to / Start date / Deadline, then "your final review", "already
+// assigned — in progress" and "with the journal" sections underneath.
+// Separate state + element ids from the Technical version so neither interferes.
+// ---------------------------------------------------------------------------
+const JM_AW_LABEL = {PROOFREADING:"Proofreading", FORMATTING:"Formatting", SUBMISSION:"Submission"};
+const JM_AW_STEPS = ["PROOFREADING","FORMATTING","SUBMISSION"];
+let jmAwOpen = new Set();
+let jmAwSearch = "";
+let jmAwType = "";
+function jmAwStepOf(stage){
+  if(["JOURNAL_MANAGER_REVIEW","PROOFREAD_COORD_ASSIGNED","PROOFREADING","PROOFREAD_CORRECTION","PROOFREAD_RECHECK"].includes(stage)) return "PROOFREADING";
+  if(["JOURNAL_MANAGER_FORMATTING","FORMATTING_ASSIGNED","FORMATTING_IN_PROGRESS","FORMATTING_MANAGER_REVIEW"].includes(stage)) return "FORMATTING";
+  if(["SUBMISSION","JOURNAL_SUBMITTED"].includes(stage)) return "SUBMISSION";
+  return "";
+}
+function jmAwStepperHtml(type){
+  const cur = JM_AW_STEPS.indexOf(type);
+  if(cur<0) return "";
+  return `<div class="wk-steps">${JM_AW_STEPS.map((s,i)=>{
+    const st = i<cur ? "done" : (i===cur ? "cur" : "next");
+    return `<span class="wk-step ${st}"><span class="wk-dot">${st==="done"?"&#10003;":(i+1)}</span>${JM_AW_LABEL[s]}</span>`;
+  }).join(`<span class="wk-sep">&#8250;</span>`)}</div>`;
+}
+function jmAwHay(c, extra){
+  return [c.name, c.phone, c.id, c.displayId, c.projectId, c.email, c.institution, c.topic, c.journalName,
+          c.proofreadCoordinator, (c.assignedProofreaders||[]).join(" "), c.formatCoordinator,
+          (c.assignedFormatters||[]).join(" "), c.submissionPerson, extra]
+    .filter(Boolean).join(" ").toLowerCase();
+}
+function jmAwBoxStats(type){
+  const by = st => clients.filter(c=>st.includes(c.stage)).length;
+  const taskWait = tasks.filter(t=>t.status==="SUBMITTED" && t.task_type===type).length;
+  if(type==="PROOFREADING") return [
+    [by(["JOURNAL_MANAGER_REVIEW"]),"To assign","hot"],
+    [by(["PROOFREAD_COORD_ASSIGNED","PROOFREADING"]),"In progress",""],
+    [by(["PROOFREAD_CORRECTION"]),"With writer","warn"],
+    [by(["PROOFREAD_RECHECK"]),"Re-check","warn"],
+    [taskWait,"Waiting approval","warn"]];
+  if(type==="FORMATTING") return [
+    [by(["JOURNAL_MANAGER_FORMATTING"]),"To assign","hot"],
+    [by(["FORMATTING_ASSIGNED","FORMATTING_IN_PROGRESS"]),"In progress",""],
+    [clients.filter(c=>c.stage==="FORMATTING_IN_PROGRESS" && (c.formatRounds||0)>0).length,"Corrections","warn"],
+    [by(["FORMATTING_MANAGER_REVIEW"]),"Your review","hot"],
+    [taskWait,"Waiting approval","warn"]];
+  const sub = clients.filter(c=>c.stage==="JOURNAL_SUBMITTED");
+  return [
+    [by(["SUBMISSION"]),"To submit","hot"],
+    [sub.filter(c=>["SUBMITTED","UNDER_REVIEW",""].includes(c.journalStatus||"")).length,"With journal",""],
+    [sub.filter(c=>c.journalStatus==="REVISION_REQUESTED").length,"Revision","warn"],
+    [clients.filter(c=>c.journalStatus==="PUBLISHED" || c.journalStatus==="ACCEPTED").length,"Accepted",""],
+    [taskWait,"Waiting approval","warn"]];
+}
+function jmAwBoxHint(){
+  return jmAwType ? `Showing only <b>${esc(JM_AW_LABEL[jmAwType])}</b> work &mdash; click the box again (or &ldquo;All work&rdquo;) to see everything.` : "Click a box to open just that work.";
+}
+function jmAwBoxesHtml(){
+  const icons = {PROOFREADING:"&#128269;", FORMATTING:"&#128208;", SUBMISSION:"&#128228;"};
+  const boxes = JM_AW_STEPS.map((type,i)=>{
+    const stats = jmAwBoxStats(type);
+    const toAssign = stats[0][0];
+    const stat = ([n,l,cls])=>`<div class="aw-box-stat ${n&&cls?cls:""}"><b>${n}</b><span>${l}</span></div>`;
+    return `<button type="button" class="aw-box ${jmAwType===type?'active':''}" data-box="${type}" onclick="jmAwPickType('${type}')">
+      <div class="aw-box-top"><span class="aw-box-ico">${icons[type]}</span>
+        <div><div class="aw-box-step">Step ${i+1}</div><div class="aw-box-title">${JM_AW_LABEL[type]}</div></div>
+        ${toAssign?`<span class="badge b-bad" style="margin-left:auto">${toAssign} ${type==="SUBMISSION"?"to submit":"to assign"}</span>`:""}</div>
+      <div class="aw-box-stats">${stats.map(stat).join("")}</div>
+    </button>`;
+  }).join("");
+  return `<div class="aw-boxes-wrap">
+    <div class="aw-boxes">${boxes}</div>
+    <div class="aw-boxes-foot"><button type="button" id="jaw-box-all" class="aw-chip ${!jmAwType?'active':''}" onclick="if(jmAwType) jmAwPickType(jmAwType)">All work</button>
+      <span id="jaw-box-current" class="aw-search-info">${jmAwBoxHint()}</span></div>
+  </div>`;
+}
+function jmAwPickType(type){
+  jmAwType = (jmAwType===type) ? "" : type;
+  document.querySelectorAll(".aw-box").forEach(b=>b.classList.toggle("active", b.getAttribute("data-box")===jmAwType));
+  const all = $("jaw-box-all"); if(all) all.classList.toggle("active", !jmAwType);
+  const lbl = $("jaw-box-current"); if(lbl) lbl.innerHTML = jmAwBoxHint();
+  jmAwApplySearch();
+}
+function jmAwToggle(id){
+  const key = String(id);
+  const row = document.querySelector(`[data-jaw-row="${CSS.escape(key)}"]`);
+  if(jmAwOpen.has(key)) jmAwOpen.delete(key); else jmAwOpen.add(key);
+  if(row) row.classList.toggle("aw-open", jmAwOpen.has(key));
+}
+function jmAwApplySearch(val){
+  if(val !== undefined) jmAwSearch = val;
+  const q = (jmAwSearch||"").trim().toLowerCase();
+  const root = $("content"); if(!root) return;
+  let total = 0, shown = 0;
+  root.querySelectorAll("[data-aw-search]").forEach(el=>{
+    total++;
+    const typeOk = !jmAwType || el.getAttribute("data-aw-type")===jmAwType;
+    const hit = typeOk && (!q || el.getAttribute("data-aw-search").includes(q));
+    el.style.display = hit ? "" : "none";
+    if(hit) shown++;
+  });
+  root.querySelectorAll("[data-aw-section]").forEach(sec=>{
+    const items = [...sec.querySelectorAll("[data-aw-search]")];
+    const vis = items.filter(x=>x.style.display!=="none").length;
+    const filtering = !!(q || jmAwType);
+    const empty = sec.querySelector(".aw-nomatch");
+    if(empty) empty.style.display = (filtering && items.length && !vis) ? "" : "none";
+    const cnt = sec.querySelector("[data-aw-count]");
+    if(cnt && items.length) cnt.textContent = filtering ? `${vis} / ${items.length}` : String(items.length);
+  });
+  const info = $("jaw-search-info");
+  if(info) info.textContent = (q || jmAwType) ? `Showing ${shown} of ${total}` : "";
+  const clr = $("jaw-search-clear");
+  if(clr) clr.style.display = q ? "" : "none";
+}
+function jmAwClearSearch(){
+  const el = $("jaw-search-input"); if(el){ el.value = ""; el.focus(); }
+  jmAwApplySearch("");
+}
+function jmAwPickerHtml(c, teamType, placeholder, emptyMsg){
+  const names = journalNames(teamType);
+  if(!names.length) return `<span style="color:var(--muted);font-size:13px">${emptyMsg}</span>`;
+  const opts = names.map(n=>`<label class="ms-select-opt"><input type="radio" name="jaw-pick-${esc(String(c.id))}" data-jaw-pick="${esc(String(c.id))}" value="${esc(n)}" onchange="msUpdateDisplay(this);msCloseAllPops()"> ${esc(n)}</label>`).join("");
+  return `<div class="ms-select">
+    <div class="ms-select-trigger" onclick="msToggleDropdown(event,this)">
+      <span class="ms-select-display" data-placeholder="${placeholder}">${placeholder}</span>
+      <svg class="ms-select-caret" viewBox="0 0 20 20" fill="none"><path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="ms-select-pop" onclick="event.stopPropagation()">${opts}</div>
+  </div>`;
+}
+async function jmAwAssignNow(id, type){
+  const pick = document.querySelector(`input[data-jaw-pick="${CSS.escape(String(id))}"]:checked`);
+  const name = pick ? pick.value : "";
+  const sd = ($("jaw-sd-"+id)||{}).value || "";
+  const dl = ($("jaw-dl-"+id)||{}).value || "";
+  const who = type==="PROOFREADING" ? "proofreading coordinator" : "formatting coordinator";
+  if(!name || !dl){ toast(`Pick a ${who} and a deadline`); return; }
+  if(sd && dl && sd > dl){ toast("Start date can't be after the deadline"); return; }
+  const action = type==="PROOFREADING" ? "assign_proofread_coordinator" : "assign_format_coordinator";
+  try{ await api(action, {clientId:id, name, startDate:sd, deadline:dl}); }
+  catch(e){ toast(e.message); await refresh(); return; }
+  jmAwOpen.delete(String(id));
+  await refresh();
+  toast(`${JM_AW_LABEL[type]} assigned to ${name}`);
+}
+function jmAwMetaHtml(c){
+  return `${c.journalName?`<span class="aw-meta">Journal: <b>${esc(c.journalName)}</b></span>`:""}
+    ${c.deadlineDate?`<span class="aw-meta">Client deadline: <b>${fmtDate(c.deadlineDate)}</b></span>`:""}`;
+}
+function jmAwIdBadges(c){
+  return `<b class="aw-name">${esc(c.name)}</b> <span class="badge b-dim" title="Project ID">${esc(c.projectId||c.id)}</span>
+    ${typeof workNumberBadge==="function"?workNumberBadge(c,"PAPER_WRITING"):""}`;
+}
+// Who / start / deadline / note for a client that's already with the journal team.
+function jmAwAssignmentInfo(c){
+  const type = jmAwStepOf(c.stage);
+  const join = a => (a||[]).filter(Boolean);
+  if(type==="PROOFREADING"){
+    const team = join(c.assignedProofreaders).filter(n=>n!==c.proofreadCoordinator);
+    return {type, coord:c.proofreadCoordinator, team, start:c.proofreadStartDate, deadline:c.proofreadDeadline,
+            rounds:c.proofreadRounds||0};
+  }
+  if(type==="FORMATTING"){
+    const team = join(c.assignedFormatters).filter(n=>n!==c.formatCoordinator);
+    return {type, coord:c.formatCoordinator, team, start:c.formatStartDate, deadline:c.formatDeadline,
+            rounds:c.formatRounds||0};
+  }
+  return {type, coord:c.submissionPerson||"", team:[], start:"", deadline:"", rounds:0};
+}
+const JM_AW_IP_NOTE = {
+  PROOFREAD_COORD_ASSIGNED:"Coordinator picking the proofreaders",
+  PROOFREADING:"Proofreading in progress",
+  PROOFREAD_CORRECTION:"Sent back to the writer for corrections",
+  PROOFREAD_RECHECK:"Writer fixed it — coordinator re-checking",
+  FORMATTING_ASSIGNED:"Coordinator picking the formatters",
+  FORMATTING_IN_PROGRESS:"Formatting in progress",
+  SUBMISSION:"Ready — Submission team to submit to the journal",
+};
+function jmAssignWorkHtml(){
+  // ---- 1. New work needing assignment
+  const newRows = clients.filter(c=>c.stage==="JOURNAL_MANAGER_REVIEW" || c.stage==="JOURNAL_MANAGER_FORMATTING");
+  const newHtml = newRows.map(c=>{
+    const type = c.stage==="JOURNAL_MANAGER_REVIEW" ? "PROOFREADING" : "FORMATTING";
+    const id = String(c.id);
+    const open = jmAwOpen.has(id);
+    const note = type==="PROOFREADING" ? "Client approved the paper — needs a proofreading coordinator"
+                                       : "Proofreading approved — needs a formatting coordinator";
+    const picker = type==="PROOFREADING"
+      ? jmAwPickerHtml(c,"PROOFREAD_COORDINATOR","Select proofreading coordinator…","No proofreading coordinators yet — add one in the Team tab.")
+      : jmAwPickerHtml(c,"FORMAT_COORDINATOR","Select formatting coordinator…","No formatting coordinators yet — add one in the Team tab.");
+    const planSd = (type==="PROOFREADING"?c.proofreadStartDate:c.formatStartDate)||"";
+    const planDl = (type==="PROOFREADING"?c.proofreadDeadline:c.formatDeadline)||"";
+    const sd = planSd && planSd >= todayISO() ? planSd : todayISO();
+    const dl = planDl && planDl >= todayISO() ? planDl : "";
+    return `<div class="aw-row ${open?'aw-open':''}" data-jaw-row="${esc(id)}" data-aw-type="${type}" data-aw-search="${esc(jmAwHay(c, JM_AW_LABEL[type]))}">
+      <div class="aw-head" onclick="jmAwToggle(${jsq(c.id)})">
+        <div class="aw-head-main">
+          ${jmAwIdBadges(c)}
+          <span class="badge b-purp">${JM_AW_LABEL[type]}</span>
+          <small class="aw-note">${note}</small>
+        </div>
+        <div class="aw-head-side">
+          ${jmAwMetaHtml(c)}
+          <span class="aw-toggle"><span class="aw-toggle-txt-closed">Assign</span><span class="aw-toggle-txt-open">Close</span> <span class="aw-chev">&#9662;</span></span>
+        </div>
+      </div>
+      <div class="aw-body" onclick="event.stopPropagation()">
+        ${jmAwStepperHtml(type)}
+        <div class="aw-grid">
+          ${tmAwField("Assign to", picker)}
+          ${tmAwField("Start date", `<input type="date" class="mini-date" id="jaw-sd-${esc(id)}" value="${sd}">`)}
+          ${tmAwField("Deadline", `<input type="date" class="mini-date" min="${todayISO()}" id="jaw-dl-${esc(id)}" value="${dl}">`)}
+        </div>
+        <div class="aw-actions">
+          <button class="btn ${type==="PROOFREADING"?"":"gold "}small" onclick="jmAwAssignNow(${jsq(c.id)},'${type}')">Assign &amp; set deadline &#8594;</button>
+          <button class="btn ghost small" onclick="admOpenProject(${jsq(c.id)})">Open project</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // ---- 2. Formatting finished — Journal Manager's final review before submission
+  const reviewRows = clients.filter(c=>c.stage==="FORMATTING_MANAGER_REVIEW");
+  const reviewHtml = reviewRows.length ? `<div class="adm-panel" style="margin-top:16px" data-aw-section>
+    <div class="adm-panel-head"><h3>Formatting done — your final review</h3><span class="badge b-bad" data-aw-count>${reviewRows.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Approve to send it to the Submission team, or send it back to the formatting team with a note.</p>
+      ${reviewRows.map(c=>`<div class="aw-ip" style="cursor:default" data-aw-type="FORMATTING" data-aw-search="${esc(jmAwHay(c,"Formatting review"))}">
+        <div class="aw-ip-top">${jmAwIdBadges(c)} <span class="badge b-purp">Formatting</span>
+          <small class="aw-note">Coordinator: ${esc(c.formatCoordinator||"—")} &bull; Correction rounds: ${c.formatRounds||0}</small>
+          <span class="aw-ra-btn"><button class="btn ghost small" onclick="admOpenProject(${jsq(c.id)})">Open project</button></span></div>
+        ${jmAwStepperHtml("FORMATTING")}
+        ${reviewActionHtml('format_manager_decision', c.id)}
+      </div>`).join("")}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div></div>` : "";
+
+  // ---- 3. Already assigned — in progress
+  const ipStages = Object.keys(JM_AW_IP_NOTE);
+  const ipRows = clients.filter(c=>ipStages.includes(c.stage))
+    .sort((a,b)=>ipStages.indexOf(a.stage)-ipStages.indexOf(b.stage));
+  const ipHtml = ipRows.length ? `<div class="adm-panel" style="margin-top:16px" data-aw-section>
+    <div class="adm-panel-head"><h3>Already assigned — in progress</h3><span class="badge b-purp" data-aw-count>${ipRows.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">These aren't stuck — the coordinator and their team are working on them. Click a client to open the project.</p>
+      ${ipRows.map(c=>{
+        const a = jmAwAssignmentInfo(c);
+        const who = a.coord ? `${esc(a.coord)}${a.type!=="SUBMISSION"?' <small style="color:var(--muted)">(coordinator)</small>':""}${a.team.length?` <small style="color:var(--muted)">&middot; team: ${a.team.map(esc).join(", ")}</small>`:""}`
+                            : `<span style="color:var(--faint)">${a.type==="SUBMISSION"?"Submission team":"Not recorded"}</span>`;
+        return `<div class="aw-ip" data-aw-type="${a.type}" data-aw-search="${esc(jmAwHay(c, JM_AW_LABEL[a.type]))}" onclick="admOpenProject(${jsq(c.id)})">
+          <div class="aw-ip-top">${jmAwIdBadges(c)} <span class="badge b-purp">${JM_AW_LABEL[a.type]}</span>
+            <small class="aw-note">${JM_AW_IP_NOTE[c.stage]}</small>
+            ${a.rounds?`<span class="badge b-wait">${a.rounds} correction round${a.rounds===1?"":"s"}</span>`:""}</div>
+          ${jmAwStepperHtml(a.type)}
+          <div class="aw-ip-grid">
+            <div><span class="aw-field-lbl">Assigned to</span><div>${who}</div></div>
+            <div><span class="aw-field-lbl">Start date</span><div>${a.start?fmtDate(a.start):"—"}</div></div>
+            <div><span class="aw-field-lbl">Deadline</span><div>${a.deadline?fmtDate(a.deadline):"—"}</div></div>
+            <div><span class="aw-field-lbl">Status</span><div>${tmAwDaysInfo(a.deadline)||"—"}</div></div>
+          </div>
+        </div>`;
+      }).join("")}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div></div>` : "";
+
+  // ---- 4. With the journal (submitted, waiting on the journal's decision)
+  const jRows = clients.filter(c=>c.stage==="JOURNAL_SUBMITTED");
+  const jHtml = jRows.length ? `<div class="adm-panel" style="margin-top:16px" data-aw-section>
+    <div class="adm-panel-head"><h3>Submitted — with the journal</h3><span class="badge b-purp" data-aw-count>${jRows.length}</span></div>
+    <div class="adm-panel-body">
+      ${jRows.map(c=>{
+        const st = c.journalStatus||"SUBMITTED";
+        const cls = st==="REVISION_REQUESTED"?"b-wait":(st==="REJECTED"?"b-bad":"b-paid");
+        return `<div class="aw-ip" data-aw-type="SUBMISSION" data-aw-search="${esc(jmAwHay(c,"Submission journal "+st))}" onclick="admOpenProject(${jsq(c.id)})">
+          <div class="aw-ip-top">${jmAwIdBadges(c)} <span class="badge b-purp">Submission</span>
+            <span class="badge ${cls}">${esc(JOURNAL_STATUS_LABEL[st]||st)}</span></div>
+          <div class="aw-ip-grid">
+            <div><span class="aw-field-lbl">Target journal</span><div>${esc(c.journalName||"—")}</div></div>
+            <div><span class="aw-field-lbl">Submitted by</span><div>${esc(c.submissionPerson||"—")}</div></div>
+            <div><span class="aw-field-lbl">Client deadline</span><div>${c.deadlineDate?fmtDate(c.deadlineDate):"—"}</div></div>
+            <div><span class="aw-field-lbl">Journal status</span><div>${esc(JOURNAL_STATUS_LABEL[st]||st)}</div></div>
+          </div>
+        </div>`;
+      }).join("")}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div></div>` : "";
+
+  const searchBar = `<div class="adm-panel aw-searchbar">
+      <div class="adm-search" style="flex:1">
+        <span>&#128269;</span>
+        <input id="jaw-search-input" placeholder="Search client name, phone, client ID, project ID, journal or assignee…" value="${esc(jmAwSearch)}" oninput="jmAwApplySearch(this.value)" autocomplete="off">
+        <button id="jaw-search-clear" class="aw-clear" style="display:none" onclick="jmAwClearSearch()" title="Clear search">&#10005;</button>
+      </div>
+      <span id="jaw-search-info" class="aw-search-info"></span>
+    </div>`;
+
+  setTimeout(()=>jmAwApplySearch(), 0);
+
+  return `${jmAwBoxesHtml()}${searchBar}
+  <div class="adm-panel" data-aw-section>
+    <div class="adm-panel-head"><h3>New work needing assignment</h3><span class="badge ${newRows.length?'b-bad':'b-purp'}" data-aw-count>${newRows.length}</span></div>
+    <div class="adm-panel-body">
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">These papers were just handed to the Journal Team (by the Technical team, or after proofreading was approved). <b>Click a client</b> to choose the coordinator, the start date and the deadline, then Assign &mdash; it moves forward immediately and disappears from this list.</p>
+      ${newRows.length ? newHtml : `<div class="adm-empty">Nothing waiting to be assigned right now.</div>`}
+      <div class="adm-empty aw-nomatch" style="display:none">Nothing here for this filter.</div>
+    </div>
+  </div>${reviewHtml}${ipHtml}${jHtml}`;
 }
 
 /* ---------- Journal Manager overview dashboard (stat cards + work-to-assign list
@@ -5275,7 +5566,7 @@ function journalDashboardPanel(){
   // ----- Row of top-line stat cards, same shape as the mock: Publications / Pending Actions / Journals
   const statCards = `<div class="adm-kpi-grid" style="grid-template-columns:repeat(3,1fr)">
     ${jmStatCard("Publications", underPublication, "Under publication", publishedCt, "Published", ['var(--ok)','var(--purple-deep)'], "jmOpenPublicationsBreakdown()")}
-    ${jmStatCard("Pending Actions", toAssign.length, "Awaiting your assignment", inProgressCt, "Currently in progress", ['var(--warn)','var(--ok)'], "jmPage='tasks';jmTasksTab='validation';refresh()")}
+    ${jmStatCard("Pending Actions", toAssign.length, "Awaiting your assignment", inProgressCt, "Currently in progress", ['var(--warn)','var(--ok)'], "jmPage='tasks';jmTasksTab='assign';refresh()")}
     ${jmStatCard("Journals", inJournal.length, "Total in journal pipeline", inJournal.length-publishedCt, "Still pending", ['var(--purple)','var(--bad)'], "jmPage='journals';refresh()")}
   </div>`;
 
@@ -5304,7 +5595,7 @@ function journalDashboardPanel(){
     return `<div class="adm-bar-row" style="cursor:pointer" onclick="openDrawer(${jsq(c.id)})">
       <span class="lbl" style="flex:0 0 auto;max-width:none">${esc(c.name)}</span>
       <span style="flex:1;font-size:12px;color:var(--muted)">${kind}</span>
-      <button class="btn gold small" onclick="event.stopPropagation();jmPage='tasks';jmTasksTab='validation';refresh()">Assign &#8594;</button>
+      <button class="btn gold small" onclick="event.stopPropagation();jmPage='tasks';jmTasksTab='assign';refresh()">Assign &#8594;</button>
     </div>`;
   }).join("") : `<div class="adm-empty">Nothing waiting on you right now.</div>`;
 
@@ -8489,13 +8780,16 @@ function admExportTasksCsv(){
   toast("Exported "+rows.length+" tasks");
 }
 let jmTasksTab = "overview";
+function jmToAssignCount(){ return clients.filter(c=>["JOURNAL_MANAGER_REVIEW","JOURNAL_MANAGER_FORMATTING","FORMATTING_MANAGER_REVIEW"].includes(c.stage)).length; }
 function renderJMTasks(){
   const wuCount = jmWorkUpdatesQueue().length;
   let html = `<div class="adm-tabbar">
     <button class="adm-tab ${jmTasksTab==='overview'?'active':''}" onclick="jmTasksTab='overview';refresh()">Overview</button>
     <button class="adm-tab" onclick="jmOpenAddTask()">Add Task</button>
+    <button class="adm-tab ${jmTasksTab==='assign'?'active':''}" onclick="jmTasksTab='assign';refresh()">Assign Work${jmToAssignCount()?` (${jmToAssignCount()})`:""}</button>
     <button class="adm-tab ${jmTasksTab==='validation'?'active':''}" onclick="jmTasksTab='validation';refresh()">Work Validation${wuCount?` (${wuCount})`:""}</button>
   </div>`;
+  if(jmTasksTab==="assign"){ $("content").innerHTML = html + jmAssignWorkHtml(); return; }
   if(jmTasksTab==="validation"){ $("content").innerHTML = html + journalWorkPanel(); return; }
   $("content").innerHTML = html + jmTasksTableHtml();
 }
