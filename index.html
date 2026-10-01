@@ -3913,6 +3913,11 @@ function renderTMDashboard(){
   const newWork = tmNewWorkQueue();
   const deliveryQueue = tmDeliveryQueue();
   const workUpdates = tmWorkUpdatesQueue();
+  // Paper Writing sent to this Manager/TL for verification lives in its own queue
+  // (each reviewer approves individually) — it must show on the dashboard too,
+  // exactly like the Work Log > Work Updates tab.
+  const paperUpdates = tmPaperDecisionQueue();
+  const workUpdatesTotal = workUpdates.length + paperUpdates.length;
   const tasksApprovedCount = tasks.filter(t=>t.status==='COMPLETED').length;
   const tcounts = tmTaskTypeCounts();
 
@@ -3942,17 +3947,18 @@ function renderTMDashboard(){
         </div>
       </div>
       <div class="adm-panel queue-card" style="margin:0;cursor:pointer" onclick="tmPage='tasks';tmTasksTab='updates';refresh()">
-        <div class="adm-panel-head"><h3>Work Updates</h3><span class="badge ${workUpdates.length?'b-bad':'b-purp'}">${workUpdates.length}</span></div>
+        <div class="adm-panel-head"><h3>Work Updates</h3><span class="badge ${workUpdatesTotal?'b-bad':'b-purp'}">${workUpdatesTotal}</span></div>
         <div class="adm-panel-body">
           <div class="adm-scroll-list">
-          ${workUpdates.length ? workUpdates.map(t=>{ const c=admTaskClient(t); return qRowHtml(c?c.name:t.title, TASK_TYPE_LABEL[t.task_type]||t.title, `${esc(t.assigned_to||"—")} &mdash; needs your approval`, c); }).join("") : `<div class="adm-empty">Nothing waiting on your approval right now.</div>`}
+          ${workUpdatesTotal ? paperUpdates.map(x=>{ const c = x.clientId ? findClient(x.clientId) : null; return qRowHtml(c?c.name:x.taskTitle, "Paper Writing", `${esc(x.sentBy||x.taskAssignedTo||"—")} &mdash; needs your verification`, c); }).join("")
+            + workUpdates.map(t=>{ const c=admTaskClient(t); return qRowHtml(c?c.name:t.title, TASK_TYPE_LABEL[t.task_type]||t.title, `${esc(t.assigned_to||"—")} &mdash; needs your approval`, c); }).join("") : `<div class="adm-empty">Nothing waiting on your approval right now.</div>`}
           </div>
           <button class="btn small" style="margin-top:10px" onclick="event.stopPropagation();tmPage='tasks';tmTasksTab='updates';refresh()">Open Work Updates &#8594;</button>
         </div>
       </div>
     </div>
     <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr">
-      ${admKpi("Work Approval", workUpdates.length, Math.max(workUpdates.length+tasksApprovedCount,1), "Pending vs completed", ["Pending","Completed: "+tasksApprovedCount], "tmPage='tasks';tmTasksTab='updates';refresh()")}
+      ${admKpi("Work Approval", workUpdatesTotal, Math.max(workUpdatesTotal+tasksApprovedCount,1), "Pending vs completed", ["Pending","Completed: "+tasksApprovedCount], "tmPage='tasks';tmTasksTab='updates';refresh()")}
       ${admKpi("Total Proposal", tcounts.proposal.pending.length, Math.max(tcounts.proposal.pending.length+tcounts.proposal.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.proposal.completed.length], "tmOpenTaskTypeModal('proposal')")}
       ${admKpi("Total Implementation", tcounts.implementation.pending.length, Math.max(tcounts.implementation.pending.length+tcounts.implementation.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.implementation.completed.length], "tmOpenTaskTypeModal('implementation')")}
       ${admKpi("Total Paper Writing", tcounts.writing.pending.length, Math.max(tcounts.writing.pending.length+tcounts.writing.completed.length,1), "Pending vs completed", ["Pending","Completed: "+tcounts.writing.completed.length], "tmOpenTaskTypeModal('writing')")}
@@ -5594,6 +5600,7 @@ function techDashboardPanel(role){
         </div>
       </div>
     </div>
+    ${coordinatorReviewDashboardBox(isWriter)}
     <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1.6fr;align-items:stretch;margin-top:14px">
       <div class="adm-panel" style="margin:0">
         <div class="adm-panel-head"><h3>New Tasks</h3><span class="badge b-purp">${newTasks.length}</span></div>
@@ -5611,6 +5618,62 @@ function techDashboardPanel(role){
         <div class="adm-panel-body">${adminCalendarHtml(adminCalYear, adminCalMonth)}</div>
       </div>
     </div>`;
+}
+/* "Work Needs to Review" — Dashboard box shown ONLY to coordinators. It gathers
+   everything waiting on this coordinator's decision: work a team member sent to
+   them (Send to Coordinator) plus, for writers, team drafts at the Coordinator
+   Review stage. Approve / Send back work straight from the box. */
+function coordinatorReviewDashboardBox(isWriter){
+  const me = employees.find(e=>e.id===empId) || {};
+  if(!me.isCoordinator) return "";
+  const mine = workSends.filter(x=>x.kind==="HANDOFF" && x.target==="COORDINATOR" && x.targetEmpId===empId);
+  const pending = mine.filter(x=>x.status==="SENT")
+    .sort((a,b)=> new Date(b.at||0) - new Date(a.at||0));
+  const approved = mine.filter(x=>x.status==="APPROVED" || x.status==="FORWARDED").length;
+  const sentBack = mine.filter(x=>x.status==="RETURNED").length;
+  const drafts = isWriter ? clients.filter(c=>c.stage==='COORDINATOR_REVIEW' && c.coordinatorName===empName) : [];
+  const total = pending.length + drafts.length;
+  const goSection = isWriter && !pending.length && drafts.length ? "Drafts awaiting your review (your team)" : "Work sent to me to review";
+
+  const stat = (n,label,color) => `<div style="flex:1;min-width:110px;background:var(--card2);border-radius:10px;padding:10px 12px">
+      <div style="font-family:var(--disp);font-size:22px;font-weight:700;color:${color}">${n}</div>
+      <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase">${label}</div></div>`;
+
+  const rows = pending.slice(0,5).map(x=>{
+    const c = x.clientId ? findClient(x.clientId) : null;
+    return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:200px">
+        <b>${esc(x.taskTitle)}</b>${x.taskType?` <span class="badge b-dim">${esc(TASK_TYPE_LABEL[x.taskType]||x.taskType)}</span>`:""}
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">From <b>${esc(x.sentBy)}</b> &bull; ${fmtDateTime(x.at)}${c?` &bull; ${esc(c.name)}`:""}</div>
+      </div>
+      ${x.hasFile?handoffFileBtn(x,"send","Paper"):""}
+      <button class="btn gold small" onclick="openCoordApprove(${x.handoffId})">&#10003; Approve</button>
+      <button class="btn ghost small" onclick="openCoordReturn(${x.handoffId})">&#8634; Send back</button>
+    </div>`;
+  }).join("") + drafts.slice(0,5).map(c=>`
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:200px">
+        <b>${esc(c.name)}</b> <span class="badge b-dim">Team draft</span>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Writer(s): ${esc((c.assignedWriters||[]).join(", ")||"—")} &bull; Coordinator review</div>
+      </div>
+      <button class="btn ghost small" onclick="empGoToWorkSection('Drafts awaiting your review (your team)')">Review &rarr;</button>
+    </div>`).join("");
+  const more = (pending.length > 5 || drafts.length > 5)
+    ? `<div style="font-size:12px;color:var(--muted);padding-top:8px">+ more waiting &mdash; open My work to see everything.</div>` : "";
+
+  return `<div class="adm-panel" style="margin:14px 0 0">
+    <div class="adm-panel-head"><h3>Work Needs to Review</h3><span class="badge ${total?'b-gold':'b-purp'}">${total}</span></div>
+    <div class="adm-panel-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        ${stat(total,"Waiting on you","var(--gold)")}
+        ${stat(approved,"Approved","var(--good,#7CD992)")}
+        ${stat(sentBack,"Sent back","var(--bad)")}
+        ${stat(mine.length + drafts.length,"Total received","var(--purple)")}
+      </div>
+      ${total ? rows + more : `<div class="adm-empty">Nothing from your team is waiting on your review right now.</div>`}
+      <button class="btn small" style="width:100%;margin-top:12px" onclick="empGoToWorkSection('${goSection}')">Open in My work &rarr;</button>
+    </div>
+  </div>`;
 }
 function renderProgrammer(){
   setHead(empName + " — Programmer","Verify new proposals and complete your assigned implementation work","");
@@ -9385,6 +9448,10 @@ function admOpenAddMember(){
       <div class="field"><label>Phone *</label><input id="mem_phone" type="tel" inputmode="numeric" maxlength="10" placeholder="10 digits" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)"></div>
     </div>
     <div class="grid2">
+      <div class="field"><label>Aadhaar No. *</label><input id="mem_aadhaar" type="tel" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,12)"></div>
+      <div class="field" style="font-size:11.5px;color:var(--muted);align-self:end">Same name is fine &mdash; only the same Phone + Aadhaar counts as an existing employee.</div>
+    </div>
+    <div class="grid2">
       <div class="field"><label>User Role *</label>
         <select id="mem_role" onchange="admToggleMemberTeamType();admDefaultDepartment()">
           ${options.map(([val,label])=>`<option value="${val}">${esc(label)}</option>`).join("")}
@@ -9470,13 +9537,14 @@ function checkEmailTypo(inputId){
 }
 async function admSaveMember(){
   const v = id => ($(id) ? $(id).value.trim() : "");
-  const req = [["mem_name","User Name"],["mem_email","Mail ID"],["mem_phone","Phone"],["mem_designation","Designation"],
+  const req = [["mem_name","User Name"],["mem_email","Mail ID"],["mem_phone","Phone"],["mem_aadhaar","Aadhaar No."],["mem_designation","Designation"],
                ["mem_department","Department"],["mem_branch","Branch"],["mem_joining","Joining Date"]];
   const missing = req.filter(([id])=>!v(id)).map(([,label])=>label);
   if(missing.length){ toast("Please fill in: " + missing.join(", ")); const f = $(req.find(([id])=>!v(id))[0]); if(f) f.focus(); return; }
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v("mem_email"))){ toast("Enter a valid Mail ID"); $("mem_email").focus(); return; }
   checkEmailTypo("mem_email");
   if(!/^\d{10}$/.test(v("mem_phone"))){ toast("Phone must be 10 digits"); $("mem_phone").focus(); return; }
+  if(!/^\d{12}$/.test(v("mem_aadhaar"))){ toast("Aadhaar must be 12 digits"); $("mem_aadhaar").focus(); return; }
   const pwd = v("mem_password");
   if(pwd && pwd.length < 8){ toast("Password must be at least 8 characters (or leave it blank to generate one)"); return; }
   const btn = $("memSaveBtn"); btn.disabled = true; btn.textContent = "Adding...";
@@ -9484,7 +9552,7 @@ async function admSaveMember(){
   try{
     const out = await api("employee_create", {
       name, empRole, teamType: $("mem_teamtype") ? $("mem_teamtype").value : "",
-      email: v("mem_email"), phone: v("mem_phone"), empUid: v("mem_uid"),
+      email: v("mem_email"), phone: v("mem_phone"), aadhaar: v("mem_aadhaar"), empUid: v("mem_uid"),
       designation: v("mem_designation"), department: v("mem_department"),
       branch: normalizeBranchName(v("mem_branch")), joiningDate: v("mem_joining"),
       dateOfBirth: v("mem_dob"), password: pwd
@@ -9569,6 +9637,7 @@ function renderTeamMemberProfile(){
           <div>
             <div class="adm-profile-row"><label>User ID</label><p>${esc(dirEmp.empUid||"—")}</p></div>
             <div class="adm-profile-row"><label>Phone</label><p>${esc(dirEmp.phone||"—")}</p></div>
+            <div class="adm-profile-row"><label>Aadhaar</label><p>${esc(dirEmp.aadhaarMasked||"—")}</p></div>
             <div class="adm-profile-row"><label>Department</label><p>${esc(dirEmp.department||"—")}</p></div>
             <div class="adm-profile-row"><label>Branch</label><p>${esc(dirEmp.branch||"—")}</p></div>
             <div class="adm-profile-row"><label>Access</label><p><span class="adm-status ${dirEmp.active?'good':'bad'}">${dirEmp.active?'Active':'Revoked'}</span>
@@ -9642,6 +9711,7 @@ function admOpenUpdateMember(empId){
       <div class="field"><label>Phone</label><input id="up_mem_phone" type="tel" inputmode="numeric" maxlength="10" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,10)" value="${esc(e.phone||"")}"></div>
       <div class="field"><label>Designation</label><input id="up_mem_designation" value="${esc(e.designation||"")}"></div>
     </div>
+    <div class="field"><label>Aadhaar No. <span style="font-weight:400;color:var(--muted)">(saved: ${esc(e.aadhaarMasked||"none")} &mdash; leave blank to keep)</span></label><input id="up_mem_aadhaar" type="tel" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" onkeydown="blockNonDigitKey(event)" oninput="digitsOnlyInput(this,12)"></div>
     <div class="grid2">
       <div class="field"><label>Department</label><input id="up_mem_department" value="${esc(e.department||"")}"></div>
       <div class="field"><label>Branch</label><input id="up_mem_branch" list="branchOptionsList" value="${esc(e.branch||"")}">${branchDatalistHtml()}</div>
@@ -9653,9 +9723,11 @@ async function admSaveUpdateMember(empId){
   const em = $("up_mem_email").value.trim();
   if(em && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)){ toast("Enter a valid Mail ID"); return; }
   checkEmailTypo("up_mem_email");
+  const aad = ($("up_mem_aadhaar")||{}).value?.trim() || "";
+  if(aad && !/^\d{12}$/.test(aad)){ toast("Aadhaar must be 12 digits"); return; }
   try{
     await api("employee_update", {empId, name:$("up_mem_name").value, email:$("up_mem_email").value,
-      phone:$("up_mem_phone").value, designation:$("up_mem_designation").value,
+      phone:$("up_mem_phone").value, aadhaar:aad, designation:$("up_mem_designation").value,
       department:$("up_mem_department").value, branch:normalizeBranchName($("up_mem_branch").value), joiningDate:$("up_mem_joining").value});
     closeModal(); await loadData(); await loadAdminDirectory(); rerenderCurrent(); toast("Member updated");
   }catch(e){ toast(e.message || "Could not update"); }

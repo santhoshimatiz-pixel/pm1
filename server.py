@@ -1956,7 +1956,7 @@ def init_db():
         ("deleted_at", "TEXT"), ("joining_date", "TEXT DEFAULT ''"),
         ("date_of_birth", "TEXT DEFAULT ''"), ("branch", "TEXT DEFAULT ''"),
         ("department", "TEXT DEFAULT ''"), ("phone", "TEXT DEFAULT ''"),
-        ("designation", "TEXT DEFAULT ''"),
+        ("designation", "TEXT DEFAULT ''"), ("aadhaar", "TEXT DEFAULT ''"),
     ]:
         con.execute(f"ALTER TABLE employees ADD COLUMN IF NOT EXISTS {col} {decl}")
     con.commit()
@@ -4155,6 +4155,8 @@ TEAM_ALIASES = {
     "designation": "designation", "branch": "branch", "department": "department",
     "employee id": "empUid", "emp id": "empUid", "emp uid": "empUid",
     "joining date": "joiningDate", "date of birth": "dateOfBirth", "dob": "dateOfBirth",
+    "aadhaar": "aadhaar", "aadhar": "aadhaar", "aadhaar number": "aadhaar", "aadhar number": "aadhaar",
+    "aadhaar no": "aadhaar", "aadhar no": "aadhaar",
 }
 PAYMENT_ALIASES = {
     "client id": "clientId", "clientid": "clientId", "client": "clientId", "cl id": "clientId",
@@ -4266,6 +4268,30 @@ TEAM_TYPE_ALIASES = {
 }
 
 
+def _clean_aadhaar(raw):
+    """Aadhaar as 12 plain digits (spaces/dashes stripped), or '' if not given."""
+    return re.sub(r"[\s-]", "", str(raw or ""))
+
+
+def _mask_aadhaar(a):
+    a = a or ""
+    return ("XXXX XXXX " + a[-4:]) if len(a) >= 4 else ""
+
+
+def _find_duplicate_employee(con, phone, aadhaar, exclude_id=None):
+    """Same person = an active employee with the SAME phone AND the SAME Aadhaar.
+    A matching name alone is NOT a duplicate (two different people can share a name)."""
+    if not phone or not aadhaar:
+        return None
+    sql = ("SELECT id, name, emp_uid FROM employees WHERE phone=? AND aadhaar=? "
+           "AND active=1 AND deleted_at IS NULL")
+    args = [phone, aadhaar]
+    if exclude_id is not None:
+        sql += " AND id<>?"
+        args.append(exclude_id)
+    return con.execute(sql, args).fetchone()
+
+
 def _next_emp_uid(con):
     n = 1001
     for r in con.execute("SELECT emp_uid FROM employees WHERE emp_uid IS NOT NULL AND emp_uid<>''"):
@@ -4302,10 +4328,16 @@ def _import_team_rows(con, rows, actor_role=""):
             skipped += 1
             errors.append(f"Row {idx}: {name} isn't part of your department's team, skipped.")
             continue
-        dup = con.execute("SELECT id FROM employees WHERE LOWER(name)=LOWER(?) AND active=1 AND deleted_at IS NULL",
-                          (name,)).fetchone()
+        imp_phone = (rec.get("phone") or "").strip()
+        imp_aadhaar = _clean_aadhaar(rec.get("aadhaar"))
+        if imp_aadhaar and not re.match(r"^\d{12}$", imp_aadhaar):
+            skipped += 1; errors.append(f"Row {idx}: {name} — Aadhaar must be 12 digits, skipped."); continue
+        dup = _find_duplicate_employee(con, imp_phone, imp_aadhaar)
         if dup:
-            skipped += 1; errors.append(f"Row {idx}: {name} is already on the team, skipped."); continue
+            skipped += 1
+            errors.append(f"Row {idx}: {name} — this employee already exists "
+                          f"({dup['name']}, {dup['emp_uid'] or 'no ID'}: same phone and Aadhaar), skipped.")
+            continue
         manual_uid = (rec.get("empUid") or "").strip()
         if manual_uid:
             if con.execute("SELECT id FROM employees WHERE UPPER(emp_uid)=UPPER(?)", (manual_uid,)).fetchone():
@@ -4317,13 +4349,13 @@ def _import_team_rows(con, rows, actor_role=""):
             uid = _next_emp_uid(con)
         con.execute("""INSERT INTO employees
                        (name, role, team_type, email, emp_uid, password, is_coordinator, coordinator_id,
-                        joining_date, date_of_birth, branch, department, phone, designation)
-                       VALUES (?,?,?,?,?,?,0,NULL,?,?,?,?,?,?)""",
+                        joining_date, date_of_birth, branch, department, phone, designation, aadhaar)
+                       VALUES (?,?,?,?,?,?,0,NULL,?,?,?,?,?,?,?)""",
                     (name, role, team_type, (rec.get("email") or "").strip(), uid,
                      "",   # SECURITY: no password set — the manager must issue one
                      (rec.get("joiningDate") or "").strip(), (rec.get("dateOfBirth") or "").strip(),
                      normalize_branch_name(rec.get("branch")), (rec.get("department") or "").strip(),
-                     (rec.get("phone") or "").strip(), (rec.get("designation") or "").strip()))
+                     imp_phone, (rec.get("designation") or "").strip(), imp_aadhaar))
         added += 1
     con.commit()
     return {"ok": True, "added": added, "skipped": skipped, "errors": errors[:30]}
@@ -4868,9 +4900,13 @@ def _handle_action_core(action, d, ip=""):
                 uid = (d.get("empUid") or "").strip()
                 if not uid:
                     raise ApiError("Enter your employee ID.")
-                e = con.execute("SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?)", (uid,)).fetchone()
+                # Deleted employees are treated exactly like an unknown ID — they must not
+                # be able to sign in (delete only sets deleted_at; `active` stays 1).
+                e = con.execute("SELECT * FROM employees WHERE UPPER(emp_uid)=UPPER(?) AND deleted_at IS NULL",
+                                (uid,)).fetchone()
                 if not e:
-                    raise ApiError("Employee ID not found. Ask your Technical Manager to check it.")
+                    raise ApiError("The entered User ID was not found. Please check it, or ask your "
+                                   "Technical Manager if your account was removed.")
                 if not e["active"]:
                     raise ApiError("Your access has been disabled by the Super Admin. Contact them for help.")
                 if not verify_password(d.get("password") or "", e["password"] or ""):
@@ -7569,6 +7605,7 @@ def _handle_action_core(action, d, ip=""):
             department = (d.get("department") or "").strip()
             phone = (d.get("phone") or "").strip()
             designation = (d.get("designation") or "").strip()
+            aadhaar = _clean_aadhaar(d.get("aadhaar"))
             if not name:
                 raise ApiError("Name is required.")
             if role not in ("PROGRAMMER", "PAPER_WRITER", "JOURNAL_EMPLOYEE", "TELECALLER"):
@@ -7583,10 +7620,14 @@ def _handle_action_core(action, d, ip=""):
                 raise ApiError("Pick a journal team type (proofreading, formatting, or submission).")
             if role != "JOURNAL_EMPLOYEE":
                 team_type = ""
-            dup = con.execute("SELECT id FROM employees WHERE LOWER(name)=LOWER(?) AND active=1 AND deleted_at IS NULL",
-                              (name,)).fetchone()
+            if aadhaar and not re.match(r"^\d{12}$", aadhaar):
+                raise ApiError("Enter a 12-digit Aadhaar number.")
+            # Only phone + Aadhaar decide "same person" — a new joiner with the same
+            # name as an existing employee is allowed.
+            dup = _find_duplicate_employee(con, phone, aadhaar)
             if dup:
-                raise ApiError(f"{name} is already on the team.")
+                raise ApiError(f"This employee already exists: {dup['name']} ({dup['emp_uid'] or 'no ID'}) "
+                               f"has the same phone number and Aadhaar number.")
 
             is_coordinator = 0
             coordinator_id = None
@@ -7616,10 +7657,10 @@ def _handle_action_core(action, d, ip=""):
                 uid = f"EMP-{n}"
             con.execute("""INSERT INTO employees
                            (name, role, team_type, email, emp_uid, password, is_coordinator, coordinator_id,
-                            joining_date, date_of_birth, branch, department, phone, designation)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            joining_date, date_of_birth, branch, department, phone, designation, aadhaar)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (name, role, team_type, email, uid, hash_password(password), is_coordinator, coordinator_id,
-                         joining_date, date_of_birth, branch, department, phone, designation))
+                         joining_date, date_of_birth, branch, department, phone, designation, aadhaar))
             con.commit()
             # The plain-text password is returned exactly once, at creation time, so it can be
             # shown/shared with the new team member — it is never stored or retrievable again.
@@ -7648,6 +7689,20 @@ def _handle_action_core(action, d, ip=""):
                     fields.append(f"{col}=?"); vals.append(val)
             if "name" in d and not (d.get("name") or "").strip():
                 raise ApiError("Name cannot be empty.")
+            # Aadhaar: blank = keep the stored one (the UI only ever shows it masked).
+            new_aadhaar = _clean_aadhaar(d.get("aadhaar"))
+            if new_aadhaar:
+                if not re.match(r"^\d{12}$", new_aadhaar):
+                    raise ApiError("Enter a 12-digit Aadhaar number.")
+                fields.append("aadhaar=?"); vals.append(new_aadhaar)
+            if "phone" in d and (d.get("phone") or "").strip() and not re.match(r"^\d{10}$", (d.get("phone") or "").strip()):
+                raise ApiError("Enter a 10-digit phone number.")
+            final_phone = (d.get("phone") or "").strip() if "phone" in d else (e["phone"] or "")
+            final_aadhaar = new_aadhaar or (e["aadhaar"] or "")
+            dup = _find_duplicate_employee(con, final_phone, final_aadhaar, exclude_id=e["id"])
+            if dup:
+                raise ApiError(f"Another employee already has this phone number and Aadhaar: "
+                               f"{dup['name']} ({dup['emp_uid'] or 'no ID'}).")
             if not fields:
                 raise ApiError("Nothing to update.")
             vals.append(emp_id)
@@ -7838,7 +7893,8 @@ def _handle_action_core(action, d, ip=""):
                          "coordinatorName": names_by_id.get(r["coordinator_id"], "") if r["coordinator_id"] else "",
                          "active": bool(r["active"]), "branch": r["branch"] or "", "department": r["department"] or "",
                          "phone": r["phone"] or "", "designation": r["designation"] or "",
-                         "joiningDate": r["joining_date"] or ""}
+                         "joiningDate": r["joining_date"] or "",
+                         "aadhaarMasked": _mask_aadhaar(r["aadhaar"])}
                         for r in emp_rows]
             if is_full_admin:
                 users_list = [{"role": r["role"], "label": r["display_name"],
