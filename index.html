@@ -896,27 +896,27 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-tb-item.done .adm-tb-dot{background:var(--purple);border-color:var(--purple)}
 .adm-tb-item.current{color:var(--purple);font-weight:700;border-left-color:var(--purple)}
 .adm-tb-item.current .adm-tb-dot{background:#fff;border-color:var(--purple);box-shadow:0 0 0 3px rgba(14,116,144,.2)}
-/* ----- Project -> "Who Did What": each step of the project with the people who did it ----- */
-.wdw-chain{display:flex;flex-direction:column;gap:0}
-.wdw-step{position:relative;border:1px solid var(--line);border-left:4px solid var(--line-strong);border-radius:12px;background:var(--card);padding:14px 16px}
-.wdw-step.done{border-left-color:var(--ok)}
-.wdw-step.current{border-left-color:var(--purple);box-shadow:0 0 0 3px rgba(14,116,144,.10)}
-.wdw-step.todo{opacity:.72}
-.wdw-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-.wdw-title{display:flex;align-items:center;gap:10px;font-weight:800;font-size:14.5px;color:var(--text)}
-.wdw-num{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;background:var(--card2);border:2px solid var(--line-strong);color:var(--muted)}
-.wdw-step.done .wdw-num{background:var(--ok);border-color:var(--ok);color:#fff}
-.wdw-step.current .wdw-num{background:var(--purple);border-color:var(--purple);color:#fff}
-.wdw-row{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;flex-wrap:wrap}
-.wdw-row:first-of-type{border-top:none}
-.wdw-row .wdw-lbl{flex:0 0 150px;color:var(--muted);font-weight:600}
-.wdw-row .wdw-val{flex:1 1 200px;min-width:0;color:var(--text)}
-.wdw-row .wdw-when{font-size:11px;color:var(--muted);white-space:nowrap}
-.wdw-person{display:inline-block;padding:3px 10px;margin:0 6px 4px 0;border-radius:99px;background:#E6F5F7;color:var(--purple);border:1px solid rgba(14,116,144,.28);font-weight:700;font-size:12px}
-:root[data-theme="dark"] .wdw-person{background:rgba(14,116,144,.18);color:var(--text)}
-.wdw-none{color:var(--faint);font-style:italic}
-.wdw-arrow{text-align:center;color:var(--muted);font-size:11.5px;font-weight:700;padding:5px 0;letter-spacing:.02em}
-@media (max-width:640px){.wdw-row .wdw-lbl{flex-basis:100%}}
+.wt-flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.wt-step{position:relative;border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:var(--card2);display:flex;flex-direction:column;gap:8px;min-width:0}
+.wt-step.done{border-color:rgba(21,128,61,.35);background:rgba(21,128,61,.05)}
+.wt-step.current{border-color:var(--purple);box-shadow:0 0 0 2px rgba(14,116,144,.15)}
+.wt-step.pending{opacity:.62}
+.wt-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.wt-title{font-weight:700;font-size:13px;color:var(--text)}
+.wt-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--line-strong);color:var(--text);font-size:10.5px;font-weight:700;margin-right:6px}
+.wt-step.done .wt-num{background:var(--ok);color:#fff}
+.wt-step.current .wt-num{background:var(--purple);color:#fff}
+.wt-people{display:flex;flex-wrap:wrap;gap:6px}
+.wt-person{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 9px 2px 2px;max-width:100%}
+.wt-person .adm-avatar{margin-left:0;width:22px;height:22px;font-size:9px;border-width:1px}
+.wt-person small{color:var(--muted);font-weight:500}
+.wt-row{font-size:11.5px;color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
+.wt-row b{color:var(--text);font-weight:600}
+.wt-none{font-size:12px;color:var(--faint)}
+.wt-mini{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.wt-mini span{font-size:10.5px;padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.wt-mini span.done{color:var(--ok);border-color:rgba(21,128,61,.3)}
+.wt-mini span.current{color:var(--purple);border-color:var(--purple)}
 .adm-bar-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .adm-bar-row:last-child{border-bottom:none}
 .adm-bar-row .lbl{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--text);font-weight:600;overflow-wrap:break-word;word-break:break-word}
@@ -1567,6 +1567,11 @@ function suggestedAmount(c, k){
   return (conf.amounts && conf.amounts[k]!=null) ? conf.amounts[k] : null;
 }
 function serviceLabel(c){ return serviceConf(c).label || c.serviceKey || "—"; }
+// Synopsis / Survey Synopsis / Thesis: delivered to the client, client accepts -> Completed. No Journal Team.
+function needsJournal(c){ return serviceConf(c).needsJournal !== false; }
+const JOURNAL_ONLY_STAGES = ['JOURNAL_MANAGER_REVIEW','PROOFREAD_COORD_ASSIGNED','PROOFREADING','PROOFREAD_CORRECTION',
+  'PROOFREAD_RECHECK','JOURNAL_MANAGER_FORMATTING','FORMATTING_ASSIGNED','FORMATTING_IN_PROGRESS',
+  'FORMATTING_MANAGER_REVIEW','SUBMISSION','JOURNAL_SUBMITTED'];
 
 let clients = [], employees = [];
 let calendarEvents = [];
@@ -1906,19 +1911,20 @@ function openPhaseInfo(phaseKey, isCurrent, currentStage){
   openModal(`<h3>${phase?phase.label:''}</h3>${body}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
-function railHtml(stage){
-  const pidx = phaseIdx(stage);
+function railHtml(stage, c){
+  const phases = (c && !needsJournal(c)) ? PHASES.filter(p=>p.key!=='proofread' && p.key!=='format') : PHASES;
+  const pidx = Math.max(0, phases.findIndex(p=>p.stages.includes(stage)));
   let h = '<div class="pl-rail">';
-  PHASES.forEach((p,i)=>{
+  phases.forEach((p,i)=>{
     let cls = '';
     if(stage==='COMPLETED') cls = 'fin';
     else if(i<pidx) cls = 'done';
     else if(i===pidx) cls = 'act';
     h += `<span class="pl-dot ${cls}" title="${p.label} \u2014 tap for details" onclick="openPhaseInfo(${jsq(p.key)},${i===pidx},${jsq(stage)})">${(cls==='done'||cls==='fin')?'&#10003;':i+1}</span>`;
-    if(i<PHASES.length-1) h += `<span class="pl-bar ${i<pidx||stage==='COMPLETED'?'done':''}"></span>`;
+    if(i<phases.length-1) h += `<span class="pl-bar ${i<pidx||stage==='COMPLETED'?'done':''}"></span>`;
   });
   h += '</div>';
-  h += `<div class="pl-note">Phase ${pidx+1} of ${PHASES.length} (${PHASES[pidx].label}) \u2014 ${STAGE_LABEL[stage]} <span style="opacity:.65;font-weight:500;text-transform:none;letter-spacing:0">&bull; tap a step for details</span></div>`;
+  h += `<div class="pl-note">Phase ${pidx+1} of ${phases.length} (${phases[pidx].label}) \u2014 ${STAGE_LABEL[stage]} <span style="opacity:.65;font-weight:500;text-transform:none;letter-spacing:0">&bull; tap a step for details</span></div>`;
   return h;
 }
 function tags(c){
@@ -1951,6 +1957,7 @@ function serviceFamilyBadgeHtml(c){
   return `<span class="badge b-gold" title="This client (CL-ID ${esc(c.displayId||c.id)}) has ${info.count} works on record — this card is work ${info.idx} of ${info.count}">&#9733; Work ${info.idx} of ${info.count}</span>`;
 }
 function sendToJournalCardHtml(c){
+  if(!needsJournal(c)) return `<div class="pc-meta" style="color:var(--muted)">${esc(serviceLabel(c))} has no journal submission — it is completed once the client accepts it.</div>`;
   if(c.journalName){
     return `<div onclick="event.stopPropagation()"><div class="pc-meta">Target journal: <b style="color:var(--gold)">${esc(c.journalName)}</b></div>
       <button class="btn gold small" style="margin-top:6px" onclick="selectJournalNow(${jsq(c.id)})">Send to Journal Team &#8594;</button>
@@ -1968,7 +1975,7 @@ function pipeCard(c, actionsHtml, extraHtml){
     </div>
     <div class="pc-meta">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"")} &bull; Deadline: ${fmtDate(c.deadlineDate)}</div>
     ${tags(c)}
-    ${railHtml(c.stage)}
+    ${railHtml(c.stage, c)}
     ${extraHtml||""}
     ${actionsHtml?`<div class="inline-actions" onclick="event.stopPropagation()">${actionsHtml}</div>`:""}
   </div>`;
@@ -3138,15 +3145,27 @@ const BULK_IMPORT_INFO = {
   team:     {title:"Import team members", hint:"Columns recognised: Name, Role (Programmer / Paper Writer / Journal / Telecaller), Team Type (for Journal roles — Proofreader, Proofreading Coordinator, Formatter, Formatting Coordinator, Submission), Email, Phone, Designation, Branch, Department, Employee ID. Imported team members are created with NO password - issue one from Team & Access before they can sign in."},
   payments: {title:"Import payments",  hint:"Columns recognised: Client ID, Payment Stage (Reg / Start / Code / Writing / Paper), Amount, Date. Marks that stage as paid for that client."},
   queries:  {title:"Import client queries", hint:"Columns recognised: Query, Assigned To, Date" + " — and Client ID, unless you're importing into just this one client."},
+  projects: {title:"Import existing projects", hint:"For clients already registered before this tool, or whose work is already in progress or published. One row per project: who the client is, the service, where the work is now (Status), and who did each part. Each project is added straight at that status, with those names on it. Put an existing Client ID in a row to update that client instead."},
 };
 function admOpenBulkImport(kind, clientId){
   const info = BULK_IMPORT_INFO[kind] || {title:"Import", hint:""};
-  openModal(`<h3>${esc(info.title)}</h3><p class="msub">Bulk import — file or Google Sheet</p>
-    <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:6px">${esc(info.hint)}</p>
-    <div class="import-box">
-      <h4>Bulk import from a file</h4>
+  const tpl = kind==="projects" ? `<div class="import-box">
+      <h4>1. Download the template</h4>
+      <p style="color:var(--muted);font-size:13px;line-height:1.55">The Excel template is the quickest: Service and Status are drop-down lists, and the
+        <b>Allowed values</b> sheet explains every column. Use JSON if you are exporting from another system.</p>
       <div class="import-row">
-        <input type="file" id="admImportFile" accept=".xlsx,.csv,.tsv">
+        <button class="btn small" onclick="downloadImportTemplate('projects','xlsx')">&#11015; Excel template (.xlsx)</button>
+        <button class="btn ghost small" onclick="downloadImportTemplate('projects','json')">&#11015; JSON template</button>
+      </div>
+      <p style="color:var(--muted);font-size:12px;margin-top:8px">Status: ${PROJECT_IMPORT_STATUS_LIST.map(esc).join(" · ")}</p>
+    </div>` : "";
+  openModal(`<h3>${esc(info.title)}</h3><p class="msub">Bulk import — ${kind==="projects"?"Excel, CSV or JSON file":"file or Google Sheet"}</p>
+    <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:6px">${esc(info.hint)}</p>
+    ${tpl}
+    <div class="import-box">
+      <h4>${kind==="projects"?"2. Upload the filled file":"Bulk import from a file"}</h4>
+      <div class="import-row">
+        <input type="file" id="admImportFile" accept=".xlsx,.csv,.tsv,.json">
         <button class="btn small" onclick="admSubmitFileImport(${jsq(kind)},'${clientId||""}')">Import file</button>
       </div>
       <div id="admImportFileResult"></div>
@@ -3163,11 +3182,28 @@ function admOpenBulkImport(kind, clientId){
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
 function admImportSummaryHtml(out){
-  let html = `<div class="import-result"><b>${out.added}</b> record(s) added${out.skipped?`, <b>${out.skipped}</b> skipped`:""}.</div>`;
+  let html = `<div class="import-result"><b>${out.added}</b> record(s) added${out.updated?`, <b>${out.updated}</b> updated`:""}${out.skipped?`, <b>${out.skipped}</b> skipped`:""}.</div>`;
   if(out.errors && out.errors.length){
     html += `<div class="import-result err-list">${out.errors.map(e=>esc(e)).join("<br>")}</div>`;
   }
+  if(out.warnings && out.warnings.length){
+    html += `<div class="import-result" style="color:var(--warn)">${out.warnings.map(e=>esc(e)).join("<br>")}</div>`;
+  }
   return html;
+}
+const PROJECT_IMPORT_STATUS_LIST = ["Not started","Proposal in progress","Proposal with client","Proposal approved",
+  "Code in progress","Code with client","Code approved","Paper writing in progress","Paper with client","Client accepted",
+  "Proofreading","Formatting","Ready for submission","Submitted to journal","Under review","Revision requested",
+  "Accepted","Published","Completed"];
+async function downloadImportTemplate(kind, format){
+  try{
+    const out = await api("import_template", {kind, format});
+    const bin = atob(out.contentBase64), bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([bytes], {type: out.mime}));
+    a.download = out.filename; document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){ toast(e.message || "Could not download the template"); }
 }
 async function admSubmitFileImport(kind, clientId){
   const inp = $("admImportFile");
@@ -3643,7 +3679,7 @@ function renderTechnicalTL(){
   const awaitingClientProposal = clients.filter(c=>c.stage==='PROPOSAL_CLIENT_REVIEW');
   const awaitingClientImpl = clients.filter(c=>c.stage==='IMPLEMENTATION_CLIENT_REVIEW');
   const awaitingClientPaper = clients.filter(c=>c.stage==='CLIENT_REVIEW');
-  const readyForJournal = clients.filter(c=>c.stage==='CLIENT_ACCEPTED');
+  const readyForJournal = clients.filter(c=>c.stage==='CLIENT_ACCEPTED' && needsJournal(c));
   const review = clients.filter(c=>c.stage==='TECHTL_REVIEW');
   const overdueCount = proposalWaiting.filter(c=>daysOverdue(c.proposalDeadline)>0).length
     + inImpl.filter(c=>daysOverdue(c.implementationDeadline)>0).length;
@@ -3922,7 +3958,7 @@ function renderTMDashboard(){
   const finalReview = clients.filter(c=>c.stage==='TECHMGR_REVIEW');
   const readyForClient = clients.filter(c=>c.stage==='WRITING_COMPLETE');
   const waitingOnClient = clients.filter(c=>c.stage==='CLIENT_REVIEW');
-  const acceptedByClient = clients.filter(c=>c.stage==='CLIENT_ACCEPTED');
+  const acceptedByClient = clients.filter(c=>c.stage==='CLIENT_ACCEPTED' && needsJournal(c));
   const readyForJournal = [...readyForClient, ...waitingOnClient, ...acceptedByClient];
   const withJournal = clients.filter(c=>c.journalName);
   const journalPending = withJournal.filter(c=>c.journalStatus!=='PUBLISHED');
@@ -4104,9 +4140,10 @@ function tmOpenTaskTypeModal(type){
 }
 function renderTMProjects(){
   const tabs = [["overview","Overview"],["newprojects","New Projects"],["addproject","Add Project"],
+    ["importprojects","Import Projects"],
     ["board","Project Board"],["query","Client's Query"],["payments","Payments Information"],["extensions","Date Extensions"]];
   const tabsHtml = tabs.map(([k,l])=>{
-    const onclick = k==="addproject" ? "openAddClient()" : `tmProjectsTab='${k}';refresh()`;
+    const onclick = k==="addproject" ? "openAddClient()" : (k==="importprojects" ? "admOpenBulkImport('projects')" : `tmProjectsTab='${k}';refresh()`);
     return `<button class="adm-tab ${tmProjectsTab===k?'active':''}" onclick="${onclick}">${l}</button>`;
   }).join("");
   let body;
@@ -7620,7 +7657,7 @@ function adminClientsTableHtml(){
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <button class="btn small" style="padding:9px 16px" onclick="rerenderCurrent()">Search</button>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
         <button class="btn ghost small" onclick="admExportClientsCsv()">Export</button>
       </div>
     </div>
@@ -7819,6 +7856,11 @@ function admTechStatusLabel(c){
   return "In Journal";
 }
 function admPubStatusLabel(c){
+  if(!needsJournal(c)){
+    if(c.stage==="COMPLETED") return "Client accepted — completed";
+    if(c.stage==="CLIENT_REVIEW") return "Delivered — awaiting client";
+    return "No journal (" + serviceLabel(c) + ")";
+  }
   if(!c.journalName) return "—";
   return JOURNAL_STATUS_LABEL[c.journalStatus] || "Submitted";
 }
@@ -7950,7 +7992,7 @@ function admNewProjectsTableHtml(scope){
     <div class="adm-panel-head">
       <h3>New Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
-      <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button></div>
+      <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button><button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${list.length ? `<table class="adm-table"><thead><tr>
       <th>Client Name</th><th>Proj. Code</th><th>Proj. Name</th><th>Service Type</th><th>Research Domain</th><th>Installments</th><th>Action</th>
@@ -7978,6 +8020,7 @@ function admProjectBoardHtml(scope){
             <div style="font-weight:700;font-size:12.5px">${esc(c.name)}</div>
             <div style="font-size:11px;color:#8DA39A;margin-top:3px">${esc(c.domain||c.topic||"—")}</div>
             <div style="margin-top:8px">${admMembersHtml(c)}</div>
+            ${workTrailMiniHtml(c)}
           </div>`).join("") : `<div style="font-size:12px;color:#B7C6BF;padding:10px 0">Nothing here</div>`}
       </div>
     </div>`).join("");
@@ -8041,10 +8084,10 @@ function admExportExtensionsCsv(){
 }
 function admExportProjectsCsv(){
   const rows = scopedClientsForCurrentView().filter(matchesAdminProjSearch);
-  const head = ["Client Name","Proj. Name","Members","Start Date","Finish By","Technical Status","Publication Status","Installments"];
+  const head = ["Client Name","Proj. Name","Members","Who did what","Start Date","Finish By","Technical Status","Publication Status","Installments"];
   const lines = [head.join(",")].concat(rows.map(c=>[
       c.name, c.domain||c.topic||"", [...(c.assignedProgrammers||[]),...(c.assignedWriters||[])].join("; "),
-      fmtDate(admClientRegDate(c)), fmtDate(c.deadlineDate), admTechStatusLabel(c), admPubStatusLabel(c), admInstallmentsText(c)
+      workTrailText(c), fmtDate(admClientRegDate(c)), fmtDate(c.deadlineDate), admTechStatusLabel(c), admPubStatusLabel(c), admInstallmentsText(c)
     ].map(v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`).join(",")));
   const blob = new Blob([lines.join("\n")], {type:"text/csv"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "matiz-projects.csv"; a.click();
@@ -8059,7 +8102,7 @@ function adminProjectsTableHtml(scope){
   else if(scope==='jm') list = list.filter(c=>!c.rejected && isJournalScope(c));
   const rows = list.map(c=>`<tr onclick="admOpenProject(${jsq(c.id)})">
     <td><b>${esc(c.name)}</b><br><small style="color:#8DA39A">${c.displayId||c.id}</small></td>
-    <td>${esc(c.domain||c.topic||"—")}</td>
+    <td>${esc(c.domain||c.topic||"—")}${workTrailMiniHtml(c)}</td>
     <td>${admMembersHtml(c)}</td>
     <td>${fmtDate(admClientRegDate(c))}</td>
     <td>${fmtDate(c.deadlineDate)}</td>
@@ -8072,7 +8115,7 @@ function adminProjectsTableHtml(scope){
       <h3>Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
       </div>
     </div>
@@ -8096,7 +8139,7 @@ function adminProjectsTableHtml(scope){
 const PROJ_TABS = [
   {key:"dashboard", label:"Dashboard"}, {key:"files", label:"Files"}, {key:"calendar", label:"Calendar"},
   {key:"discussion", label:"Discussion"}, {key:"notes", label:"Notes"}, {key:"activity", label:"Activity"},
-  {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"whodid", label:"Who Did What"}, {key:"validation", label:"Work Validation"},
+  {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"validation", label:"Work Validation"},
   {key:"extensions", label:"Date Extensions"}, {key:"payment", label:"Payment Information"}, {key:"query", label:"Client's Query"},
 ];
 let adminProjectClientId = null, admProjTab = "dashboard";
@@ -8164,7 +8207,6 @@ function renderAdminProjectDetail(){
   else if(admProjTab==="activity") body = admProjActivityTab(c);
   else if(admProjTab==="tasks") body = admProjTasksTab(c);
   else if(admProjTab==="taskboard") body = admProjTaskBoardTab(c);
-  else if(admProjTab==="whodid") body = admProjWhoDidTab(c);
   else if(admProjTab==="validation") body = admProjValidationTab(c);
   else if(admProjTab==="extensions") body = admProjExtensionsTab(c);
   else if(admProjTab==="payment") body = admProjPaymentTab(c);
@@ -8181,6 +8223,157 @@ function renderAdminProjectDetail(){
     </div>
     <div class="adm-tabbar" style="margin-top:16px">${tabsHtml}</div>
     <div>${body}</div>`;
+}
+/* ================= WHO DID WHAT (work trail per project) =================
+   For every phase of a project (Marketing -> Proposal -> Code -> Paper -> Journal)
+   shows the employee(s) who did the work, when it was finished and who approved it.
+   Built only from data the client record already carries (assigned names +
+   stageTimes), so it works for every role that can open the project. */
+function wtUniq(list){ const seen = new Set(); return list.map(x=>(x||"").trim()).filter(x=>x && !seen.has(x) && seen.add(x)); }
+function workTrailPhases(c){
+  const times = {};
+  (c.stageTimes || c.history || []).forEach(h=>{ if(h.stage && h.at) (times[h.stage] = times[h.stage] || []).push(h); });
+  const latest = s => (times[s] || [])[0] || null;               // newest first
+  const first  = s => { const t = times[s] || []; return t[t.length-1] || null; };
+  const cur = stageIdx(c.stage);
+  const st = (startStage, doneStage) => {
+    if(cur >= stageIdx(doneStage)) return "done";
+    if(cur >= stageIdx(startStage)) return "current";
+    return "pending";
+  };
+  const person = (name, what) => ({name, what});
+  // The server records different actors on the "done" step depending on the path taken:
+  // e.g. complete_implementation records the programmers themselves, the Work Updates
+  // approval records "Technical TL/Manager". Only call someone the approver when they
+  // are NOT one of the people who did the work.
+  const splitNames = v => String(v||"").split(",").map(x=>x.trim()).filter(Boolean);
+  const approver = (hit, doers) => {
+    if(!hit || !hit.actor) return "";
+    const doerSet = new Set(doers.flatMap(splitNames));
+    const who = splitNames(hit.actor);
+    return who.length && who.every(n=>doerSet.has(n)) ? "" : hit.actor;
+  };
+  const phases = [];
+
+  // 1. Marketing team (lead -> TL -> Manager -> Accounts)
+  const added = first("NEW"), tl = latest("MANAGER_REVIEW"), mgr = latest("ACCOUNT_REVIEW"), acc = latest("TECH_ASSIGNED");
+  const mktPeople = [];
+  if(added && added.actor) mktPeople.push(person(added.actor, "Lead entry"));
+  if(c.bdc) mktPeople.push(person(c.bdc, "BDC"));
+  if(tl && tl.actor) mktPeople.push(person(tl.actor, "TL verified"));
+  if(mgr && mgr.actor) mktPeople.push(person(mgr.actor, "Manager approved"));
+  if(acc && acc.actor) mktPeople.push(person(acc.actor, "Accounts confirmed"));
+  phases.push({key:"marketing", title:"Marketing team", status: st("NEW","TECH_ASSIGNED"),
+    people: mktPeople, doneAt: acc ? acc.at : null, doneLabel:"Handed to Technical"});
+
+  if(serviceConf(c).hasImplementation){
+    // 2. Proposal
+    const sub = latest("PROPOSAL_SUBMITTED"), ver = latest("PROPOSAL_VERIFIED"), capp = latest("PROPOSAL_APPROVED");
+    const writers = wtUniq([c.proposalWriter, c.proposalCoordinator]);
+    if(!writers.length && sub && sub.actor) writers.push(sub.actor);
+    phases.push({key:"proposal", title:"Proposal", status: st("PROPOSAL_ASSIGNED","PROPOSAL_VERIFIED"),
+      people: writers.map(n=>person(n, "Proposal writer")),
+      doneAt: sub ? sub.at : null, doneLabel:"Submitted",
+      approvedBy: c.proposalVerifiedBy || approver(ver, writers), approvedAt: ver ? ver.at : null,
+      clientAt: capp ? capp.at : null});
+
+    // 3. Code implementation
+    const done = latest("IMPLEMENTATION_COMPLETE"), iapp = latest("IMPLEMENTATION_APPROVED");
+    const progs = wtUniq([...(c.assignedProgrammers||[]), c.implCoordinator]);
+    phases.push({key:"code", title:"Code implementation", status: st("IMPLEMENTATION_ASSIGNED","IMPLEMENTATION_COMPLETE"),
+      people: progs.map(n=>person(n, n===c.implCoordinator && !(c.assignedProgrammers||[]).includes(n) ? "Coordinator" : "Programmer")),
+      doneAt: done ? done.at : null, doneLabel:"Completed",
+      approvedBy: approver(done, progs) || approver(latest("IMPLEMENTATION_CLIENT_REVIEW"), progs) || c.demoApprovedBy || "",
+      approvedAt: done ? done.at : null,
+      clientAt: iapp ? iapp.at : null,
+      extra: c.demoGivenDate ? "Demo given " + fmtDate(c.demoGivenDate) : ""});
+  }
+
+  // 4. Paper writing
+  const wdone = latest("WRITING_COMPLETE"), wapp = latest("CLIENT_ACCEPTED");
+  const pw = wtUniq([...(c.assignedWriters||[]), c.writingCompletedBy]);
+  const pwPeople = pw.map(n=>person(n, "Paper writer"));
+  if(c.coordinatorName && !pw.includes(c.coordinatorName)) pwPeople.push(person(c.coordinatorName, "Content coordinator"));
+  phases.push({key:"paper", title:"Paper writing", status: st("PAPERWRITER_ASSIGNED","WRITING_COMPLETE"),
+    people: pwPeople,
+    doneAt: c.writingCompletedAt || (wdone ? wdone.at : null), doneLabel:"Writing completed",
+    approvedBy: approver(wdone, pw), approvedAt: wdone ? wdone.at : null,
+    clientAt: wapp ? wapp.at : null});
+
+  if(!needsJournal(c)){
+    // Synopsis / Survey Synopsis / Thesis: delivered to the client, client accepts -> Completed.
+    const dl = latest("CLIENT_REVIEW"), acc2 = latest("COMPLETED") || latest("CLIENT_ACCEPTED");
+    phases.push({key:"clientok", title:"Delivered — client acceptance", status: st("CLIENT_REVIEW","CLIENT_ACCEPTED"),
+      people: dl && dl.actor ? [person(dl.actor, "Delivered to client")] : [],
+      doneAt: acc2 ? acc2.at : null, doneLabel:"Client accepted",
+      extra: c.stage==="CLIENT_REVIEW" ? "Waiting for the client to accept" : ""});
+    if(c.rejected || c.onHold) phases.forEach(p=>{ if(p.status==="current") p.status = "paused"; });
+    return phases;
+  }
+
+  // 5. Journal team — proofreading, formatting, submission
+  const pr = latest("JOURNAL_MANAGER_FORMATTING");
+  const prPeople = [];
+  if(c.proofreadCoordinator) prPeople.push(person(c.proofreadCoordinator, "Proofread coordinator"));
+  (c.assignedProofreaders||[]).filter(n=>n!==c.proofreadCoordinator).forEach(n=>prPeople.push(person(n, "Proofreader")));
+  phases.push({key:"proofread", title:"Journal team — Proofreading", status: st("JOURNAL_MANAGER_REVIEW","JOURNAL_MANAGER_FORMATTING"),
+    people: prPeople, doneAt: pr ? pr.at : null, doneLabel:"Completed",
+    approvedBy: approver(pr, prPeople.map(x=>x.name)), approvedAt: pr ? pr.at : null,
+    extra: c.proofreadRounds ? `${c.proofreadRounds} correction round${c.proofreadRounds===1?"":"s"}` : ""});
+
+  const fm = latest("SUBMISSION");
+  const fmPeople = [];
+  if(c.formatCoordinator) fmPeople.push(person(c.formatCoordinator, "Format coordinator"));
+  (c.assignedFormatters||[]).filter(n=>n!==c.formatCoordinator).forEach(n=>fmPeople.push(person(n, "Formatter")));
+  phases.push({key:"format", title:"Journal team — Formatting", status: st("JOURNAL_MANAGER_FORMATTING","SUBMISSION"),
+    people: fmPeople, doneAt: fm ? fm.at : null, doneLabel:"Completed",
+    approvedBy: approver(fm, fmPeople.map(x=>x.name)), approvedAt: fm ? fm.at : null});
+
+  const sb = latest("JOURNAL_SUBMITTED");
+  const sbPeople = [];
+  if(c.submissionPerson) sbPeople.push(person(c.submissionPerson, "Submission"));
+  else if(sb && sb.actor) sbPeople.push(person(sb.actor, "Submission"));
+  const jStatus = c.journalStatus ? (typeof JOURNAL_STATUS_LABEL!=="undefined" && JOURNAL_STATUS_LABEL[c.journalStatus] || c.journalStatus) : "";
+  phases.push({key:"submission", title:"Journal team — Submission", status: st("SUBMISSION","JOURNAL_SUBMITTED"),
+    people: sbPeople, doneAt: sb ? sb.at : null, doneLabel:"Submitted to journal",
+    extra: [c.journalName, jStatus].filter(Boolean).join(" • ")});
+
+  // A rejected / on-hold project shouldn't show the next step as "in progress".
+  if(c.rejected || c.onHold) phases.forEach(p=>{ if(p.status==="current") p.status = "paused"; });
+  return phases;
+}
+function workTrailHtml(c){
+  const statusPill = {done:'<span class="adm-status good">Done</span>', current:'<span class="adm-status warn">In progress</span>',
+    paused:`<span class="adm-status bad">${c.rejected?"Rejected":"On hold"}</span>`, pending:'<span class="adm-status" style="background:var(--card);color:var(--faint)">Not started</span>'};
+  const cards = workTrailPhases(c).map((p,i)=>{
+    const people = p.people.length
+      ? `<div class="wt-people">${p.people.map(x=>`<span class="wt-person" title="${esc(x.name)} — ${esc(x.what)}"><span class="adm-avatar ${p.key==="code"?"blue":(p.key==="paper"?"red":"")}" style="${p.key==="code"||p.key==="paper"?"":"background:var(--purple)"}">${initials(x.name)}</span>${esc(x.name)} <small>${esc(x.what)}</small></span>`).join("")}</div>`
+      : `<div class="wt-none">${p.status==="pending" ? "Not assigned yet" : "No name recorded"}</div>`;
+    const rows = [];
+    if(p.doneAt && p.status!=="pending") rows.push(`${esc(p.doneLabel)}: <b>${esc(tbDateTime(p.doneAt))}</b>`);
+    if(p.approvedBy && p.status==="done") rows.push(`Approved by: <b>${esc(p.approvedBy)}</b>`);
+    if(p.clientAt) rows.push(`Client approved: <b>${esc(tbDateTime(p.clientAt))}</b>`);
+    if(p.extra) rows.push(esc(p.extra));
+    return `<div class="wt-step ${p.status==="paused"?"current":p.status}">
+      <div class="wt-top"><div class="wt-title"><span class="wt-num">${p.status==="done"?"&#10003;":i+1}</span>${esc(p.title)}</div>${statusPill[p.status]||""}</div>
+      ${people}
+      ${rows.map(r=>`<div class="wt-row">${r}</div>`).join("")}
+    </div>`;
+  }).join("");
+  return `<div class="wt-flow">${cards}</div>`;
+}
+// Compact one-line version for project cards / lists: "✓ Proposal: Ravi".
+function workTrailMiniHtml(c){
+  const short = {marketing:"Marketing", proposal:"Proposal", code:"Code", paper:"Paper", proofread:"Proofread", format:"Format", submission:"Submission", clientok:"Client"};
+  const bits = workTrailPhases(c).filter(p=>p.key!=="marketing" && p.status!=="pending" && p.people.length).map(p=>{
+    const names = p.people.map(x=>x.name).join(", ");
+    return `<span class="${p.status==="done"?"done":"current"}" title="${esc(p.title)}: ${esc(names)}">${p.status==="done"?"&#10003; ":""}${short[p.key]}: ${esc(names)}</span>`;
+  });
+  return bits.length ? `<div class="wt-mini">${bits.join("")}</div>` : "";
+}
+function workTrailText(c){
+  return workTrailPhases(c).filter(p=>p.people.length && p.status!=="pending")
+    .map(p=>`${p.title}: ${p.people.map(x=>x.name).join(", ")}${p.status==="done"?" (done)":""}`).join(" | ");
 }
 function admProjDashboardTab(c){
   const stagesTotal = STAGES.length;
@@ -8207,6 +8400,10 @@ function admProjDashboardTab(c){
           ${demoScheduleSectionHtml(c)}
         </div>
       </div>
+    </div>
+    <div class="adm-panel" style="margin:14px 0 0"><div class="adm-panel-head"><h3>Who did what</h3>
+        <span style="font-size:12px;color:var(--muted)">Each step of this project and the employee who did it</span></div>
+      <div class="adm-panel-body">${workTrailHtml(c)}</div>
     </div>
     <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1.3fr;margin-top:14px">
       <div class="adm-panel" style="margin:0"><div class="adm-panel-head"><h3>Progress</h3></div>
@@ -8339,7 +8536,8 @@ function tbDurationSince(iso){
 }
 function admProjTaskBoardTab(c){
   const curIdx = stageIdx(c.stage);
-  const displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
+  let displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
+  if(!needsJournal(c)) displayStages = displayStages.filter(s=>!JOURNAL_ONLY_STAGES.includes(s));
   // Every time this client reached each stage (newest first), from the stage history.
   const times = {};
   (c.stageTimes || c.history || []).forEach(h=>{ if(h.stage && h.at) (times[h.stage] = times[h.stage] || []).push(h); });
@@ -8364,120 +8562,6 @@ function admProjTaskBoardTab(c){
   return projectSendsPanelHtml(c) + `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3>
       <span style="font-size:12px;color:var(--muted)">Date &amp; time each stage was reached, and who sent it there</span></div>
     <div class="adm-panel-body"><div class="adm-tb-rail">${items}</div></div>
-  </div>`;
-}
-// ----- "Who Did What": the project step by step (Marketing -> Proposal -> Code
-//       Implementation -> Paper Writing -> Journal Team) with the name of every person who
-//       did each step, when it was completed and who approved it before it went to the
-//       next step. Read-only - built from data the project already carries.
-function admProjWhoDidTab(c){
-  const curIdx = stageIdx(c.stage);
-  const hasImpl = !!serviceConf(c).hasImplementation;
-  // Latest time (and who) each stage was reached.
-  const reached = {};
-  (c.stageTimes || c.history || []).forEach(h=>{
-    if(!h.stage || !h.at) return;
-    if(!reached[h.stage] || new Date(h.at) > new Date(reached[h.stage].at)) reached[h.stage] = h;
-  });
-  const listOf = v => (Array.isArray(v) ? v : String(v||"").split(","))
-                        .map(x=>String(x||"").trim()).filter(Boolean);
-  const people = v => { const l = listOf(v); return l.length ? l.map(n=>`<span class="wdw-person">${esc(n)}</span>`).join("")
-                                                             : `<span class="wdw-none">Not assigned yet</span>`; };
-  const at = s => reached[s] ? tbDateTime(reached[s].at) : "";
-  const by = s => reached[s] && reached[s].actor ? reached[s].actor : "";
-  const row = (lbl, valHtml, when) => `<div class="wdw-row"><div class="wdw-lbl">${lbl}</div>
-      <div class="wdw-val">${valHtml}</div>${when?`<div class="wdw-when">${esc(when)}</div>`:""}</div>`;
-  // Rows for a step that hasn't happened yet are left out, so only real names/dates show.
-  const nameRow = (lbl, name, when) => (name || when) ? row(lbl, name ? `<span class="wdw-person">${esc(name)}</span>` : `<span class="wdw-none">—</span>`, when) : "";
-  // done = the project is already past `doneAt`; current = it is somewhere between `startAt` and `doneAt`.
-  const status = (startAt, doneAt) => {
-    if(c.stage===doneAt || curIdx > stageIdx(doneAt)) return "done";
-    if(curIdx >= stageIdx(startAt)) return "current";
-    return "todo";
-  };
-  const badge = st => st==="done" ? `<span class="adm-status good">Completed</span>`
-                    : st==="current" ? `<span class="adm-status warn">In progress</span>`
-                    : `<span class="badge b-dim">Not started</span>`;
-
-  const steps = [];
-
-  // 1. Marketing Team
-  const mkSt = status("NEW", "TECH_ASSIGNED");
-  steps.push({ title: "Marketing Team", st: mkSt, body:
-      nameRow("Lead added by", by("NEW"), at("NEW"))
-    + (c.bdc ? nameRow("BDC", c.bdc, "") : "")
-    + nameRow("Sent to Marketing TL by", by("TL_REVIEW"), at("TL_REVIEW"))
-    + nameRow("Approved by (TL)", by("MANAGER_REVIEW"), at("MANAGER_REVIEW"))
-    + nameRow("Approved by (Manager)", by("ACCOUNT_REVIEW"), at("ACCOUNT_REVIEW"))
-    + nameRow("Sent to Technical Team by", by("TECH_ASSIGNED"), at("TECH_ASSIGNED")) });
-
-  if(hasImpl){
-    // 2. Proposal
-    const pSt = status("PROPOSAL_ASSIGNED", "PROPOSAL_APPROVED");
-    steps.push({ title: "Proposal", st: pSt, body:
-        row("Proposal written by", people(c.proposalWriter),
-            c.proposalSubmittedAt ? "Submitted " + tbDateTime(c.proposalSubmittedAt) : at("PROPOSAL_SUBMITTED") ? "Submitted " + at("PROPOSAL_SUBMITTED") : "")
-      + (c.proposalCoordinator ? nameRow("Coordinator", c.proposalCoordinator, "") : "")
-      + nameRow("Assigned by", by("PROPOSAL_ASSIGNED"), at("PROPOSAL_ASSIGNED"))
-      + nameRow("Approved by", c.proposalVerifiedBy || by("PROPOSAL_VERIFIED"), at("PROPOSAL_VERIFIED"))
-      + nameRow("Client approved", reached.PROPOSAL_APPROVED ? (by("PROPOSAL_APPROVED") || "Client") : "", at("PROPOSAL_APPROVED")) });
-
-    // 3. Code Implementation
-    const iSt = status("IMPLEMENTATION_ASSIGNED", "IMPLEMENTATION_APPROVED");
-    steps.push({ title: "Code Implementation", st: iSt, body:
-        row("Code done by", people(c.assignedProgrammers), at("IMPLEMENTATION_COMPLETE") ? "Completed " + at("IMPLEMENTATION_COMPLETE") : "")
-      + (c.implCoordinator ? nameRow("Coordinator", c.implCoordinator, "") : "")
-      + nameRow("Assigned by", by("IMPLEMENTATION_ASSIGNED"), at("IMPLEMENTATION_ASSIGNED"))
-      + (c.demoGivenDate ? row("Demo given", `${esc(fmtDate(c.demoGivenDate))}${c.demoSatisfied?` &middot; ${c.demoSatisfied==="satisfied"?"client satisfied":"client not satisfied"}`:""}`, "") : "")
-      + (c.demoApprovedBy ? nameRow("Demo approved by", c.demoApprovedBy, c.demoApprovedAt ? tbDateTime(c.demoApprovedAt) : "") : "")
-      + nameRow("Approved by", by("IMPLEMENTATION_COMPLETE"), at("IMPLEMENTATION_COMPLETE"))
-      + nameRow("Client approved", reached.IMPLEMENTATION_APPROVED ? (by("IMPLEMENTATION_APPROVED") || "Client") : "", at("IMPLEMENTATION_APPROVED")) });
-  }
-
-  // 4. Paper Writing
-  const wSt = status("PAPERWRITER_ASSIGNED", "CLIENT_ACCEPTED");
-  steps.push({ title: "Paper Writing", st: wSt, body:
-      row("Paper written by", people(c.assignedWriters),
-          c.writingCompletedAt ? "Writing completed " + tbDateTime(c.writingCompletedAt) : "")
-    + (c.writingCompletedBy ? nameRow("Marked completed by", c.writingCompletedBy, "") : "")
-    + (c.coordinatorName ? nameRow("Coordinator", c.coordinatorName, "") : "")
-    + nameRow("Assigned by", by("PAPERWRITER_ASSIGNED"), at("PAPERWRITER_ASSIGNED"))
-    + nameRow("Approved by", by("WRITING_COMPLETE"), at("WRITING_COMPLETE"))
-    + nameRow("Client approved", reached.CLIENT_ACCEPTED ? (by("CLIENT_ACCEPTED") || "Client") : "", at("CLIENT_ACCEPTED")) });
-
-  // 5. Journal Team
-  const jSt = status("JOURNAL_MANAGER_REVIEW", "COMPLETED");
-  const prSt = status("PROOFREAD_COORD_ASSIGNED", "PROOFREAD_RECHECK");
-  const fmSt = status("FORMATTING_ASSIGNED", "FORMATTING_MANAGER_REVIEW");
-  const tag = st => st==="done" ? " (done)" : st==="current" ? " (in progress)" : "";
-  steps.push({ title: "Journal Team", st: jSt, body:
-      nameRow("Sent to Journal Team by", by("JOURNAL_MANAGER_REVIEW"), at("JOURNAL_MANAGER_REVIEW"))
-    + (c.journalName ? row("Target journal", `<b>${esc(c.journalName)}</b>`, "") : "")
-    + nameRow("Proofreading coordinator", c.proofreadCoordinator, "")
-    + row("Proofreading done by" + tag(prSt), people(c.assignedProofreaders),
-          at("JOURNAL_MANAGER_FORMATTING") ? "Completed " + at("JOURNAL_MANAGER_FORMATTING") : "")
-    + nameRow("Formatting coordinator", c.formatCoordinator, "")
-    + row("Formatting done by" + tag(fmSt), people(c.assignedFormatters),
-          at("SUBMISSION") ? "Completed " + at("SUBMISSION") : "")
-    + nameRow("Submitted by", c.submissionPerson || by("JOURNAL_SUBMITTED"), at("JOURNAL_SUBMITTED"))
-    + (c.journalStatus ? row("Journal status", `<b>${esc(String(c.journalStatus).replace(/_/g," "))}</b>`, "") : "")
-    + (c.stage==="COMPLETED" ? nameRow("Project closed by", by("COMPLETED"), at("COMPLETED")) : "") });
-
-  const chain = steps.map((s,i)=>{
-    const next = steps[i+1];
-    const arrow = next ? `<div class="wdw-arrow">&#8595; ${s.st==="done" ? "went on to" : "next"}: ${esc(next.title)}</div>` : "";
-    return `<div class="wdw-step ${s.st}">
-        <div class="wdw-head"><div class="wdw-title"><span class="wdw-num">${s.st==="done"?"&#10003;":(i+1)}</span>${esc(s.title)}</div>${badge(s.st)}</div>
-        ${s.body}
-      </div>${arrow}`;
-  }).join("");
-  return `<div class="adm-panel"><div class="adm-panel-head"><h3>Who did what</h3>
-      <span style="font-size:12px;color:var(--muted)">Each step of this project and the people who did it</span></div>
-    <div class="adm-panel-body">
-      ${c.rejected ? `<div style="margin-bottom:12px"><span class="adm-status bad">Rejected</span></div>` : ""}
-      ${c.onHold ? `<div style="margin-bottom:12px"><span class="adm-status warn">On hold</span></div>` : ""}
-      <div class="wdw-chain">${chain}</div>
-    </div>
   </div>`;
 }
 function admProjValidationTab(c){
@@ -9241,7 +9325,7 @@ function mktProjectsTableHtml(){
       <h3>Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
       </div>
     </div>
@@ -10980,7 +11064,7 @@ function renderClientOverview(c){
     </div>
     <div class="panel" style="padding:20px">
       <h3 style="margin-bottom:6px">Project progress</h3>
-      ${railHtml(c.stage)}
+      ${railHtml(c.stage, c)}
       ${c.demoGivenDate?`<p style="color:var(--gold);font-size:13px;margin-top:10px">Demo completed on ${fmtDate(c.demoGivenDate)}</p>`:""}
       <button class="btn ghost small" style="margin-top:12px" onclick="setClientView('status')">View full project status &#8594;</button>
     </div>
@@ -11006,7 +11090,7 @@ function renderClientProjectStatus(c){
     <div class="panel" style="padding:20px">
       <h3 style="margin-bottom:6px">Where things stand</h3>
       <p style="font-size:13.5px;margin-bottom:6px">Current stage: <b style="color:var(--gold)">${STAGE_LABEL[c.stage]||c.stage}</b></p>
-      ${railHtml(c.stage)}
+      ${railHtml(c.stage, c)}
       ${c.demoGivenDate?`<p style="color:var(--gold);font-size:13px;margin-top:10px">Demo completed on ${fmtDate(c.demoGivenDate)}</p>`:""}
     </div>
     ${clientJournalBlockHtml(c)}
@@ -11432,7 +11516,7 @@ function openDrawer(id){
         <span class="badge b-gold" style="margin-left:6px">${esc(serviceLabel(c))}</span></div>
       <button class="xbtn" onclick="closeDrawer()" aria-label="Close">&times;</button>
     </div>
-    ${railHtml(c.stage)}
+    ${railHtml(c.stage, c)}
     ${canManageInvites() ? `<div class="sec" style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div><h4 style="margin:0">Client Portal</h4><p class="pc-meta" style="margin:4px 0 0">${inviteStatusPill(c)}</p></div>
       <button class="btn ghost small" onclick="openInviteCard(${jsq(c.id)})">${c.hasClientLogin||c.inviteSentAt?"Manage invite":"Send portal invite"}</button>
@@ -11464,6 +11548,7 @@ function openDrawer(id){
       ${c.notes?`<div style="grid-column:1/-1"><b>Notes</b><p>${esc(c.notes)}</p></div>`:""}
     </div>
     ${tags(c)}
+    <div class="sec" style="margin-top:14px"><h4>Who did what</h4>${workTrailHtml(c)}</div>
     ${(isTelecaller()||role==="marketing_tl"||role==="marketing_manager") ? `<div class="sec" style="margin-top:10px">
       <h4>Project deadline</h4>
       ${c.extRequested && c.extTarget==='project' ? `<div class="pc-meta" style="color:var(--gold)">Extension requested (${esc(c.extAmount)}) &mdash; waiting on Marketing TL/Manager.</div>`
@@ -13805,7 +13890,7 @@ const PERM_IMPORT = (function(){
   return { clients: mkt, referrals: mkt, payments: mkt.concat(["account_team"]),
            notes: mkt.concat(["account_team"], tech, jrn), queries: mkt.concat(tech, jrn),
            tasks: ["marketing_tl", "marketing_manager"].concat(tech, jrn),
-           team: ["marketing_tl", "marketing_manager"].concat(tech, jrn) };
+           team: ["marketing_tl", "marketing_manager"].concat(tech, jrn), projects: tech };
 })();
 function canAddClient(){ return isAdminRole() || PERM_ADD_CLIENT.includes(permRole()); }
 function canEditClient(){ return isAdminRole() || PERM_EDIT_CLIENT.includes(permRole()); }

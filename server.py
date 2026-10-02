@@ -731,6 +731,7 @@ ACTION_ROLES = {
     # Who may import which kind is decided per kind (BULK_IMPORT_ROLES) inside the handler.
     "bulk_import": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
     "bulk_import_from_url": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
+    "import_template": _R_TECH_MGMT,
     "assign_proposal_writer": _R_MARKETING + ("technical_manager", "technical_tl"),
     # Delivering the approved paper to the client is the Technical Manager/TL's step.
     "send_to_client": _R_TECH_MGMT + _R_MARKETING,
@@ -1232,18 +1233,24 @@ SERVICES = {
         "label": "Synopsis",
         "hasImplementation": False,
         "requiresWritingFee": False,
+        # Not a journal paper: delivered to the client, client accepts -> Completed.
+        "needsJournal": False,
         "amounts": {"reg": 15000, "paper": 10000},
     },
     "SURVEY_SYNOPSIS": {
         "label": "Survey Synopsis",
         "hasImplementation": False,
         "requiresWritingFee": False,
+        # Not a journal paper: delivered to the client, client accepts -> Completed.
+        "needsJournal": False,
         "amounts": {"reg": 15000, "paper": 10000},
     },
     "THESIS_100": {
         "label": "100 Page Thesis",
         "hasImplementation": False,
         "requiresWritingFee": False,
+        # Not a journal paper: delivered to the client, client accepts -> Completed.
+        "needsJournal": False,
         "amounts": {"reg": 30000, "paper": 70000},
     },
 }
@@ -1371,6 +1378,23 @@ def read_validation_document(d, required=True, label="document"):
 
 def service_conf(key):
     return SERVICES.get(key) or SERVICES[DEFAULT_SERVICE]
+
+
+def service_needs_journal(key):
+    """Synopsis / Survey Synopsis / Thesis are not journal papers: once the client
+    accepts the delivered work it is finished - there is no Journal Team stage."""
+    return service_conf(key).get("needsJournal", True)
+
+
+def finish_if_no_journal(con, c, actor):
+    """Called right after a client reaches CLIENT_ACCEPTED. For services with no
+    journal stage, close the work as COMPLETED straight away."""
+    if service_needs_journal(c["service_key"]):
+        return False
+    move_stage(con, c["id"], "COMPLETED", actor,
+               "Client accepted the work — completed (%s has no journal submission)."
+               % service_conf(c["service_key"])["label"])
+    return True
 
 
 def stageIdxServer(stage):
@@ -2326,6 +2350,17 @@ def init_db():
         if not is_hashed_password(r["client_password"]):
             con.execute("UPDATE clients SET client_password=? WHERE id=?",
                         (hash_password(r["client_password"]), r["id"]))
+    con.commit()
+
+    # ----- Synopsis / Survey Synopsis / Thesis have no Journal Team stage. Any that are
+    #       sitting at "Client approved - ready for Journal Team" are already finished.
+    _no_journal = [k for k, v in SERVICES.items() if not v.get("needsJournal", True)]
+    for r in con.execute("SELECT id FROM clients WHERE stage='CLIENT_ACCEPTED' AND service_key = ANY(?)",
+                         (_no_journal,)).fetchall():
+        con.execute("UPDATE clients SET stage='COMPLETED', stage_entered_at=? WHERE id=?", (now_str(), r["id"]))
+        con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                    (r["id"], "COMPLETED", "System",
+                     "Client had accepted the work — completed (this service has no journal submission)."))
     con.commit()
 
     # ----- SECURITY: purge any expired sessions left over from a previous run. Computed
@@ -4262,8 +4297,36 @@ def _rows_from_upload(filename, b64, csv_text):
             return list(csv.reader(io.StringIO(raw.decode("utf-8", errors="ignore"))))
         if filename.endswith(".xlsx"):
             return read_xlsx_rows(raw)
-        raise ApiError("Please upload a .xlsx or .csv file.")
+        if filename.endswith(".json"):
+            return _json_to_rows(raw)
+        raise ApiError("Please upload a .xlsx, .csv or .json file.")
     raise ApiError("No file was received.")
+
+
+def _json_to_rows(raw):
+    """A JSON upload -> the same [header, row, row...] shape a spreadsheet gives.
+    Accepts a list of objects, or {"projects": [...]} / {"rows": [...]}. A list value
+    (e.g. "Programmers": ["Arun", "Meena"]) becomes a comma-separated cell."""
+    try:
+        data = json.loads(raw.decode("utf-8-sig", errors="ignore"))
+    except Exception as e:
+        raise ApiError("That JSON file couldn't be read: %s" % e)
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list)), [data])
+    if not isinstance(data, list) or not all(isinstance(x, dict) for x in data):
+        raise ApiError("The JSON file must be a list of objects, e.g. [{\"Client Name\": \"...\"}].")
+    header = []
+    for obj in data:
+        for k in obj:
+            if k not in header:
+                header.append(k)
+    def cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, list):
+            return ", ".join(str(x).strip() for x in v if str(x).strip())
+        return v
+    return [header] + [[cell(obj.get(k)) for k in header] for obj in data]
 
 
 def _find_client(con, ref):
@@ -4594,7 +4657,7 @@ def _import_queries_rows(con, rows, default_client_id="", actor=""):
     return {"ok": True, "added": added, "skipped": skipped, "errors": errors[:30]}
 
 
-BULK_IMPORT_KINDS = {"clients", "notes", "referrals", "tasks", "team", "payments", "queries"}
+BULK_IMPORT_KINDS = {"clients", "notes", "referrals", "tasks", "team", "payments", "queries", "projects"}
 # Which logins may import each kind (Super Admin / MD Admin may import anything). The page
 # shows an Import button only where the login is on this list (see canImport in index.html).
 _IMP_MKT = ("telecaller", "marketing_tl", "marketing_manager")
@@ -4608,6 +4671,8 @@ BULK_IMPORT_ROLES = {
     "queries": _IMP_MKT + _IMP_TECH + _IMP_JRN,
     "tasks": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,
     "team": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,   # own department only
+    # Already-registered clients whose work is in progress / already published.
+    "projects": _IMP_TECH,
 }
 
 
@@ -4623,6 +4688,460 @@ def require_import_role(role_, kind):
         return
     if role_ not in BULK_IMPORT_ROLES.get(kind, ()):
         raise ApiError("Your login can't import %s." % kind, 403)
+
+
+
+# =====================================================================
+# IMPORT EXISTING PROJECTS (Technical Manager / TL)
+# ---------------------------------------------------------------------
+# For clients that were registered before this tool was used, or whose work is
+# already part-way through / already published. One row per project (work). The
+# row says where the work is now and who did each part; the project is created
+# straight at that stage with those people on it, so it shows up in the right
+# queue and in "Who did what". A row with a Client ID that already exists updates
+# that client instead (forward only - it never moves a project backwards).
+# =====================================================================
+PROJECT_IMPORT_COLUMNS = [
+    # (template header, field, example 1, example 2)
+    ("Client ID", "clientId", "", ""),
+    ("Client Name", "name", "Dr. Lakshmi R", "Mr. Suresh Babu"),
+    ("Phone", "phone", "9876543210", "9123456780"),
+    ("Email", "email", "lakshmi@example.com", ""),
+    ("Service", "service", "SCI", "Synopsis"),
+    ("Project Title", "topic", "Deep learning for crop disease detection", "Survey on IoT security"),
+    ("Institution", "institution", "Anna University", "VIT"),
+    ("Registration Date", "regDate", "2025-11-10", "2026-02-01"),
+    ("Deadline", "deadlineDate", "2026-06-30", "2026-08-15"),
+    ("Total Amount", "totalAmount", "120000", "25000"),
+    ("Registration Paid", "regAmount", "25000", "15000"),
+    ("Status", "status", "Published", "Paper writing in progress"),
+    ("Proposal Writer", "proposalWriter", "Ravi Kumar", ""),
+    ("Programmers", "programmers", "Arun Raj, Meena S", ""),
+    ("Paper Writers", "writers", "Priya N", "Ravi Kumar"),
+    ("Proofreaders", "proofreaders", "Vijay P, Anu R", ""),
+    ("Formatters", "formatters", "Kavya M", ""),
+    ("Submission Person", "submissionPerson", "Sana K", ""),
+    ("Journal Name", "journalName", "IEEE Access", ""),
+    ("Notes", "notes", "Imported from old register", ""),
+]
+PROJECT_IMPORT_ALIASES = {h.lower(): f for h, f, _, _ in PROJECT_IMPORT_COLUMNS}
+PROJECT_IMPORT_ALIASES.update({
+    "client": "name", "name": "name", "mobile": "phone", "phone number": "phone",
+    "service type": "service", "work": "service", "title": "topic", "topic": "topic",
+    "project": "topic", "project name": "topic", "college": "institution", "university": "institution",
+    "reg date": "regDate", "date": "regDate", "deadline date": "deadlineDate", "total": "totalAmount",
+    "amount": "totalAmount", "reg amount": "regAmount", "registration amount": "regAmount",
+    "current status": "status", "stage": "status", "proposal by": "proposalWriter",
+    "programmer": "programmers", "code by": "programmers", "paper writer": "writers",
+    "writer": "writers", "writers": "writers", "proofreader": "proofreaders", "formatter": "formatters",
+    "submitted by": "submissionPerson", "submission": "submissionPerson", "journal": "journalName",
+    "cl id": "clientId", "clientid": "clientId", "id": "clientId",
+})
+
+# Status the Technical Manager types -> (pipeline stage, journal status)
+PROJECT_IMPORT_STATUSES = [
+    ("Not started", "TECH_ASSIGNED", ""),
+    ("Proposal in progress", "PROPOSAL_ASSIGNED", ""),
+    ("Proposal with client", "PROPOSAL_CLIENT_REVIEW", ""),
+    ("Proposal approved", "PROPOSAL_APPROVED", ""),
+    ("Code in progress", "IMPLEMENTATION_ASSIGNED", ""),
+    ("Code with client", "IMPLEMENTATION_CLIENT_REVIEW", ""),
+    ("Code approved", "IMPLEMENTATION_APPROVED", ""),
+    ("Paper writing in progress", "PAPERWRITER_ASSIGNED", ""),
+    ("Paper with client", "CLIENT_REVIEW", ""),
+    ("Client accepted", "CLIENT_ACCEPTED", ""),
+    ("Proofreading", "PROOFREADING", ""),
+    ("Formatting", "FORMATTING_IN_PROGRESS", ""),
+    ("Ready for submission", "SUBMISSION", ""),
+    ("Submitted to journal", "JOURNAL_SUBMITTED", "SUBMITTED"),
+    ("Under review", "JOURNAL_SUBMITTED", "UNDER_REVIEW"),
+    ("Revision requested", "JOURNAL_SUBMITTED", "REVISION_REQUESTED"),
+    ("Accepted", "COMPLETED", "ACCEPTED"),
+    ("Published", "COMPLETED", "PUBLISHED"),
+    ("Completed", "COMPLETED", ""),
+]
+_STATUS_LOOKUP = {k.lower(): (st, js) for k, st, js in PROJECT_IMPORT_STATUSES}
+_STATUS_LOOKUP.update({st.lower(): (st, "") for st in STAGES})
+_PROPOSAL_CODE_STAGES = set(STAGES[STAGES.index("PROPOSAL_ASSIGNED"):STAGES.index("IMPLEMENTATION_APPROVED") + 1])
+_JOURNAL_STAGES = set(STAGES[STAGES.index("JOURNAL_MANAGER_REVIEW"):STAGES.index("JOURNAL_SUBMITTED") + 1])
+
+
+def _service_key_from_text(text):
+    t = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+    if not t:
+        return None
+    for k, v in SERVICES.items():
+        if t in (k.lower().replace("_", " "), re.sub(r"[^a-z0-9]+", " ", v["label"].lower()).strip()):
+            return k
+    if "thesis" in t:
+        return "THESIS_100"
+    if "survey" in t:
+        return "SURVEY_SYNOPSIS"
+    if "synopsis" in t:
+        return "SYNOPSIS"
+    if "sci" == t or t.startswith("sci "):
+        return "SCI"
+    if "scopus" in t:
+        return "SCOPUS_NO_IMPL" if ("without" in t or "no impl" in t or "no " in t) else "SCOPUS_PAID"
+    return None
+
+
+def _split_people(v):
+    return [x.strip() for x in re.split(r"[,;/\n]+", v or "") if x.strip()]
+
+
+def _next_client_ids(con, phone, email):
+    """Same CL-/PRJ- numbering as add_client (a known phone/email joins that client's family)."""
+    fam = con.execute("""SELECT display_id, id FROM clients
+                         WHERE (phone<>'' AND LOWER(REPLACE(phone,' ',''))=?)
+                            OR (email<>'' AND ?<>'' AND LOWER(email)=LOWER(?))
+                         ORDER BY created_at ASC, id ASC""",
+                      (phone.replace(" ", "").lower(), email, email)).fetchall()
+    if fam:
+        display_id = fam[0]["display_id"] or fam[0]["id"]
+        n = con.execute("SELECT COUNT(*) c FROM clients WHERE display_id=?", (display_id,)).fetchone()["c"]
+        cid = f"{display_id}-S{n + 1}"
+    else:
+        n = 1001
+        for r in con.execute("SELECT id FROM clients"):
+            m = re.match(r"^CL-(\d+)$", r["id"])
+            if m:
+                n = max(n, int(m.group(1)) + 1)
+        cid = display_id = f"CL-{n}"
+    pn = 2001
+    for r in con.execute("SELECT project_id FROM clients"):
+        m = re.match(r"^PRJ-(\d+)$", r["project_id"] or "")
+        if m:
+            pn = max(pn, int(m.group(1)) + 1)
+    return cid, display_id, f"PRJ-{pn}"
+
+
+def _import_date(v, default=""):
+    if v in (None, ""):
+        return default
+    if isinstance(v, (int, float)):
+        return _excel_serial_to_iso(v) or default
+    sv = str(v).strip()
+    if re.match(r"^\d+(\.0+)?$", sv) and len(sv) <= 6:          # Excel serial typed as text
+        return _excel_serial_to_iso(float(sv)) or default
+    out = _normalize_date_str(sv)
+    return out if re.match(r"^\d{4}-\d{2}-\d{2}$", out) else default
+
+
+def _import_amount(v):
+    try:
+        return float(str(v).replace(",", "").replace("Rs.", "").replace("Rs", "").strip()) if str(v or "").strip() else 0.0
+    except ValueError:
+        return None
+
+
+def _import_projects_rows(con, rows, actor):
+    if not rows or len(rows) < 2:
+        raise ApiError("The file has no project rows under the header row.")
+    # keep raw cell values (dates may be Excel serial numbers)
+    header = [(str(h).strip().lower() if h is not None else "") for h in rows[0]]
+    mapping = {i: PROJECT_IMPORT_ALIASES.get(h) for i, h in enumerate(header)}
+    if "name" not in mapping.values() or "status" not in mapping.values():
+        raise ApiError("Use the template: the header row needs at least 'Client Name', 'Phone', "
+                       "'Service' and 'Status' columns.")
+    team = {}
+    for r in con.execute("SELECT name, role, team_type FROM employees WHERE active=1 AND deleted_at IS NULL"):
+        team.setdefault(r["name"].strip().lower(), (r["name"], r["role"], r["team_type"] or ""))
+    who = "Imported by " + (actor or "Technical Manager")
+    added, updated, skipped, errors, warnings = 0, 0, 0, [], []
+
+    for idx, raw in enumerate(rows[1:], start=2):
+        rec = {}
+        for i, val in enumerate(raw):
+            f = mapping.get(i)
+            if f and val not in (None, ""):
+                rec[f] = val if f in ("regDate", "deadlineDate") else str(val).strip()
+        if not any(str(v).strip() for v in rec.values()):
+            continue
+        label = rec.get("name") or rec.get("clientId") or f"row {idx}"
+        def fail(msg):
+            errors.append(f"Row {idx} ({label}): {msg}")
+
+        # ---------- where is the work now?
+        st = _STATUS_LOOKUP.get((rec.get("status") or "").strip().lower())
+        if not st:
+            fail("unknown Status '%s'. Use one of: %s." % (rec.get("status", ""),
+                 ", ".join(k for k, _, _ in PROJECT_IMPORT_STATUSES))); skipped += 1; continue
+        stage, journal_status = st
+
+        existing = None
+        if rec.get("clientId"):
+            existing = con.execute("SELECT * FROM clients WHERE id=? OR project_id=?",
+                                   (rec["clientId"], rec["clientId"])).fetchone()
+            if not existing:
+                fail("Client ID %s was not found — leave Client ID blank to add a new client." % rec["clientId"])
+                skipped += 1; continue
+        svc = existing["service_key"] if existing else _service_key_from_text(rec.get("service"))
+        if not svc:
+            fail("unknown Service '%s'. Use one of: %s." % (rec.get("service", ""),
+                 ", ".join(v["label"] for v in SERVICES.values()))); skipped += 1; continue
+        conf = service_conf(svc)
+        if stage in _PROPOSAL_CODE_STAGES and not conf["hasImplementation"]:
+            fail("%s has no proposal / code step, so Status can't be '%s'." % (conf["label"], rec["status"]))
+            skipped += 1; continue
+        if not conf.get("needsJournal", True):
+            if stage in _JOURNAL_STAGES or journal_status:
+                fail("%s has no journal submission — use 'Paper with client', 'Client accepted' or "
+                     "'Completed'." % conf["label"]); skipped += 1; continue
+            if stage == "CLIENT_ACCEPTED":
+                stage = "COMPLETED"
+        if stage == "CLIENT_ACCEPTED" and (rec.get("journalName") or "").strip():
+            stage = "JOURNAL_MANAGER_REVIEW"   # client accepted + journal named = already with the Journal Team
+
+        # ---------- people
+        ppl = {k: _split_people(rec.get(k)) for k in
+               ("proposalWriter", "programmers", "writers", "proofreaders", "formatters", "submissionPerson")}
+        if len(ppl["proposalWriter"]) > 1:
+            ppl["proposalWriter"] = ppl["proposalWriter"][:1]
+        # canonical spelling from the Team list when the name matches
+        for k, lst in ppl.items():
+            ppl[k] = [team.get(n.lower(), (n,))[0] for n in lst]
+        si = STAGES.index(stage)
+        # The person doing the CURRENT step must be a real, active team member (they log in
+        # and do it). Earlier, finished steps may name anyone (people may have left since).
+        need = None
+        if stage in ("PROPOSAL_ASSIGNED",):
+            need = ("proposalWriter", "PAPER_WRITER", "", "Proposal Writer")
+        elif stage == "IMPLEMENTATION_ASSIGNED":
+            need = ("programmers", "PROGRAMMER", "", "Programmers")
+        elif stage == "PAPERWRITER_ASSIGNED":
+            need = ("writers", "PAPER_WRITER", "", "Paper Writers")
+        elif stage == "PROOFREADING":
+            need = ("proofreaders", "JOURNAL_EMPLOYEE", "PROOFREAD", "Proofreaders")
+        elif stage == "FORMATTING_IN_PROGRESS":
+            need = ("formatters", "JOURNAL_EMPLOYEE", "FORMAT", "Formatters")
+        if need:
+            field, erole, ttype, col = need
+            if not ppl[field]:
+                fail("Status '%s' needs the %s column filled (who is doing it now)." % (rec["status"], col))
+                skipped += 1; continue
+            bad = [n for n in ppl[field] if not (n.lower() in team and team[n.lower()][1] == erole
+                                                 and ttype in team[n.lower()][2])]
+            if bad:
+                fail("%s: %s %s not an active %s on the Team list." % (col, ", ".join(bad),
+                     "is" if len(bad) == 1 else "are", col[:-1].lower() if col.endswith("s") else col.lower()))
+                skipped += 1; continue
+        for k, lst in ppl.items():
+            unknown = [n for n in lst if n.lower() not in team]
+            if unknown and not (need and need[0] == k):
+                warnings.append(f"Row {idx} ({label}): {', '.join(unknown)} not on the Team list — kept as written.")
+
+        # ---------- dates & money
+        reg = _import_date(rec.get("regDate"), date.today().isoformat())
+        deadline = _import_date(rec.get("deadlineDate"), _default_deadline(reg))
+        total = _import_amount(rec.get("totalAmount"))
+        reg_amt = _import_amount(rec.get("regAmount"))
+        if total is None or reg_amt is None:
+            fail("Total Amount / Registration Paid must be numbers."); skipped += 1; continue
+
+        if existing:
+            cur = STAGES.index(existing["stage"]) if existing["stage"] in STAGES else 0
+            if si < cur:
+                fail("this client is already further along (%s) — import never moves a project back."
+                     % STAGE_LABELS.get(existing["stage"], existing["stage"])); skipped += 1; continue
+            cid = existing["id"]
+        else:
+            name = (rec.get("name") or "").strip()
+            phone = re.sub(r"\D", "", rec.get("phone") or "")
+            if phone.startswith("91") and len(phone) == 12:
+                phone = phone[2:]
+            if not name or not re.match(r"^\d{10}$", phone):
+                fail("Client Name and a 10-digit Phone are required."); skipped += 1; continue
+            email = (rec.get("email") or "").strip()
+            if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+                fail("Email '%s' isn't valid." % email); skipped += 1; continue
+            dup = con.execute("""SELECT id FROM clients WHERE REPLACE(phone,' ','')=? AND service_key=?
+                                 AND LOWER(name)=LOWER(?)""", (phone, svc, name)).fetchone()
+            if dup:
+                fail("already in the tool as %s (same name, phone and service). To update it, put %s in "
+                     "the Client ID column." % (dup["id"], dup["id"])); skipped += 1; continue
+            cid, display_id, project_id = _next_client_ids(con, phone, email)
+            topic = (rec.get("topic") or "").strip()
+            con.execute("""INSERT INTO clients (id, display_id, project_id, name, phone, email, domain, topic,
+                               institution, notes, reg_date, deadline_date, stage, service_key, total_amount)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'NEW',?,?)""",
+                        (cid, display_id, project_id, name, phone, email, topic, topic,
+                         (rec.get("institution") or "").strip(), (rec.get("notes") or "").strip(),
+                         reg, deadline, svc, total))
+            for k in PAY_KEYS:
+                if k == "reg" and reg_amt:
+                    con.execute("""INSERT INTO payments (client_id, pay_key, status, amount, pay_date)
+                                   VALUES (?,?,'paid',?,?)""", (cid, k, reg_amt, reg))
+                else:
+                    con.execute("INSERT INTO payments (client_id, pay_key) VALUES (?,?)", (cid, k))
+            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                        (cid, "NEW", who, "Already-registered client, added by import."))
+
+        # ---------- who did what (only fill what the row gives; never wipe existing names)
+        sets, vals = [], []
+        def put(col, v):
+            if v:
+                sets.append(col + "=?"); vals.append(v)
+        put("proposal_writer", ",".join(ppl["proposalWriter"]))
+        put("assigned_programmers", ",".join(ppl["programmers"]))
+        put("assigned_writers", ",".join(ppl["writers"]))
+        if ppl["proofreaders"]:
+            put("proofread_coordinator", ppl["proofreaders"][0])
+            put("assigned_proofreaders", ",".join(ppl["proofreaders"]))
+        if ppl["formatters"]:
+            put("format_coordinator", ppl["formatters"][0])
+            put("assigned_formatters", ",".join(ppl["formatters"]))
+        put("submission_person", ",".join(ppl["submissionPerson"]))
+        put("journal_name", (rec.get("journalName") or "").strip())
+        put("journal_status", journal_status)
+        if stage == "PROPOSAL_ASSIGNED":
+            put("proposal_deadline", deadline)
+        if stage == "IMPLEMENTATION_ASSIGNED":
+            put("implementation_deadline", deadline)
+        if stage == "PAPERWRITER_ASSIGNED":
+            put("writing_deadline", deadline)
+        if si >= STAGES.index("CLIENT_ACCEPTED"):
+            put("client_approved_at", now_str())
+        if sets:
+            con.execute("UPDATE clients SET %s WHERE id=?" % ", ".join(sets), vals + [cid])
+        status_txt = rec.get("status", "")
+        if not existing or existing["stage"] != stage:
+            move_stage(con, cid, stage, who, "Imported existing project — status: %s." % status_txt)
+        else:
+            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
+                        (cid, stage, who, "Import updated the team / journal details."))
+        if existing:
+            updated += 1
+        else:
+            added += 1
+    con.commit()
+    return {"ok": True, "added": added, "updated": updated, "skipped": skipped,
+            "errors": errors, "warnings": warnings}
+
+
+def _xlsx_col(i):
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def build_projects_template_xlsx():
+    """Excel template (stdlib only): sheet 1 'Projects' with headers + 2 examples and
+    drop-down lists on Service / Status; sheet 2 'Allowed values'."""
+    from xml.sax.saxutils import escape as xesc
+    heads = [h for h, _, _, _ in PROJECT_IMPORT_COLUMNS]
+    ex1 = [e1 for _, _, e1, _ in PROJECT_IMPORT_COLUMNS]
+    ex2 = [e2 for _, _, _, e2 in PROJECT_IMPORT_COLUMNS]
+    services = [v["label"] for v in SERVICES.values()]
+    statuses = [k for k, _, _ in PROJECT_IMPORT_STATUSES]
+
+    def row_xml(r, cells, style=0):
+        out = []
+        for i, v in enumerate(cells):
+            if v == "":
+                continue
+            st = f' s="{style}"' if style else ""
+            out.append(f'<c r="{_xlsx_col(i)}{r}" t="inlineStr"{st}><is><t>{xesc(str(v))}</t></is></c>')
+        return f'<row r="{r}">{"".join(out)}</row>'
+
+    widths = "".join(f'<col min="{i+1}" max="{i+1}" width="{max(14, min(42, len(h) + 6))}" customWidth="1"/>'
+                     for i, h in enumerate(heads))
+    s_col, st_col = _xlsx_col(heads.index("Service")), _xlsx_col(heads.index("Status"))
+    sheet1 = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+              '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+              f'<cols>{widths}</cols><sheetData>'
+              + row_xml(1, heads, 1) + row_xml(2, ex1) + row_xml(3, ex2) +
+              '</sheetData><dataValidations count="2">'
+              f'<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="{s_col}2:{s_col}2000">'
+              f"<formula1>'Allowed values'!$A$2:$A${len(services)+1}</formula1></dataValidation>"
+              f'<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="{st_col}2:{st_col}2000">'
+              f"<formula1>'Allowed values'!$B$2:$B${len(statuses)+1}</formula1></dataValidation>"
+              '</dataValidations></worksheet>')
+    help_rows = [row_xml(1, ["Service", "Status", "How to fill"], 1)]
+    tips = ["One row per project (work).",
+            "Client ID: leave blank for a new client; put an existing ID (e.g. CL-1003) to update it.",
+            "Several people: separate names with commas, e.g. Arun Raj, Meena S.",
+            "Proofreaders / Formatters: the first name is the coordinator.",
+            "Names should match the Team list. The person on the CURRENT step must be an active team member.",
+            "Dates: YYYY-MM-DD (e.g. 2026-03-31) or DD/MM/YYYY.",
+            "Synopsis / Survey Synopsis / Thesis have no journal: use Paper with client, Client accepted or Completed.",
+            "Delete the two example rows before importing."]
+    for i in range(max(len(services), len(statuses), len(tips))):
+        help_rows.append(row_xml(i + 2, [services[i] if i < len(services) else "",
+                                         statuses[i] if i < len(statuses) else "",
+                                         tips[i] if i < len(tips) else ""]))
+    sheet2 = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+              '<cols><col min="1" max="1" width="34" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/>'
+              '<col min="3" max="3" width="100" customWidth="1"/></cols>'
+              f'<sheetData>{"".join(help_rows)}</sheetData></worksheet>')
+    files = {
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '</Types>',
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>',
+        "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+            '<sheet name="Projects" sheetId="1" r:id="rId1"/><sheet name="Allowed values" sheetId="2" r:id="rId2"/>'
+            '</sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
+            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>',
+        "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>'
+            '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            '<fill><patternFill patternType="solid"><fgColor rgb="FF0E7490"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            '</styleSheet>',
+        "xl/worksheets/sheet1.xml": sheet1,
+        "xl/worksheets/sheet2.xml": sheet2,
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels",
+                     "xl/styles.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"]:
+            z.writestr(name, files[name])
+    return buf.getvalue()
+
+
+def build_projects_template_json():
+    ex = []
+    for col in (2, 3):
+        obj = {}
+        for h, f, e1, e2 in PROJECT_IMPORT_COLUMNS:
+            v = e1 if col == 2 else e2
+            if f in ("programmers", "writers", "proofreaders", "formatters"):
+                v = _split_people(v)
+            obj[h] = v
+        ex.append(obj)
+    return json.dumps({"_help": {
+        "Service": [v["label"] for v in SERVICES.values()],
+        "Status": [k for k, _, _ in PROJECT_IMPORT_STATUSES],
+        "Notes": "One object per project. Client ID blank = new client. Name lists can be arrays. "
+                 "Proofreaders/Formatters: first name is the coordinator. Delete the examples."},
+        "projects": ex}, indent=2, ensure_ascii=False).encode("utf-8")
 
 
 def _dispatch_bulk_import(con, kind, rows, d):
@@ -4642,6 +5161,8 @@ def _dispatch_bulk_import(con, kind, rows, d):
         return _import_payments_rows(con, rows)
     if kind == "queries":
         return _import_queries_rows(con, rows, default_client_id, actor)
+    if kind == "projects":
+        return _import_projects_rows(con, rows, actor or "Technical Manager")
     raise ApiError("Unknown import type.")
 
 
@@ -5532,6 +6053,7 @@ def _handle_action_core(action, d, ip=""):
                     "clientReferrals": client_refs, "workSends": sends_out,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
+                                      "needsJournal": v.get("needsJournal", True),
                                       "amounts": v["amounts"]} for k, v in SERVICES.items()},
                     "stageReminders": reminder_settings(con) if (d.get("role") or "") != "client" else None}
 
@@ -5892,6 +6414,19 @@ def _handle_action_core(action, d, ip=""):
             require_import_role((d.get("role") or "").strip(), kind)
             rows = _rows_from_upload(d.get("filename"), d.get("contentBase64"), d.get("csvText"))
             return _dispatch_bulk_import(con, kind, rows, d)
+
+        if action == "import_template":
+            if (d.get("kind") or "") != "projects":
+                raise ApiError("No template for that import type.")
+            require_import_role((d.get("role") or "").strip(), "projects")
+            fmt = (d.get("format") or "xlsx").lower()
+            if fmt == "json":
+                data, name, mime = build_projects_template_json(), "existing-projects-template.json", "application/json"
+            else:
+                data, name = build_projects_template_xlsx(), "existing-projects-template.xlsx"
+                mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            return {"ok": True, "filename": name, "mime": mime,
+                    "contentBase64": base64.b64encode(data).decode("ascii")}
 
         if action == "bulk_import_from_url":
             kind = (d.get("kind") or "").strip()
@@ -7477,6 +8012,7 @@ def _handle_action_core(action, d, ip=""):
             con.execute("UPDATE clients SET client_approved_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
                         (c["id"],))
             move_stage(con, c["id"], "CLIENT_ACCEPTED", "Client", "Client approved the paper.")
+            finish_if_no_journal(con, c, "Client")
             con.commit()
             return {"ok": True}
 
@@ -7512,6 +8048,7 @@ def _handle_action_core(action, d, ip=""):
                         (c["id"],))
             move_stage(con, c["id"], "CLIENT_ACCEPTED", actor,
                        "Continued without waiting for the client's approval — " + note)
+            finish_if_no_journal(con, c, actor)
             con.commit()
             return {"ok": True}
 
@@ -7589,6 +8126,9 @@ def _handle_action_core(action, d, ip=""):
         #       name(s).
         if action == "select_journal":
             c = get_client(con, d.get("clientId") or "")
+            if not service_needs_journal(c["service_key"]):
+                raise ApiError(service_conf(c["service_key"])["label"] + " has no journal submission — "
+                               "it is completed once the client accepts it.")
             if c["stage"] != "CLIENT_ACCEPTED":
                 raise ApiError("This client isn't ready to be sent to the Journal Team yet — "
                                 "the client needs to approve the delivered paper first.")
