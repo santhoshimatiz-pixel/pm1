@@ -251,8 +251,18 @@ a{color:var(--purple)}
 .import-box h4{margin-bottom:8px}
 .import-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .import-row input[type="text"]{flex:1;min-width:220px}
-.import-result{margin-top:12px;padding:12px 14px;border-radius:10px;font-size:13px;background:#EAF7F8;border:1px solid var(--line)}
-.import-result.err-list{color:var(--muted)}
+.import-result{margin-top:12px;padding:12px 14px;border-radius:10px;font-size:13px;background:var(--card2);color:var(--text);border:1px solid var(--line);line-height:1.55}
+.import-result.err-list{color:var(--text);border-color:rgba(220,38,38,.35);background:rgba(220,38,38,.06);max-height:260px;overflow:auto}
+.import-result.warn-list{color:var(--text);border-color:rgba(217,119,6,.35);background:rgba(217,119,6,.07);max-height:200px;overflow:auto}
+.import-result .ir-rows{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.import-result + .import-result{margin-top:8px}
+.import-map{margin-top:12px;padding:14px;border-radius:10px;border:1px solid var(--purple);background:var(--card2);color:var(--text)}
+.import-map h5{font-size:13.5px;margin:0 0 4px}
+.import-map p{font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.5}
+.import-map-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+.import-map-row b{overflow-wrap:anywhere}
+.import-map-row small{color:var(--muted);display:block}
+.import-map-row select{width:100%}
 .reject-row{background:#FEF2F2;border:1px solid rgba(220,38,38,.22);border-radius:12px;padding:14px 16px;margin-bottom:10px}
 .reject-row .reason{color:var(--bad);font-size:13px;margin-top:4px}
 .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -3181,15 +3191,83 @@ function admOpenBulkImport(kind, clientId){
     </div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
+// "Row 2 (Darshan): unknown Service 'EPORS' ..." x 293  ->  one line + "293 rows: 2, 3, 4 ... (show all)"
+function admGroupImportMessages(list){
+  const groups = new Map();
+  (list||[]).forEach(m=>{
+    const mm = /^Row (\d+)(?: \(([^)]*)\))?: (.*)$/s.exec(m);
+    const key = mm ? mm[3] : m;
+    if(!groups.has(key)) groups.set(key, []);
+    if(mm) groups.get(key).push(mm[2] ? `${mm[1]} (${mm[2]})` : mm[1]);
+  });
+  return [...groups.entries()].map(([msg, rows])=>{
+    if(!rows.length) return `<div>${esc(msg)}</div>`;
+    const shown = rows.slice(0, 8).join(", ") + (rows.length>8 ? `, … +${rows.length-8} more` : "");
+    return `<div style="margin-bottom:6px">${esc(msg)}<span class="ir-rows">${rows.length===1?"Row":rows.length+" rows:"} ${esc(shown)}</span></div>`;
+  }).join("");
+}
 function admImportSummaryHtml(out){
   let html = `<div class="import-result"><b>${out.added}</b> record(s) added${out.updated?`, <b>${out.updated}</b> updated`:""}${out.skipped?`, <b>${out.skipped}</b> skipped`:""}.</div>`;
   if(out.errors && out.errors.length){
-    html += `<div class="import-result err-list">${out.errors.map(e=>esc(e)).join("<br>")}</div>`;
+    html += `<div class="import-result err-list"><b>Not imported</b><div style="margin-top:6px">${admGroupImportMessages(out.errors)}</div></div>`;
   }
   if(out.warnings && out.warnings.length){
-    html += `<div class="import-result" style="color:var(--warn)">${out.warnings.map(e=>esc(e)).join("<br>")}</div>`;
+    html += `<div class="import-result warn-list"><b>Imported, but check</b><div style="margin-top:6px">${admGroupImportMessages(out.warnings)}</div></div>`;
   }
   return html;
+}
+// The file uses Service / Status words the tool doesn't know (e.g. "EPORS"). Ask once what
+// each one means, then send the same file again with those choices.
+let admImportPending = null;
+function admImportMappingHtml(out){
+  const sel = (kind, raw)=>{
+    const opts = kind==="service"
+      ? out.services.map(sv=>`<option value="${esc(sv.key)}">${esc(sv.label)}</option>`).join("")
+      : out.statuses.map(st=>`<option value="${esc(st)}">${esc(st)}</option>`).join("");
+    return `<select class="imp-map" data-kind="${kind}" data-raw="${esc(raw)}">
+      <option value="">— choose —</option>${opts}<option value="__skip__">Skip these rows</option></select>`;
+  };
+  const block = (kind, title)=>{
+    const vals = Object.entries(out.unknown[kind]||{});
+    if(!vals.length) return "";
+    return `<h5>${title}</h5>` + vals.map(([raw,n])=>`<div class="import-map-row">
+      <div><b>${esc(raw)}</b><small>${n} row${n===1?"":"s"}</small></div>${sel(kind, raw)}</div>`).join("");
+  };
+  return `<div class="import-map">
+    <h5>Your file uses words this tool doesn't know yet</h5>
+    <p>Tell it once what each one means and every row with that word is imported. Nothing has been imported yet.</p>
+    ${block("service","Service")}${out.unknown.status && Object.keys(out.unknown.status).length ? '<div style="height:8px"></div>' : ""}${block("status","Status")}
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn small" onclick="admImportWithMapping()">Import with these choices</button>
+    </div>
+    <div id="admImportMapErr" style="color:var(--bad);font-size:12.5px;margin-top:6px"></div>
+  </div>`;
+}
+function admShowImportResult(box, out, resend){
+  if(out.needsMapping){
+    admImportPending = {box, resend};
+    box.innerHTML = admImportMappingHtml(out);
+    return false;
+  }
+  admImportPending = null;
+  box.innerHTML = admImportSummaryHtml(out);
+  return true;
+}
+async function admImportWithMapping(){
+  if(!admImportPending) return;
+  const mapping = {service:{}, status:{}};
+  let missing = 0;
+  document.querySelectorAll(".imp-map").forEach(el=>{
+    if(!el.value) missing++;
+    else mapping[el.dataset.kind][el.dataset.raw] = el.value;
+  });
+  if(missing){ $("admImportMapErr").textContent = "Choose an option for every word (or 'Skip these rows')."; return; }
+  const {box, resend} = admImportPending;
+  box.innerHTML = `<div class="import-result">Importing…</div>`;
+  try{
+    const out = await resend(mapping);
+    if(admShowImportResult(box, out, resend)){ await loadData(); rerenderCurrent(); }
+  }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
 }
 const PROJECT_IMPORT_STATUS_LIST = ["Not started","Proposal in progress","Proposal with client","Proposal approved",
   "Code in progress","Code with client","Code approved","Paper writing in progress","Paper with client","Client accepted",
@@ -3214,11 +3292,13 @@ async function admSubmitFileImport(kind, clientId){
   const reader = new FileReader();
   reader.onload = async ()=>{
     const b64 = reader.result.split(",")[1];
+    const send = mapping => api("bulk_import", {kind, clientId, filename:file.name, contentBase64:b64, actorName: roleTitle(), mapping});
     try{
-      const out = await api("bulk_import", {kind, clientId, filename:file.name, contentBase64:b64, actorName: roleTitle()});
-      box.innerHTML = admImportSummaryHtml(out);
-      inp.value = "";
-      await loadData(); rerenderCurrent();
+      const out = await send(undefined);
+      if(admShowImportResult(box, out, send)){
+        inp.value = "";
+        await loadData(); rerenderCurrent();
+      }
     }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
   };
   reader.onerror = ()=>{ box.innerHTML = `<div class="import-result err-list">Could not read that file.</div>`; };
@@ -3229,10 +3309,10 @@ async function admSubmitUrlImport(kind, clientId){
   if(!url){ toast("Paste a Google Sheet link first"); return; }
   const box = $("admImportUrlResult");
   box.innerHTML = `<div class="import-result">Fetching sheet...</div>`;
+  const send = mapping => api("bulk_import_from_url", {kind, clientId, url, actorName: roleTitle(), mapping});
   try{
-    const out = await api("bulk_import_from_url", {kind, clientId, url, actorName: roleTitle()});
-    box.innerHTML = admImportSummaryHtml(out);
-    await loadData(); rerenderCurrent();
+    const out = await send(undefined);
+    if(admShowImportResult(box, out, send)){ await loadData(); rerenderCurrent(); }
   }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
 }
 

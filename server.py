@@ -1229,6 +1229,15 @@ SERVICES = {
         "requiresWritingFee": False,
         "amounts": {"reg": 20000, "paper": 15000},
     },
+    # EPORS = Scopus paid WITHOUT implementation. Both names mean this service (see "aliases").
+    # Journal paper (goes to the Journal Team), no proposal / code step.
+    "EPORS": {
+        "label": "EPORS (Scopus paid without implementation)",
+        "aliases": ["EPORS", "Scopus paid without implementation"],
+        "hasImplementation": False,
+        "requiresWritingFee": False,
+        "amounts": {"reg": 20000, "paper": 15000},
+    },
     "SYNOPSIS": {
         "label": "Synopsis",
         "hasImplementation": False,
@@ -4770,9 +4779,13 @@ def _service_key_from_text(text):
     t = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
     if not t:
         return None
+    norm = lambda x: re.sub(r"[^a-z0-9]+", " ", (x or "").lower()).strip()
     for k, v in SERVICES.items():
-        if t in (k.lower().replace("_", " "), re.sub(r"[^a-z0-9]+", " ", v["label"].lower()).strip()):
+        if t in [norm(k), norm(v["label"])] + [norm(a) for a in v.get("aliases", [])]:
             return k
+    # EPORS / "Scopus paid ... without implementation" - checked before the general Scopus rule
+    if "epors" in t.split() or ("scopus" in t and "paid" in t and ("without" in t or "no impl" in t)):
+        return "EPORS"
     if "thesis" in t:
         return "THESIS_100"
     if "survey" in t:
@@ -4835,15 +4848,69 @@ def _import_amount(v):
         return None
 
 
-def _import_projects_rows(con, rows, actor):
+SKIP_VALUE = "__skip__"
+
+
+def _clean_mapping(mapping):
+    """{"service": {"EPORS": "SCOPUS_PAID"}, "status": {"Done": "Published"}} from the page;
+    anything that isn't a known service key / status label (or skip) is dropped."""
+    out = {"service": {}, "status": {}}
+    if not isinstance(mapping, dict):
+        return out
+    statuses = {k.lower(): k for k, _, _ in PROJECT_IMPORT_STATUSES}
+    for raw, target in (mapping.get("service") or {}).items():
+        t = str(target or "")
+        if t == SKIP_VALUE or t in SERVICES:
+            out["service"][str(raw).strip().lower()] = t
+    for raw, target in (mapping.get("status") or {}).items():
+        t = str(target or "")
+        if t == SKIP_VALUE or t.lower() in statuses:
+            out["status"][str(raw).strip().lower()] = SKIP_VALUE if t == SKIP_VALUE else statuses[t.lower()]
+    return out
+
+
+def _import_projects_rows(con, rows, actor, mapping=None):
     if not rows or len(rows) < 2:
         raise ApiError("The file has no project rows under the header row.")
+    mapping = _clean_mapping(mapping)
+    BLANK = "(blank)"
     # keep raw cell values (dates may be Excel serial numbers)
     header = [(str(h).strip().lower() if h is not None else "") for h in rows[0]]
-    mapping = {i: PROJECT_IMPORT_ALIASES.get(h) for i, h in enumerate(header)}
-    if "name" not in mapping.values() or "status" not in mapping.values():
+    hdr_map = {i: PROJECT_IMPORT_ALIASES.get(h) for i, h in enumerate(header)}
+    if "name" not in hdr_map.values() or "status" not in hdr_map.values():
         raise ApiError("Use the template: the header row needs at least 'Client Name', 'Phone', "
                        "'Service' and 'Status' columns.")
+    # ---------- First pass: any Service / Status words this tool doesn't know? Ask the
+    #            person ONCE what each means (e.g. "EPORS" -> which service) instead of
+    #            failing every row with the same error. Nothing is imported until then.
+    unknown = {"service": {}, "status": {}}
+    f_idx = {}
+    for i, f in hdr_map.items():
+        if f and f not in f_idx:
+            f_idx[f] = i
+    def cell(raw_row, field):
+        i = f_idx.get(field)
+        if i is None or i >= len(raw_row) or raw_row[i] is None:
+            return ""
+        return str(raw_row[i]).strip()
+    for raw_row in rows[1:]:
+        if not any((str(v).strip() if v is not None else "") for v in raw_row):
+            continue
+        sv = cell(raw_row, "status")
+        key = sv.lower() or BLANK.lower()
+        if key not in _STATUS_LOOKUP and key not in mapping["status"]:
+            unknown["status"][sv or BLANK] = unknown["status"].get(sv or BLANK, 0) + 1
+        if not cell(raw_row, "clientId"):
+            sv = cell(raw_row, "service")
+            key = sv.lower() or BLANK.lower()
+            if not _service_key_from_text(sv) and key not in mapping["service"]:
+                unknown["service"][sv or BLANK] = unknown["service"].get(sv or BLANK, 0) + 1
+    if unknown["service"] or unknown["status"]:
+        return {"ok": True, "needsMapping": True, "unknown": unknown,
+                "services": [{"key": k, "label": v["label"]} for k, v in SERVICES.items()],
+                "statuses": [k for k, _, _ in PROJECT_IMPORT_STATUSES],
+                "added": 0, "updated": 0, "skipped": 0, "errors": [], "warnings": []}
+
     team = {}
     for r in con.execute("SELECT name, role, team_type FROM employees WHERE active=1 AND deleted_at IS NULL"):
         team.setdefault(r["name"].strip().lower(), (r["name"], r["role"], r["team_type"] or ""))
@@ -4853,7 +4920,7 @@ def _import_projects_rows(con, rows, actor):
     for idx, raw in enumerate(rows[1:], start=2):
         rec = {}
         for i, val in enumerate(raw):
-            f = mapping.get(i)
+            f = hdr_map.get(i)
             if f and val not in (None, ""):
                 rec[f] = val if f in ("regDate", "deadlineDate") else str(val).strip()
         if not any(str(v).strip() for v in rec.values()):
@@ -4862,7 +4929,13 @@ def _import_projects_rows(con, rows, actor):
         def fail(msg):
             errors.append(f"Row {idx} ({label}): {msg}")
 
-        # ---------- where is the work now?
+        # ---------- where is the work now? (apply what the person chose for unknown words)
+        st_word = (rec.get("status") or "").strip()
+        mapped = mapping["status"].get(st_word.lower() or BLANK.lower())
+        if mapped == SKIP_VALUE:
+            skipped += 1; continue
+        if mapped:
+            rec["status"] = mapped
         st = _STATUS_LOOKUP.get((rec.get("status") or "").strip().lower())
         if not st:
             fail("unknown Status '%s'. Use one of: %s." % (rec.get("status", ""),
@@ -4877,6 +4950,11 @@ def _import_projects_rows(con, rows, actor):
                 fail("Client ID %s was not found — leave Client ID blank to add a new client." % rec["clientId"])
                 skipped += 1; continue
         svc = existing["service_key"] if existing else _service_key_from_text(rec.get("service"))
+        if not existing and not svc:
+            chosen = mapping["service"].get((rec.get("service") or "").strip().lower() or BLANK.lower())
+            if chosen == SKIP_VALUE:
+                skipped += 1; continue
+            svc = chosen
         if not svc:
             fail("unknown Service '%s'. Use one of: %s." % (rec.get("service", ""),
                  ", ".join(v["label"] for v in SERVICES.values()))); skipped += 1; continue
@@ -5162,7 +5240,7 @@ def _dispatch_bulk_import(con, kind, rows, d):
     if kind == "queries":
         return _import_queries_rows(con, rows, default_client_id, actor)
     if kind == "projects":
-        return _import_projects_rows(con, rows, actor or "Technical Manager")
+        return _import_projects_rows(con, rows, actor or "Technical Manager", d.get("mapping"))
     raise ApiError("Unknown import type.")
 
 
