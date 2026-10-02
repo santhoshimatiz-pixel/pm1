@@ -896,6 +896,27 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-tb-item.done .adm-tb-dot{background:var(--purple);border-color:var(--purple)}
 .adm-tb-item.current{color:var(--purple);font-weight:700;border-left-color:var(--purple)}
 .adm-tb-item.current .adm-tb-dot{background:#fff;border-color:var(--purple);box-shadow:0 0 0 3px rgba(14,116,144,.2)}
+/* ----- Project -> "Who Did What": each step of the project with the people who did it ----- */
+.wdw-chain{display:flex;flex-direction:column;gap:0}
+.wdw-step{position:relative;border:1px solid var(--line);border-left:4px solid var(--line-strong);border-radius:12px;background:var(--card);padding:14px 16px}
+.wdw-step.done{border-left-color:var(--ok)}
+.wdw-step.current{border-left-color:var(--purple);box-shadow:0 0 0 3px rgba(14,116,144,.10)}
+.wdw-step.todo{opacity:.72}
+.wdw-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.wdw-title{display:flex;align-items:center;gap:10px;font-weight:800;font-size:14.5px;color:var(--text)}
+.wdw-num{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;background:var(--card2);border:2px solid var(--line-strong);color:var(--muted)}
+.wdw-step.done .wdw-num{background:var(--ok);border-color:var(--ok);color:#fff}
+.wdw-step.current .wdw-num{background:var(--purple);border-color:var(--purple);color:#fff}
+.wdw-row{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;flex-wrap:wrap}
+.wdw-row:first-of-type{border-top:none}
+.wdw-row .wdw-lbl{flex:0 0 150px;color:var(--muted);font-weight:600}
+.wdw-row .wdw-val{flex:1 1 200px;min-width:0;color:var(--text)}
+.wdw-row .wdw-when{font-size:11px;color:var(--muted);white-space:nowrap}
+.wdw-person{display:inline-block;padding:3px 10px;margin:0 6px 4px 0;border-radius:99px;background:#E6F5F7;color:var(--purple);border:1px solid rgba(14,116,144,.28);font-weight:700;font-size:12px}
+:root[data-theme="dark"] .wdw-person{background:rgba(14,116,144,.18);color:var(--text)}
+.wdw-none{color:var(--faint);font-style:italic}
+.wdw-arrow{text-align:center;color:var(--muted);font-size:11.5px;font-weight:700;padding:5px 0;letter-spacing:.02em}
+@media (max-width:640px){.wdw-row .wdw-lbl{flex-basis:100%}}
 .adm-bar-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .adm-bar-row:last-child{border-bottom:none}
 .adm-bar-row .lbl{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--text);font-weight:600;overflow-wrap:break-word;word-break:break-word}
@@ -8075,7 +8096,7 @@ function adminProjectsTableHtml(scope){
 const PROJ_TABS = [
   {key:"dashboard", label:"Dashboard"}, {key:"files", label:"Files"}, {key:"calendar", label:"Calendar"},
   {key:"discussion", label:"Discussion"}, {key:"notes", label:"Notes"}, {key:"activity", label:"Activity"},
-  {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"validation", label:"Work Validation"},
+  {key:"tasks", label:"Tasks"}, {key:"taskboard", label:"Task Board"}, {key:"whodid", label:"Who Did What"}, {key:"validation", label:"Work Validation"},
   {key:"extensions", label:"Date Extensions"}, {key:"payment", label:"Payment Information"}, {key:"query", label:"Client's Query"},
 ];
 let adminProjectClientId = null, admProjTab = "dashboard";
@@ -8143,6 +8164,7 @@ function renderAdminProjectDetail(){
   else if(admProjTab==="activity") body = admProjActivityTab(c);
   else if(admProjTab==="tasks") body = admProjTasksTab(c);
   else if(admProjTab==="taskboard") body = admProjTaskBoardTab(c);
+  else if(admProjTab==="whodid") body = admProjWhoDidTab(c);
   else if(admProjTab==="validation") body = admProjValidationTab(c);
   else if(admProjTab==="extensions") body = admProjExtensionsTab(c);
   else if(admProjTab==="payment") body = admProjPaymentTab(c);
@@ -8342,6 +8364,120 @@ function admProjTaskBoardTab(c){
   return projectSendsPanelHtml(c) + `<div class="adm-panel"><div class="adm-panel-head"><h3>Task board</h3>
       <span style="font-size:12px;color:var(--muted)">Date &amp; time each stage was reached, and who sent it there</span></div>
     <div class="adm-panel-body"><div class="adm-tb-rail">${items}</div></div>
+  </div>`;
+}
+// ----- "Who Did What": the project step by step (Marketing -> Proposal -> Code
+//       Implementation -> Paper Writing -> Journal Team) with the name of every person who
+//       did each step, when it was completed and who approved it before it went to the
+//       next step. Read-only - built from data the project already carries.
+function admProjWhoDidTab(c){
+  const curIdx = stageIdx(c.stage);
+  const hasImpl = !!serviceConf(c).hasImplementation;
+  // Latest time (and who) each stage was reached.
+  const reached = {};
+  (c.stageTimes || c.history || []).forEach(h=>{
+    if(!h.stage || !h.at) return;
+    if(!reached[h.stage] || new Date(h.at) > new Date(reached[h.stage].at)) reached[h.stage] = h;
+  });
+  const listOf = v => (Array.isArray(v) ? v : String(v||"").split(","))
+                        .map(x=>String(x||"").trim()).filter(Boolean);
+  const people = v => { const l = listOf(v); return l.length ? l.map(n=>`<span class="wdw-person">${esc(n)}</span>`).join("")
+                                                             : `<span class="wdw-none">Not assigned yet</span>`; };
+  const at = s => reached[s] ? tbDateTime(reached[s].at) : "";
+  const by = s => reached[s] && reached[s].actor ? reached[s].actor : "";
+  const row = (lbl, valHtml, when) => `<div class="wdw-row"><div class="wdw-lbl">${lbl}</div>
+      <div class="wdw-val">${valHtml}</div>${when?`<div class="wdw-when">${esc(when)}</div>`:""}</div>`;
+  // Rows for a step that hasn't happened yet are left out, so only real names/dates show.
+  const nameRow = (lbl, name, when) => (name || when) ? row(lbl, name ? `<span class="wdw-person">${esc(name)}</span>` : `<span class="wdw-none">—</span>`, when) : "";
+  // done = the project is already past `doneAt`; current = it is somewhere between `startAt` and `doneAt`.
+  const status = (startAt, doneAt) => {
+    if(c.stage===doneAt || curIdx > stageIdx(doneAt)) return "done";
+    if(curIdx >= stageIdx(startAt)) return "current";
+    return "todo";
+  };
+  const badge = st => st==="done" ? `<span class="adm-status good">Completed</span>`
+                    : st==="current" ? `<span class="adm-status warn">In progress</span>`
+                    : `<span class="badge b-dim">Not started</span>`;
+
+  const steps = [];
+
+  // 1. Marketing Team
+  const mkSt = status("NEW", "TECH_ASSIGNED");
+  steps.push({ title: "Marketing Team", st: mkSt, body:
+      nameRow("Lead added by", by("NEW"), at("NEW"))
+    + (c.bdc ? nameRow("BDC", c.bdc, "") : "")
+    + nameRow("Sent to Marketing TL by", by("TL_REVIEW"), at("TL_REVIEW"))
+    + nameRow("Approved by (TL)", by("MANAGER_REVIEW"), at("MANAGER_REVIEW"))
+    + nameRow("Approved by (Manager)", by("ACCOUNT_REVIEW"), at("ACCOUNT_REVIEW"))
+    + nameRow("Sent to Technical Team by", by("TECH_ASSIGNED"), at("TECH_ASSIGNED")) });
+
+  if(hasImpl){
+    // 2. Proposal
+    const pSt = status("PROPOSAL_ASSIGNED", "PROPOSAL_APPROVED");
+    steps.push({ title: "Proposal", st: pSt, body:
+        row("Proposal written by", people(c.proposalWriter),
+            c.proposalSubmittedAt ? "Submitted " + tbDateTime(c.proposalSubmittedAt) : at("PROPOSAL_SUBMITTED") ? "Submitted " + at("PROPOSAL_SUBMITTED") : "")
+      + (c.proposalCoordinator ? nameRow("Coordinator", c.proposalCoordinator, "") : "")
+      + nameRow("Assigned by", by("PROPOSAL_ASSIGNED"), at("PROPOSAL_ASSIGNED"))
+      + nameRow("Approved by", c.proposalVerifiedBy || by("PROPOSAL_VERIFIED"), at("PROPOSAL_VERIFIED"))
+      + nameRow("Client approved", reached.PROPOSAL_APPROVED ? (by("PROPOSAL_APPROVED") || "Client") : "", at("PROPOSAL_APPROVED")) });
+
+    // 3. Code Implementation
+    const iSt = status("IMPLEMENTATION_ASSIGNED", "IMPLEMENTATION_APPROVED");
+    steps.push({ title: "Code Implementation", st: iSt, body:
+        row("Code done by", people(c.assignedProgrammers), at("IMPLEMENTATION_COMPLETE") ? "Completed " + at("IMPLEMENTATION_COMPLETE") : "")
+      + (c.implCoordinator ? nameRow("Coordinator", c.implCoordinator, "") : "")
+      + nameRow("Assigned by", by("IMPLEMENTATION_ASSIGNED"), at("IMPLEMENTATION_ASSIGNED"))
+      + (c.demoGivenDate ? row("Demo given", `${esc(fmtDate(c.demoGivenDate))}${c.demoSatisfied?` &middot; ${c.demoSatisfied==="satisfied"?"client satisfied":"client not satisfied"}`:""}`, "") : "")
+      + (c.demoApprovedBy ? nameRow("Demo approved by", c.demoApprovedBy, c.demoApprovedAt ? tbDateTime(c.demoApprovedAt) : "") : "")
+      + nameRow("Approved by", by("IMPLEMENTATION_COMPLETE"), at("IMPLEMENTATION_COMPLETE"))
+      + nameRow("Client approved", reached.IMPLEMENTATION_APPROVED ? (by("IMPLEMENTATION_APPROVED") || "Client") : "", at("IMPLEMENTATION_APPROVED")) });
+  }
+
+  // 4. Paper Writing
+  const wSt = status("PAPERWRITER_ASSIGNED", "CLIENT_ACCEPTED");
+  steps.push({ title: "Paper Writing", st: wSt, body:
+      row("Paper written by", people(c.assignedWriters),
+          c.writingCompletedAt ? "Writing completed " + tbDateTime(c.writingCompletedAt) : "")
+    + (c.writingCompletedBy ? nameRow("Marked completed by", c.writingCompletedBy, "") : "")
+    + (c.coordinatorName ? nameRow("Coordinator", c.coordinatorName, "") : "")
+    + nameRow("Assigned by", by("PAPERWRITER_ASSIGNED"), at("PAPERWRITER_ASSIGNED"))
+    + nameRow("Approved by", by("WRITING_COMPLETE"), at("WRITING_COMPLETE"))
+    + nameRow("Client approved", reached.CLIENT_ACCEPTED ? (by("CLIENT_ACCEPTED") || "Client") : "", at("CLIENT_ACCEPTED")) });
+
+  // 5. Journal Team
+  const jSt = status("JOURNAL_MANAGER_REVIEW", "COMPLETED");
+  const prSt = status("PROOFREAD_COORD_ASSIGNED", "PROOFREAD_RECHECK");
+  const fmSt = status("FORMATTING_ASSIGNED", "FORMATTING_MANAGER_REVIEW");
+  const tag = st => st==="done" ? " (done)" : st==="current" ? " (in progress)" : "";
+  steps.push({ title: "Journal Team", st: jSt, body:
+      nameRow("Sent to Journal Team by", by("JOURNAL_MANAGER_REVIEW"), at("JOURNAL_MANAGER_REVIEW"))
+    + (c.journalName ? row("Target journal", `<b>${esc(c.journalName)}</b>`, "") : "")
+    + nameRow("Proofreading coordinator", c.proofreadCoordinator, "")
+    + row("Proofreading done by" + tag(prSt), people(c.assignedProofreaders),
+          at("JOURNAL_MANAGER_FORMATTING") ? "Completed " + at("JOURNAL_MANAGER_FORMATTING") : "")
+    + nameRow("Formatting coordinator", c.formatCoordinator, "")
+    + row("Formatting done by" + tag(fmSt), people(c.assignedFormatters),
+          at("SUBMISSION") ? "Completed " + at("SUBMISSION") : "")
+    + nameRow("Submitted by", c.submissionPerson || by("JOURNAL_SUBMITTED"), at("JOURNAL_SUBMITTED"))
+    + (c.journalStatus ? row("Journal status", `<b>${esc(String(c.journalStatus).replace(/_/g," "))}</b>`, "") : "")
+    + (c.stage==="COMPLETED" ? nameRow("Project closed by", by("COMPLETED"), at("COMPLETED")) : "") });
+
+  const chain = steps.map((s,i)=>{
+    const next = steps[i+1];
+    const arrow = next ? `<div class="wdw-arrow">&#8595; ${s.st==="done" ? "went on to" : "next"}: ${esc(next.title)}</div>` : "";
+    return `<div class="wdw-step ${s.st}">
+        <div class="wdw-head"><div class="wdw-title"><span class="wdw-num">${s.st==="done"?"&#10003;":(i+1)}</span>${esc(s.title)}</div>${badge(s.st)}</div>
+        ${s.body}
+      </div>${arrow}`;
+  }).join("");
+  return `<div class="adm-panel"><div class="adm-panel-head"><h3>Who did what</h3>
+      <span style="font-size:12px;color:var(--muted)">Each step of this project and the people who did it</span></div>
+    <div class="adm-panel-body">
+      ${c.rejected ? `<div style="margin-bottom:12px"><span class="adm-status bad">Rejected</span></div>` : ""}
+      ${c.onHold ? `<div style="margin-bottom:12px"><span class="adm-status warn">On hold</span></div>` : ""}
+      <div class="wdw-chain">${chain}</div>
+    </div>
   </div>`;
 }
 function admProjValidationTab(c){
