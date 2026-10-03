@@ -112,3 +112,17 @@ REMINDER TONE
   Reminder pop-ups (AI reminders + overdue steps) play a loud tone for 3 seconds.
   Everyone picks their own in Settings -> Reminder tone: Bell chime (default), Ding-dong,
   Marimba, Phone ring, Alarm clock, Beep beep or Siren. The tones are built into the app.
+
+IMPORT OLD WORK  (Technical Manager -> sidebar "Import Old Work")
+  1. Download the Excel or JSON template from that page, fill ONE row per work.
+     Required: Client Name, Phone or Email, Service, Status
+     (Not Started / Ongoing / Published / Finished). For Ongoing also fill
+     Current Work and Assigned To.
+  2. Upload it (.xlsx / .csv / .json). A check table is shown first - nothing is
+     saved until you click Import.
+  Client ID and Project ID are created automatically. Same phone or email as an
+  existing client = that client's next work (CL-xxxx-S2, -S3 ...). Uploading the
+  same file again is safe (already-imported rows are skipped).
+
+SERVICES
+  "EPORS" and "Scopus paid without implementation" are the same service.

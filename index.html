@@ -251,18 +251,8 @@ a{color:var(--purple)}
 .import-box h4{margin-bottom:8px}
 .import-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .import-row input[type="text"]{flex:1;min-width:220px}
-.import-result{margin-top:12px;padding:12px 14px;border-radius:10px;font-size:13px;background:var(--card2);color:var(--text);border:1px solid var(--line);line-height:1.55}
-.import-result.err-list{color:var(--text);border-color:rgba(220,38,38,.35);background:rgba(220,38,38,.06);max-height:260px;overflow:auto}
-.import-result.warn-list{color:var(--text);border-color:rgba(217,119,6,.35);background:rgba(217,119,6,.07);max-height:200px;overflow:auto}
-.import-result .ir-rows{display:block;color:var(--muted);font-size:12px;margin-top:2px}
-.import-result + .import-result{margin-top:8px}
-.import-map{margin-top:12px;padding:14px;border-radius:10px;border:1px solid var(--purple);background:var(--card2);color:var(--text)}
-.import-map h5{font-size:13.5px;margin:0 0 4px}
-.import-map p{font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.5}
-.import-map-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
-.import-map-row b{overflow-wrap:anywhere}
-.import-map-row small{color:var(--muted);display:block}
-.import-map-row select{width:100%}
+.import-result{margin-top:12px;padding:12px 14px;border-radius:10px;font-size:13px;background:#EAF7F8;border:1px solid var(--line)}
+.import-result.err-list{color:var(--muted)}
 .reject-row{background:#FEF2F2;border:1px solid rgba(220,38,38,.22);border-radius:12px;padding:14px 16px;margin-bottom:10px}
 .reject-row .reason{color:var(--bad);font-size:13px;margin-top:4px}
 .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -906,27 +896,6 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 .adm-tb-item.done .adm-tb-dot{background:var(--purple);border-color:var(--purple)}
 .adm-tb-item.current{color:var(--purple);font-weight:700;border-left-color:var(--purple)}
 .adm-tb-item.current .adm-tb-dot{background:#fff;border-color:var(--purple);box-shadow:0 0 0 3px rgba(14,116,144,.2)}
-.wt-flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
-.wt-step{position:relative;border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:var(--card2);display:flex;flex-direction:column;gap:8px;min-width:0}
-.wt-step.done{border-color:rgba(21,128,61,.35);background:rgba(21,128,61,.05)}
-.wt-step.current{border-color:var(--purple);box-shadow:0 0 0 2px rgba(14,116,144,.15)}
-.wt-step.pending{opacity:.62}
-.wt-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.wt-title{font-weight:700;font-size:13px;color:var(--text)}
-.wt-num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--line-strong);color:var(--text);font-size:10.5px;font-weight:700;margin-right:6px}
-.wt-step.done .wt-num{background:var(--ok);color:#fff}
-.wt-step.current .wt-num{background:var(--purple);color:#fff}
-.wt-people{display:flex;flex-wrap:wrap;gap:6px}
-.wt-person{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 9px 2px 2px;max-width:100%}
-.wt-person .adm-avatar{margin-left:0;width:22px;height:22px;font-size:9px;border-width:1px}
-.wt-person small{color:var(--muted);font-weight:500}
-.wt-row{font-size:11.5px;color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
-.wt-row b{color:var(--text);font-weight:600}
-.wt-none{font-size:12px;color:var(--faint)}
-.wt-mini{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
-.wt-mini span{font-size:10.5px;padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.wt-mini span.done{color:var(--ok);border-color:rgba(21,128,61,.3)}
-.wt-mini span.current{color:var(--purple);border-color:var(--purple)}
 .adm-bar-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .adm-bar-row:last-child{border-bottom:none}
 .adm-bar-row .lbl{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--text);font-weight:600;overflow-wrap:break-word;word-break:break-word}
@@ -1483,7 +1452,7 @@ input.adm-th-search:not(:placeholder-shown){color:var(--text);text-transform:non
 
     <main class="main">
       <div id="pingPermBar"><span>&#128276; Turn on desktop notifications so your manager's calls reach you even while you're in Word, another tab or another app.</span><button class="btn small" type="button" onclick="requestPingPermission()">Turn on notifications</button></div>
-<div id="memWarn">Cannot reach the server. Open the terminal in VS Code and run:  python server.py  (see README.txt)</div>
+<div id="memWarn">Can't connect to the server. Please try again in a moment.</div>
       <div class="page-head">
         <div>
           <h2 id="pageTitle"></h2>
@@ -1577,11 +1546,6 @@ function suggestedAmount(c, k){
   return (conf.amounts && conf.amounts[k]!=null) ? conf.amounts[k] : null;
 }
 function serviceLabel(c){ return serviceConf(c).label || c.serviceKey || "—"; }
-// Synopsis / Survey Synopsis / Thesis: delivered to the client, client accepts -> Completed. No Journal Team.
-function needsJournal(c){ return serviceConf(c).needsJournal !== false; }
-const JOURNAL_ONLY_STAGES = ['JOURNAL_MANAGER_REVIEW','PROOFREAD_COORD_ASSIGNED','PROOFREADING','PROOFREAD_CORRECTION',
-  'PROOFREAD_RECHECK','JOURNAL_MANAGER_FORMATTING','FORMATTING_ASSIGNED','FORMATTING_IN_PROGRESS',
-  'FORMATTING_MANAGER_REVIEW','SUBMISSION','JOURNAL_SUBMITTED'];
 
 let clients = [], employees = [];
 let calendarEvents = [];
@@ -1624,6 +1588,14 @@ function isPageRefresh(){
   }catch(e){ return false; }
 }
 
+function httpErrorText(status, statusText){
+  const names = {400:"Bad Request", 401:"Unauthorized", 403:"Forbidden", 404:"Not Found", 405:"Method Not Allowed",
+                 408:"Request Timeout", 413:"File Too Large", 429:"Too Many Requests", 500:"Internal Server Error",
+                 502:"Bad Gateway", 503:"Service Unavailable", 504:"Gateway Timeout"};
+  const label = "Error " + status + " \u2013 " + (statusText || names[status] || "Server error");
+  if(status === 502 || status === 503 || status === 504) return label + ". The server may be starting up \u2014 try again in a minute.";
+  return label + ".";
+}
 async function api(action, data){
   // SECURITY: every call is a POST and carries X-Requested-With. A cross-site
   // <form> cannot set a custom header, so this forces a CORS preflight that the
@@ -1637,9 +1609,16 @@ async function api(action, data){
   let res, out;
   try{
     res = await fetch("api?action=" + encodeURIComponent(action), opts);
+  }catch(e){
+    // No response at all: offline, DNS, server down.
+    throw new Error("Can't connect to the server. Check your internet connection and try again.");
+  }
+  try{
     out = await res.json();
   }catch(e){
-    throw new Error("Cannot reach the server. In the VS Code terminal, run:  python server.py");
+    // The server answered, but not with app data (404 page, 502/503 while the
+    // host is restarting, etc.) - show the real status code, short and plain.
+    throw new Error(httpErrorText(res.status, ""));
   }
   if(res.status === 401 && action !== "login" && action !== "session"){
     // The server-side session ended (expired, logged out elsewhere, or access
@@ -1647,7 +1626,13 @@ async function api(action, data){
     handleSessionExpired();
     throw new Error(out.error || "Your session has expired. Please log in again.");
   }
-  if(!res.ok || out.error) throw new Error(out.error || "Server error");
+  // Server / connection problems (not found, too large, too many requests, crashes,
+  // gateway errors, timeouts) -> one short line with the status code, on every screen
+  // and every upload. 400/401/403 keep the server's own message, because those tell
+  // the person what to fix ("Enter a valid phone number", "You don't have permission").
+  if(!res.ok && (res.status >= 500 || [404,405,408,413,429].includes(res.status)))
+    throw new Error(httpErrorText(res.status, ""));
+  if(!res.ok || out.error) throw new Error(out.error || httpErrorText(res.status, res.statusText));
   if(out && out.mailNotice) showMailNotice(out.mailNotice);
   return out;
 }
@@ -1754,6 +1739,7 @@ async function loadData(){
       return;
     }catch(e){
       if(i === attempts-1){
+        $("memWarn").textContent = (e && e.message) || "Can't connect to the server. Please try again in a moment.";
         $("memWarn").style.display = "block";
         lastLoadOk = false;
       } else {
@@ -1921,20 +1907,19 @@ function openPhaseInfo(phaseKey, isCurrent, currentStage){
   openModal(`<h3>${phase?phase.label:''}</h3>${body}
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
-function railHtml(stage, c){
-  const phases = (c && !needsJournal(c)) ? PHASES.filter(p=>p.key!=='proofread' && p.key!=='format') : PHASES;
-  const pidx = Math.max(0, phases.findIndex(p=>p.stages.includes(stage)));
+function railHtml(stage){
+  const pidx = phaseIdx(stage);
   let h = '<div class="pl-rail">';
-  phases.forEach((p,i)=>{
+  PHASES.forEach((p,i)=>{
     let cls = '';
     if(stage==='COMPLETED') cls = 'fin';
     else if(i<pidx) cls = 'done';
     else if(i===pidx) cls = 'act';
     h += `<span class="pl-dot ${cls}" title="${p.label} \u2014 tap for details" onclick="openPhaseInfo(${jsq(p.key)},${i===pidx},${jsq(stage)})">${(cls==='done'||cls==='fin')?'&#10003;':i+1}</span>`;
-    if(i<phases.length-1) h += `<span class="pl-bar ${i<pidx||stage==='COMPLETED'?'done':''}"></span>`;
+    if(i<PHASES.length-1) h += `<span class="pl-bar ${i<pidx||stage==='COMPLETED'?'done':''}"></span>`;
   });
   h += '</div>';
-  h += `<div class="pl-note">Phase ${pidx+1} of ${phases.length} (${phases[pidx].label}) \u2014 ${STAGE_LABEL[stage]} <span style="opacity:.65;font-weight:500;text-transform:none;letter-spacing:0">&bull; tap a step for details</span></div>`;
+  h += `<div class="pl-note">Phase ${pidx+1} of ${PHASES.length} (${PHASES[pidx].label}) \u2014 ${STAGE_LABEL[stage]} <span style="opacity:.65;font-weight:500;text-transform:none;letter-spacing:0">&bull; tap a step for details</span></div>`;
   return h;
 }
 function tags(c){
@@ -1967,7 +1952,6 @@ function serviceFamilyBadgeHtml(c){
   return `<span class="badge b-gold" title="This client (CL-ID ${esc(c.displayId||c.id)}) has ${info.count} works on record — this card is work ${info.idx} of ${info.count}">&#9733; Work ${info.idx} of ${info.count}</span>`;
 }
 function sendToJournalCardHtml(c){
-  if(!needsJournal(c)) return `<div class="pc-meta" style="color:var(--muted)">${esc(serviceLabel(c))} has no journal submission — it is completed once the client accepts it.</div>`;
   if(c.journalName){
     return `<div onclick="event.stopPropagation()"><div class="pc-meta">Target journal: <b style="color:var(--gold)">${esc(c.journalName)}</b></div>
       <button class="btn gold small" style="margin-top:6px" onclick="selectJournalNow(${jsq(c.id)})">Send to Journal Team &#8594;</button>
@@ -1985,7 +1969,7 @@ function pipeCard(c, actionsHtml, extraHtml){
     </div>
     <div class="pc-meta">${esc(c.domain||"no domain")} &bull; ${esc(c.phone||"")} &bull; Deadline: ${fmtDate(c.deadlineDate)}</div>
     ${tags(c)}
-    ${railHtml(c.stage, c)}
+    ${railHtml(c.stage)}
     ${extraHtml||""}
     ${actionsHtml?`<div class="inline-actions" onclick="event.stopPropagation()">${actionsHtml}</div>`:""}
   </div>`;
@@ -2341,7 +2325,7 @@ async function loadCaptcha(){
   }catch(e){
     if(seq !== captchaSeq) return;
     img.removeAttribute("src");
-    $("loginErr").textContent = "Couldn't load the captcha (" + e.message + "). Click \u21bb to try again.";
+    $("loginErr").textContent = "Couldn't load the captcha \u2014 " + e.message + " Click \u21bb to try again.";
   }finally{
     if(seq === captchaSeq){ img.classList.remove("loading"); if(btn) btn.disabled = false; }
   }
@@ -2820,7 +2804,9 @@ function renderTcSideNav(){
     // clients, projects, journals, tasks incl. assigning work) but without the Team
     // page - only the Technical Manager manages the programmer/paper-writer roster.
     const navItems = (role==="technical_tl" ? ADMIN_NAV_ITEMS.filter(it=>it.key!=="team") : ADMIN_NAV_ITEMS)
-      .concat([{key:"validation", icon:"&#128737;&#65039;", label:"Validation"}]);
+      .concat([{key:"validation", icon:"&#128737;&#65039;", label:"Validation"}])
+      // Import Old Work: Technical Manager only (server allows technical_manager + admin).
+      .concat(role==="technical_manager" ? [{key:"importOld", icon:"&#11014;&#65039;", label:"Import Old Work"}] : []);
     nav.innerHTML = navItems.map(it=>
       `<button class="navbtn ${tmPage===it.key?'act':''}" onclick="setTmPage(${jsq(it.key)})">${it.icon}&nbsp; ${it.label}</button>`
     ).join("");
@@ -3155,27 +3141,15 @@ const BULK_IMPORT_INFO = {
   team:     {title:"Import team members", hint:"Columns recognised: Name, Role (Programmer / Paper Writer / Journal / Telecaller), Team Type (for Journal roles — Proofreader, Proofreading Coordinator, Formatter, Formatting Coordinator, Submission), Email, Phone, Designation, Branch, Department, Employee ID. Imported team members are created with NO password - issue one from Team & Access before they can sign in."},
   payments: {title:"Import payments",  hint:"Columns recognised: Client ID, Payment Stage (Reg / Start / Code / Writing / Paper), Amount, Date. Marks that stage as paid for that client."},
   queries:  {title:"Import client queries", hint:"Columns recognised: Query, Assigned To, Date" + " — and Client ID, unless you're importing into just this one client."},
-  projects: {title:"Import existing projects", hint:"For clients already registered before this tool, or whose work is already in progress or published. One row per project: who the client is, the service, where the work is now (Status), and who did each part. Each project is added straight at that status, with those names on it. Put an existing Client ID in a row to update that client instead."},
 };
 function admOpenBulkImport(kind, clientId){
   const info = BULK_IMPORT_INFO[kind] || {title:"Import", hint:""};
-  const tpl = kind==="projects" ? `<div class="import-box">
-      <h4>1. Download the template</h4>
-      <p style="color:var(--muted);font-size:13px;line-height:1.55">The Excel template is the quickest: Service and Status are drop-down lists, and the
-        <b>Allowed values</b> sheet explains every column. Use JSON if you are exporting from another system.</p>
-      <div class="import-row">
-        <button class="btn small" onclick="downloadImportTemplate('projects','xlsx')">&#11015; Excel template (.xlsx)</button>
-        <button class="btn ghost small" onclick="downloadImportTemplate('projects','json')">&#11015; JSON template</button>
-      </div>
-      <p style="color:var(--muted);font-size:12px;margin-top:8px">Status: ${PROJECT_IMPORT_STATUS_LIST.map(esc).join(" · ")}</p>
-    </div>` : "";
-  openModal(`<h3>${esc(info.title)}</h3><p class="msub">Bulk import — ${kind==="projects"?"Excel, CSV or JSON file":"file or Google Sheet"}</p>
+  openModal(`<h3>${esc(info.title)}</h3><p class="msub">Bulk import — file or Google Sheet</p>
     <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:6px">${esc(info.hint)}</p>
-    ${tpl}
     <div class="import-box">
-      <h4>${kind==="projects"?"2. Upload the filled file":"Bulk import from a file"}</h4>
+      <h4>Bulk import from a file</h4>
       <div class="import-row">
-        <input type="file" id="admImportFile" accept=".xlsx,.csv,.tsv,.json">
+        <input type="file" id="admImportFile" accept=".xlsx,.csv,.tsv">
         <button class="btn small" onclick="admSubmitFileImport(${jsq(kind)},'${clientId||""}')">Import file</button>
       </div>
       <div id="admImportFileResult"></div>
@@ -3191,97 +3165,12 @@ function admOpenBulkImport(kind, clientId){
     </div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
 }
-// "Row 2 (Darshan): unknown Service 'EPORS' ..." x 293  ->  one line + "293 rows: 2, 3, 4 ... (show all)"
-function admGroupImportMessages(list){
-  const groups = new Map();
-  (list||[]).forEach(m=>{
-    const mm = /^Row (\d+)(?: \(([^)]*)\))?: (.*)$/s.exec(m);
-    const key = mm ? mm[3] : m;
-    if(!groups.has(key)) groups.set(key, []);
-    if(mm) groups.get(key).push(mm[2] ? `${mm[1]} (${mm[2]})` : mm[1]);
-  });
-  return [...groups.entries()].map(([msg, rows])=>{
-    if(!rows.length) return `<div>${esc(msg)}</div>`;
-    const shown = rows.slice(0, 8).join(", ") + (rows.length>8 ? `, … +${rows.length-8} more` : "");
-    return `<div style="margin-bottom:6px">${esc(msg)}<span class="ir-rows">${rows.length===1?"Row":rows.length+" rows:"} ${esc(shown)}</span></div>`;
-  }).join("");
-}
 function admImportSummaryHtml(out){
-  let html = `<div class="import-result"><b>${out.added}</b> record(s) added${out.updated?`, <b>${out.updated}</b> updated`:""}${out.skipped?`, <b>${out.skipped}</b> skipped`:""}.</div>`;
+  let html = `<div class="import-result"><b>${out.added}</b> record(s) added${out.skipped?`, <b>${out.skipped}</b> skipped`:""}.</div>`;
   if(out.errors && out.errors.length){
-    html += `<div class="import-result err-list"><b>Not imported</b><div style="margin-top:6px">${admGroupImportMessages(out.errors)}</div></div>`;
-  }
-  if(out.warnings && out.warnings.length){
-    html += `<div class="import-result warn-list"><b>Imported, but check</b><div style="margin-top:6px">${admGroupImportMessages(out.warnings)}</div></div>`;
+    html += `<div class="import-result err-list">${out.errors.map(e=>esc(e)).join("<br>")}</div>`;
   }
   return html;
-}
-// The file uses Service / Status words the tool doesn't know (e.g. "EPORS"). Ask once what
-// each one means, then send the same file again with those choices.
-let admImportPending = null;
-function admImportMappingHtml(out){
-  const sel = (kind, raw)=>{
-    const opts = kind==="service"
-      ? out.services.map(sv=>`<option value="${esc(sv.key)}">${esc(sv.label)}</option>`).join("")
-      : out.statuses.map(st=>`<option value="${esc(st)}">${esc(st)}</option>`).join("");
-    return `<select class="imp-map" data-kind="${kind}" data-raw="${esc(raw)}">
-      <option value="">— choose —</option>${opts}<option value="__skip__">Skip these rows</option></select>`;
-  };
-  const block = (kind, title)=>{
-    const vals = Object.entries(out.unknown[kind]||{});
-    if(!vals.length) return "";
-    return `<h5>${title}</h5>` + vals.map(([raw,n])=>`<div class="import-map-row">
-      <div><b>${esc(raw)}</b><small>${n} row${n===1?"":"s"}</small></div>${sel(kind, raw)}</div>`).join("");
-  };
-  return `<div class="import-map">
-    <h5>Your file uses words this tool doesn't know yet</h5>
-    <p>Tell it once what each one means and every row with that word is imported. Nothing has been imported yet.</p>
-    ${block("service","Service")}${out.unknown.status && Object.keys(out.unknown.status).length ? '<div style="height:8px"></div>' : ""}${block("status","Status")}
-    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn small" onclick="admImportWithMapping()">Import with these choices</button>
-    </div>
-    <div id="admImportMapErr" style="color:var(--bad);font-size:12.5px;margin-top:6px"></div>
-  </div>`;
-}
-function admShowImportResult(box, out, resend){
-  if(out.needsMapping){
-    admImportPending = {box, resend};
-    box.innerHTML = admImportMappingHtml(out);
-    return false;
-  }
-  admImportPending = null;
-  box.innerHTML = admImportSummaryHtml(out);
-  return true;
-}
-async function admImportWithMapping(){
-  if(!admImportPending) return;
-  const mapping = {service:{}, status:{}};
-  let missing = 0;
-  document.querySelectorAll(".imp-map").forEach(el=>{
-    if(!el.value) missing++;
-    else mapping[el.dataset.kind][el.dataset.raw] = el.value;
-  });
-  if(missing){ $("admImportMapErr").textContent = "Choose an option for every word (or 'Skip these rows')."; return; }
-  const {box, resend} = admImportPending;
-  box.innerHTML = `<div class="import-result">Importing…</div>`;
-  try{
-    const out = await resend(mapping);
-    if(admShowImportResult(box, out, resend)){ await loadData(); rerenderCurrent(); }
-  }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
-}
-const PROJECT_IMPORT_STATUS_LIST = ["Not started","Proposal in progress","Proposal with client","Proposal approved",
-  "Code in progress","Code with client","Code approved","Paper writing in progress","Paper with client","Client accepted",
-  "Proofreading","Formatting","Ready for submission","Submitted to journal","Under review","Revision requested",
-  "Accepted","Published","Completed"];
-async function downloadImportTemplate(kind, format){
-  try{
-    const out = await api("import_template", {kind, format});
-    const bin = atob(out.contentBase64), bytes = new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([bytes], {type: out.mime}));
-    a.download = out.filename; document.body.appendChild(a); a.click(); a.remove();
-  }catch(e){ toast(e.message || "Could not download the template"); }
 }
 async function admSubmitFileImport(kind, clientId){
   const inp = $("admImportFile");
@@ -3292,13 +3181,11 @@ async function admSubmitFileImport(kind, clientId){
   const reader = new FileReader();
   reader.onload = async ()=>{
     const b64 = reader.result.split(",")[1];
-    const send = mapping => api("bulk_import", {kind, clientId, filename:file.name, contentBase64:b64, actorName: roleTitle(), mapping});
     try{
-      const out = await send(undefined);
-      if(admShowImportResult(box, out, send)){
-        inp.value = "";
-        await loadData(); rerenderCurrent();
-      }
+      const out = await api("bulk_import", {kind, clientId, filename:file.name, contentBase64:b64, actorName: roleTitle()});
+      box.innerHTML = admImportSummaryHtml(out);
+      inp.value = "";
+      await loadData(); rerenderCurrent();
     }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
   };
   reader.onerror = ()=>{ box.innerHTML = `<div class="import-result err-list">Could not read that file.</div>`; };
@@ -3309,10 +3196,10 @@ async function admSubmitUrlImport(kind, clientId){
   if(!url){ toast("Paste a Google Sheet link first"); return; }
   const box = $("admImportUrlResult");
   box.innerHTML = `<div class="import-result">Fetching sheet...</div>`;
-  const send = mapping => api("bulk_import_from_url", {kind, clientId, url, actorName: roleTitle(), mapping});
   try{
-    const out = await send(undefined);
-    if(admShowImportResult(box, out, send)){ await loadData(); rerenderCurrent(); }
+    const out = await api("bulk_import_from_url", {kind, clientId, url, actorName: roleTitle()});
+    box.innerHTML = admImportSummaryHtml(out);
+    await loadData(); rerenderCurrent();
   }catch(e){ box.innerHTML = `<div class="import-result err-list">${esc(e.message)}</div>`; }
 }
 
@@ -3759,7 +3646,7 @@ function renderTechnicalTL(){
   const awaitingClientProposal = clients.filter(c=>c.stage==='PROPOSAL_CLIENT_REVIEW');
   const awaitingClientImpl = clients.filter(c=>c.stage==='IMPLEMENTATION_CLIENT_REVIEW');
   const awaitingClientPaper = clients.filter(c=>c.stage==='CLIENT_REVIEW');
-  const readyForJournal = clients.filter(c=>c.stage==='CLIENT_ACCEPTED' && needsJournal(c));
+  const readyForJournal = clients.filter(c=>c.stage==='CLIENT_ACCEPTED');
   const review = clients.filter(c=>c.stage==='TECHTL_REVIEW');
   const overdueCount = proposalWaiting.filter(c=>daysOverdue(c.proposalDeadline)>0).length
     + inImpl.filter(c=>daysOverdue(c.implementationDeadline)>0).length;
@@ -3876,6 +3763,161 @@ function renderTechnicalTL(){
   $("content").innerHTML = html;
 }
 
+/* ================= TECHNICAL MANAGER — IMPORT OLD WORK =================
+   Old works kept outside the tool (not started / ongoing / published / finished) are
+   uploaded from the Excel or JSON template. The server creates every Client ID and
+   Project ID: a phone/email that already exists = the same client's next work
+   (CL-1003-S2, -S3 ...). "Check file" is a dry run (nothing saved) so the manager
+   sees exactly what will happen before clicking Import.
+   State lives here, not in the <input type=file>, because the dashboard re-renders
+   itself every 12 seconds. */
+let owState = {fileName:"", payload:null, preview:null, result:null, busy:false, error:"", filter:"all"};
+function owReset(){ owState = {fileName:"", payload:null, preview:null, result:null, busy:false, error:"", filter:"all"}; rerenderCurrent(); }
+async function owDownloadTemplate(fmt){
+  try{
+    const out = await api("tm_import_template", {format: fmt});
+    const bin = atob(out.fileData), bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([bytes], {type: out.mime}));
+    a.download = out.fileName; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  }catch(e){ toast(e.message || "Couldn't download the template"); }
+}
+function owPickFile(inp){
+  const file = inp.files && inp.files[0];
+  if(!file) return;
+  const low = file.name.toLowerCase();
+  if(!/\.(xlsx|csv|tsv|json)$/.test(low)){
+    toast(low.endsWith(".xls") ? "Old .xls files can't be read — open it in Excel and Save As .xlsx" : "Choose the filled .xlsx, .csv or .json template");
+    inp.value = ""; return;
+  }
+  if(file.size > 8*1024*1024){ toast("That file is too large (8 MB max) — split it into smaller files"); inp.value=""; return; }
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const payload = low.endsWith(".json")
+      ? {fileName: file.name, jsonText: reader.result}
+      : {fileName: file.name, fileData: String(reader.result).split(",")[1] || ""};
+    owState = {fileName:file.name, payload, preview:null, result:null, busy:false, error:"", filter:"all"};
+    owRun(false);
+  };
+  reader.onerror = ()=>{ toast("Couldn't read that file"); };
+  if(low.endsWith(".json")) reader.readAsText(file); else reader.readAsDataURL(file);
+}
+async function owRun(commit){
+  if(!owState.payload || owState.busy) return;
+  if(commit){
+    const s = owState.preview && owState.preview.summary;
+    if(!s || !s.added){ toast("Nothing to import — fix the rows marked in red first"); return; }
+    if(!confirm(`Import ${s.added} work(s) now?${s.error ? `\n\n${s.error} row(s) with errors will be left out.` : ""}`)) return;
+  }
+  owState.busy = true; owState.error = ""; rerenderCurrent();
+  try{
+    const out = await api("tm_import_old_work", Object.assign({commit: !!commit}, owState.payload));
+    if(commit){ owState.result = out; owState.preview = null; owState.filter = "all"; }
+    else owState.preview = out;
+  }catch(e){ owState.error = e.message || "Import failed"; }
+  owState.busy = false;
+  if(commit && owState.result){ await refresh(); toast(`${owState.result.summary.added} work(s) imported`); }
+  rerenderCurrent();
+}
+function owSetFilter(f){ owState.filter = f; rerenderCurrent(); }
+const OW_TEAM_LABEL = {technical:"Technical", journal:"Journal", completed:"Completed", accounts:"Accounts", marketing:"Marketing"};
+function owTableHtml(out){
+  const rows = out.rows.filter(r=> owState.filter==="all" || r.result===owState.filter || (owState.filter==="warn" && r.result==="added" && r.messages.length));
+  const s = out.summary;
+  const chip = (key, label, n, cls)=> `<button class="btn ${owState.filter===key?'':'ghost'} small" onclick="owSetFilter('${key}')">${label} <span class="badge ${cls}" style="margin-left:4px">${n}</span></button>`;
+  const warnCount = out.rows.filter(r=>r.result==="added" && r.messages.length).length;
+  const resBadge = r=> r.result==="added" ? `<span class="badge b-paid">${out.saved?"Imported":"Ready"}</span>`
+                   : r.result==="skipped" ? `<span class="badge b-dim">Skipped</span>` : `<span class="badge b-bad">Error</span>`;
+  const body = rows.map(r=>`<tr style="cursor:default">
+      <td>${r.row}</td>
+      <td>${resBadge(r)}</td>
+      <td><b>${esc(r.name||"—")}</b><br><small style="color:var(--muted)">${esc(r.phone||r.email||"")}</small></td>
+      <td>${esc(r.service||"—")}</td>
+      <td>${esc(r.status||"—")}${r.stageLabel?`<br><small style="color:var(--muted)">&#8594; ${esc(r.stageLabel)}</small>`:""}</td>
+      <td>${r.clientId?`<span class="badge b-purp">${esc(r.clientId)}</span>${r.result==="added"?(r.clientIsNew?' <span class="badge b-gold">New client</span>':(r.sameAsRow?` <span class="badge b-gold">Same client as row ${r.sameAsRow}</span>`:' <span class="badge b-dim">Existing client</span>')):""}`:"—"}</td>
+      <td>${r.projectId?`<span class="badge b-purp">${esc(r.projectId)}</span>`:"—"}</td>
+      <td>${r.workNo?`Work ${r.workNo}${r.workCount>1?` of ${r.workCount}`:""}`:"—"}</td>
+      <td style="min-width:240px">${r.messages.length?r.messages.map(m=>`<div style="font-size:12px;color:${r.result==="error"?"var(--bad)":"var(--muted)"};margin:2px 0">&bull; ${esc(m)}</div>`).join(""):'<small style="color:var(--muted)">—</small>'}</td>
+    </tr>`).join("");
+  const teams = Object.entries(out.teams||{}).map(([k,v])=>`${v} ${OW_TEAM_LABEL[k]||k}`).join(" &bull; ");
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px">
+      ${chip("all","All rows",out.rows.length,"b-dim")}
+      ${chip("added", out.saved?"Imported":"Ready", s.added, "b-paid")}
+      ${chip("warn","With notes",warnCount,"b-gold")}
+      ${chip("skipped","Skipped",s.skipped,"b-dim")}
+      ${chip("error","Errors",s.error,"b-bad")}
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px">
+      ${s.newClients} new client(s)${s.nextWorkInFile?` &bull; ${s.nextWorkInFile} more work for those new clients`:""} &bull; ${s.moreWorkForExisting} more work for clients already in the tool${teams?` &bull; Goes to: ${teams}`:""}
+    </div>
+    <div class="adm-table-wrap"><table class="adm-table" style="min-width:1100px">
+      <thead><tr><th>Row</th><th>Result</th><th>Client</th><th>Service</th><th>Status &#8594; Stage</th><th>Client ID</th><th>Project ID</th><th>Work</th><th>Notes</th></tr></thead>
+      <tbody>${body || `<tr><td colspan="9" style="text-align:center;color:var(--muted)">No rows in this filter.</td></tr>`}</tbody>
+    </table></div>`;
+}
+function owDownloadResult(){
+  const out = owState.result; if(!out) return;
+  const q = v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const lines = [["Row","Result","Client Name","Phone","Email","Service","Status","Stage","Client ID","Project ID","Work No","Notes"].map(q).join(",")];
+  out.rows.forEach(r=> lines.push([r.row, r.result, r.name, r.phone, r.email, r.service, r.status, r.stageLabel,
+    r.clientId, r.projectId, r.workNo ? (r.workCount>1 ? `${r.workNo} of ${r.workCount}` : r.workNo) : "", r.messages.join(" | ")].map(q).join(",")));
+  const blob = new Blob(["\ufeff"+lines.join("\r\n")], {type:"text/csv"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "imatiz-old-work-import-result.csv"; document.body.appendChild(a); a.click(); a.remove();
+}
+function renderTMImportOld(){
+  const st = owState;
+  let html = `
+    <div class="import-box">
+      <h4>1. Download a template</h4>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:6px">Fill <b>one row per work</b>. A client with a 2nd or 3rd work gets another row with the <b>same phone or email</b>.
+        Don't type a Client ID or Project ID — they are created for you. Same phone/email as a client already in the tool = that client's next work.</p>
+      <p style="color:var(--muted);font-size:13px">Required: Client Name, Phone or Email, Service, Status
+        (<b>Not Started</b> / <b>Ongoing</b> / <b>Published</b> / <b>Finished</b>). For Ongoing, also fill Current Work and Assigned To.
+        <b>EPORS</b> and <b>Scopus paid without implementation</b> are the same service.</p>
+      <div class="import-row">
+        <button class="btn gold small" onclick="owDownloadTemplate('xlsx')">&#11015; Excel template (.xlsx)</button>
+        <button class="btn ghost small" onclick="owDownloadTemplate('json')">&#11015; JSON template (.json)</button>
+      </div>
+    </div>
+    <div class="import-box">
+      <h4>2. Upload the filled file</h4>
+      <p style="color:var(--muted);font-size:13px">.xlsx, .csv or .json. The file is checked first — nothing is saved until you click Import.</p>
+      <div class="import-row">
+        <label class="btn small" style="cursor:pointer">&#128206; Choose file
+          <input type="file" accept=".xlsx,.csv,.tsv,.json" style="display:none" onchange="owPickFile(this)"></label>
+        ${st.fileName?`<span class="badge b-dim">${esc(st.fileName)}</span>
+          <button class="btn ghost small" ${st.busy?"disabled":""} onclick="owRun(false)">&#8635; Check again</button>
+          <button class="btn ghost small" ${st.busy?"disabled":""} onclick="owReset()">Clear</button>`:""}
+      </div>
+      ${st.busy?`<div class="import-result">Working on it...</div>`:""}
+      ${st.error?`<div class="import-result err-list" style="color:var(--bad)">${esc(st.error)}</div>`:""}
+    </div>`;
+  if(st.preview){
+    const s = st.preview.summary;
+    html += `<div class="adm-panel"><div class="adm-panel-head"><h3>3. Check &amp; import</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn gold" ${st.busy||!s.added?"disabled":""} onclick="owRun(true)">Import ${s.added} work(s) &#8594;</button></div></div>
+      <div style="padding:14px 18px">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">Preview only — nothing is saved yet. The IDs shown are the ones that will be given.
+          ${s.error?`<b style="color:var(--bad)">${s.error} row(s) have errors and will be left out</b> — fix them in the file and choose it again, or import the rest now.`:""}</p>
+        ${owTableHtml(st.preview)}
+      </div></div>`;
+  }
+  if(st.result){
+    const s = st.result.summary;
+    html += `<div class="adm-panel"><div class="adm-panel-head"><h3>&#9989; Imported ${s.added} work(s)</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ghost small" onclick="owDownloadResult()">&#11015; Download result (.csv)</button>
+          <button class="btn ghost small" onclick="tmPage='clients';refresh()">Open Clients &#8594;</button>
+          <button class="btn small" onclick="owReset()">Import another file</button></div></div>
+      <div style="padding:14px 18px">${owTableHtml(st.result)}</div></div>`;
+  }
+  $("content").innerHTML = html;
+}
+
 /* ================= TECHNICAL MANAGER — MODERN DASHBOARD (Dashboard / Clients / Projects / Journals / Tasks / Team) ================= */
 let tmProjectsTab = "overview", tmTasksTab = "overview";
 function renderTechnicalManagerModern(){
@@ -3888,6 +3930,10 @@ function renderTechnicalManagerModern(){
   if(tmPage==="journals"){ setHead("Journals","Journal submissions and publication status",""); renderAdminJournals(); return; }
   if(tmPage==="tasks"){ setHead("Tasks","Assign work, add a task, and validate submitted work",""); renderTMTasks(); return; }
   if(tmPage==="validation"){ renderTMValidation(); return; }
+  if(tmPage==="importOld"){
+    if(isTL){ tmPage = "dashboard"; }
+    else{ setHead("Import Old Work","Upload old not-started, ongoing, published and finished works. Client ID and Project ID are created for you",""); renderTMImportOld(); return; }
+  }
   if(tmPage==="taskDetail"){ setHead("Task","",""); renderMktTaskDetail(); return; }
   if(tmPage==="team"){
     // Only the Technical Manager manages the team roster - if a Technical TL somehow
@@ -3899,6 +3945,7 @@ function renderTechnicalManagerModern(){
     "Assign proposal writers, paper writers, give final sign-off, and hand off to clients and the Journal Team",
     `<button class="btn ghost" onclick="openAssignedWorkOverview()" title="See every client with active work, who it's assigned to, and the deadline">&#128203; Assigned Work</button>
      <button class="btn ghost" onclick="openCompletedWorkOverview()" title="See every finished proposal, implementation, and paper-writing task, and who did it">&#9989; Completed Work</button>
+     ${isTL ? "" : `<button class="btn ghost" onclick="setTmPage('importOld')" title="Upload old works from the Excel / JSON template">&#11014;&#65039; Import Old Work</button>`}
      <button class="btn gold" onclick="openPingTeam()" title="Call a team member to your cabin or the conference room">&#128222; Call</button>`);
   renderTMDashboard();
 }
@@ -4038,7 +4085,7 @@ function renderTMDashboard(){
   const finalReview = clients.filter(c=>c.stage==='TECHMGR_REVIEW');
   const readyForClient = clients.filter(c=>c.stage==='WRITING_COMPLETE');
   const waitingOnClient = clients.filter(c=>c.stage==='CLIENT_REVIEW');
-  const acceptedByClient = clients.filter(c=>c.stage==='CLIENT_ACCEPTED' && needsJournal(c));
+  const acceptedByClient = clients.filter(c=>c.stage==='CLIENT_ACCEPTED');
   const readyForJournal = [...readyForClient, ...waitingOnClient, ...acceptedByClient];
   const withJournal = clients.filter(c=>c.journalName);
   const journalPending = withJournal.filter(c=>c.journalStatus!=='PUBLISHED');
@@ -4220,10 +4267,9 @@ function tmOpenTaskTypeModal(type){
 }
 function renderTMProjects(){
   const tabs = [["overview","Overview"],["newprojects","New Projects"],["addproject","Add Project"],
-    ["importprojects","Import Projects"],
     ["board","Project Board"],["query","Client's Query"],["payments","Payments Information"],["extensions","Date Extensions"]];
   const tabsHtml = tabs.map(([k,l])=>{
-    const onclick = k==="addproject" ? "openAddClient()" : (k==="importprojects" ? "admOpenBulkImport('projects')" : `tmProjectsTab='${k}';refresh()`);
+    const onclick = k==="addproject" ? "openAddClient()" : `tmProjectsTab='${k}';refresh()`;
     return `<button class="adm-tab ${tmProjectsTab===k?'active':''}" onclick="${onclick}">${l}</button>`;
   }).join("");
   let body;
@@ -7737,7 +7783,7 @@ function adminClientsTableHtml(){
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <button class="btn small" style="padding:9px 16px" onclick="rerenderCurrent()">Search</button>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
         <button class="btn ghost small" onclick="admExportClientsCsv()">Export</button>
       </div>
     </div>
@@ -7936,11 +7982,6 @@ function admTechStatusLabel(c){
   return "In Journal";
 }
 function admPubStatusLabel(c){
-  if(!needsJournal(c)){
-    if(c.stage==="COMPLETED") return "Client accepted — completed";
-    if(c.stage==="CLIENT_REVIEW") return "Delivered — awaiting client";
-    return "No journal (" + serviceLabel(c) + ")";
-  }
   if(!c.journalName) return "—";
   return JOURNAL_STATUS_LABEL[c.journalStatus] || "Submitted";
 }
@@ -8072,7 +8113,7 @@ function admNewProjectsTableHtml(scope){
     <div class="adm-panel-head">
       <h3>New Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
-      <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button><button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button></div>
+      <div style="display:flex;gap:8px"><button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button></div>
     </div>
     <div class="adm-table-wrap">${list.length ? `<table class="adm-table"><thead><tr>
       <th>Client Name</th><th>Proj. Code</th><th>Proj. Name</th><th>Service Type</th><th>Research Domain</th><th>Installments</th><th>Action</th>
@@ -8100,7 +8141,6 @@ function admProjectBoardHtml(scope){
             <div style="font-weight:700;font-size:12.5px">${esc(c.name)}</div>
             <div style="font-size:11px;color:#8DA39A;margin-top:3px">${esc(c.domain||c.topic||"—")}</div>
             <div style="margin-top:8px">${admMembersHtml(c)}</div>
-            ${workTrailMiniHtml(c)}
           </div>`).join("") : `<div style="font-size:12px;color:#B7C6BF;padding:10px 0">Nothing here</div>`}
       </div>
     </div>`).join("");
@@ -8164,10 +8204,10 @@ function admExportExtensionsCsv(){
 }
 function admExportProjectsCsv(){
   const rows = scopedClientsForCurrentView().filter(matchesAdminProjSearch);
-  const head = ["Client Name","Proj. Name","Members","Who did what","Start Date","Finish By","Technical Status","Publication Status","Installments"];
+  const head = ["Client Name","Proj. Name","Members","Start Date","Finish By","Technical Status","Publication Status","Installments"];
   const lines = [head.join(",")].concat(rows.map(c=>[
       c.name, c.domain||c.topic||"", [...(c.assignedProgrammers||[]),...(c.assignedWriters||[])].join("; "),
-      workTrailText(c), fmtDate(admClientRegDate(c)), fmtDate(c.deadlineDate), admTechStatusLabel(c), admPubStatusLabel(c), admInstallmentsText(c)
+      fmtDate(admClientRegDate(c)), fmtDate(c.deadlineDate), admTechStatusLabel(c), admPubStatusLabel(c), admInstallmentsText(c)
     ].map(v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`).join(",")));
   const blob = new Blob([lines.join("\n")], {type:"text/csv"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "matiz-projects.csv"; a.click();
@@ -8182,7 +8222,7 @@ function adminProjectsTableHtml(scope){
   else if(scope==='jm') list = list.filter(c=>!c.rejected && isJournalScope(c));
   const rows = list.map(c=>`<tr onclick="admOpenProject(${jsq(c.id)})">
     <td><b>${esc(c.name)}</b><br><small style="color:#8DA39A">${c.displayId||c.id}</small></td>
-    <td>${esc(c.domain||c.topic||"—")}${workTrailMiniHtml(c)}</td>
+    <td>${esc(c.domain||c.topic||"—")}</td>
     <td>${admMembersHtml(c)}</td>
     <td>${fmtDate(admClientRegDate(c))}</td>
     <td>${fmtDate(c.deadlineDate)}</td>
@@ -8195,7 +8235,7 @@ function adminProjectsTableHtml(scope){
       <h3>Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
       </div>
     </div>
@@ -8304,157 +8344,6 @@ function renderAdminProjectDetail(){
     <div class="adm-tabbar" style="margin-top:16px">${tabsHtml}</div>
     <div>${body}</div>`;
 }
-/* ================= WHO DID WHAT (work trail per project) =================
-   For every phase of a project (Marketing -> Proposal -> Code -> Paper -> Journal)
-   shows the employee(s) who did the work, when it was finished and who approved it.
-   Built only from data the client record already carries (assigned names +
-   stageTimes), so it works for every role that can open the project. */
-function wtUniq(list){ const seen = new Set(); return list.map(x=>(x||"").trim()).filter(x=>x && !seen.has(x) && seen.add(x)); }
-function workTrailPhases(c){
-  const times = {};
-  (c.stageTimes || c.history || []).forEach(h=>{ if(h.stage && h.at) (times[h.stage] = times[h.stage] || []).push(h); });
-  const latest = s => (times[s] || [])[0] || null;               // newest first
-  const first  = s => { const t = times[s] || []; return t[t.length-1] || null; };
-  const cur = stageIdx(c.stage);
-  const st = (startStage, doneStage) => {
-    if(cur >= stageIdx(doneStage)) return "done";
-    if(cur >= stageIdx(startStage)) return "current";
-    return "pending";
-  };
-  const person = (name, what) => ({name, what});
-  // The server records different actors on the "done" step depending on the path taken:
-  // e.g. complete_implementation records the programmers themselves, the Work Updates
-  // approval records "Technical TL/Manager". Only call someone the approver when they
-  // are NOT one of the people who did the work.
-  const splitNames = v => String(v||"").split(",").map(x=>x.trim()).filter(Boolean);
-  const approver = (hit, doers) => {
-    if(!hit || !hit.actor) return "";
-    const doerSet = new Set(doers.flatMap(splitNames));
-    const who = splitNames(hit.actor);
-    return who.length && who.every(n=>doerSet.has(n)) ? "" : hit.actor;
-  };
-  const phases = [];
-
-  // 1. Marketing team (lead -> TL -> Manager -> Accounts)
-  const added = first("NEW"), tl = latest("MANAGER_REVIEW"), mgr = latest("ACCOUNT_REVIEW"), acc = latest("TECH_ASSIGNED");
-  const mktPeople = [];
-  if(added && added.actor) mktPeople.push(person(added.actor, "Lead entry"));
-  if(c.bdc) mktPeople.push(person(c.bdc, "BDC"));
-  if(tl && tl.actor) mktPeople.push(person(tl.actor, "TL verified"));
-  if(mgr && mgr.actor) mktPeople.push(person(mgr.actor, "Manager approved"));
-  if(acc && acc.actor) mktPeople.push(person(acc.actor, "Accounts confirmed"));
-  phases.push({key:"marketing", title:"Marketing team", status: st("NEW","TECH_ASSIGNED"),
-    people: mktPeople, doneAt: acc ? acc.at : null, doneLabel:"Handed to Technical"});
-
-  if(serviceConf(c).hasImplementation){
-    // 2. Proposal
-    const sub = latest("PROPOSAL_SUBMITTED"), ver = latest("PROPOSAL_VERIFIED"), capp = latest("PROPOSAL_APPROVED");
-    const writers = wtUniq([c.proposalWriter, c.proposalCoordinator]);
-    if(!writers.length && sub && sub.actor) writers.push(sub.actor);
-    phases.push({key:"proposal", title:"Proposal", status: st("PROPOSAL_ASSIGNED","PROPOSAL_VERIFIED"),
-      people: writers.map(n=>person(n, "Proposal writer")),
-      doneAt: sub ? sub.at : null, doneLabel:"Submitted",
-      approvedBy: c.proposalVerifiedBy || approver(ver, writers), approvedAt: ver ? ver.at : null,
-      clientAt: capp ? capp.at : null});
-
-    // 3. Code implementation
-    const done = latest("IMPLEMENTATION_COMPLETE"), iapp = latest("IMPLEMENTATION_APPROVED");
-    const progs = wtUniq([...(c.assignedProgrammers||[]), c.implCoordinator]);
-    phases.push({key:"code", title:"Code implementation", status: st("IMPLEMENTATION_ASSIGNED","IMPLEMENTATION_COMPLETE"),
-      people: progs.map(n=>person(n, n===c.implCoordinator && !(c.assignedProgrammers||[]).includes(n) ? "Coordinator" : "Programmer")),
-      doneAt: done ? done.at : null, doneLabel:"Completed",
-      approvedBy: approver(done, progs) || approver(latest("IMPLEMENTATION_CLIENT_REVIEW"), progs) || c.demoApprovedBy || "",
-      approvedAt: done ? done.at : null,
-      clientAt: iapp ? iapp.at : null,
-      extra: c.demoGivenDate ? "Demo given " + fmtDate(c.demoGivenDate) : ""});
-  }
-
-  // 4. Paper writing
-  const wdone = latest("WRITING_COMPLETE"), wapp = latest("CLIENT_ACCEPTED");
-  const pw = wtUniq([...(c.assignedWriters||[]), c.writingCompletedBy]);
-  const pwPeople = pw.map(n=>person(n, "Paper writer"));
-  if(c.coordinatorName && !pw.includes(c.coordinatorName)) pwPeople.push(person(c.coordinatorName, "Content coordinator"));
-  phases.push({key:"paper", title:"Paper writing", status: st("PAPERWRITER_ASSIGNED","WRITING_COMPLETE"),
-    people: pwPeople,
-    doneAt: c.writingCompletedAt || (wdone ? wdone.at : null), doneLabel:"Writing completed",
-    approvedBy: approver(wdone, pw), approvedAt: wdone ? wdone.at : null,
-    clientAt: wapp ? wapp.at : null});
-
-  if(!needsJournal(c)){
-    // Synopsis / Survey Synopsis / Thesis: delivered to the client, client accepts -> Completed.
-    const dl = latest("CLIENT_REVIEW"), acc2 = latest("COMPLETED") || latest("CLIENT_ACCEPTED");
-    phases.push({key:"clientok", title:"Delivered — client acceptance", status: st("CLIENT_REVIEW","CLIENT_ACCEPTED"),
-      people: dl && dl.actor ? [person(dl.actor, "Delivered to client")] : [],
-      doneAt: acc2 ? acc2.at : null, doneLabel:"Client accepted",
-      extra: c.stage==="CLIENT_REVIEW" ? "Waiting for the client to accept" : ""});
-    if(c.rejected || c.onHold) phases.forEach(p=>{ if(p.status==="current") p.status = "paused"; });
-    return phases;
-  }
-
-  // 5. Journal team — proofreading, formatting, submission
-  const pr = latest("JOURNAL_MANAGER_FORMATTING");
-  const prPeople = [];
-  if(c.proofreadCoordinator) prPeople.push(person(c.proofreadCoordinator, "Proofread coordinator"));
-  (c.assignedProofreaders||[]).filter(n=>n!==c.proofreadCoordinator).forEach(n=>prPeople.push(person(n, "Proofreader")));
-  phases.push({key:"proofread", title:"Journal team — Proofreading", status: st("JOURNAL_MANAGER_REVIEW","JOURNAL_MANAGER_FORMATTING"),
-    people: prPeople, doneAt: pr ? pr.at : null, doneLabel:"Completed",
-    approvedBy: approver(pr, prPeople.map(x=>x.name)), approvedAt: pr ? pr.at : null,
-    extra: c.proofreadRounds ? `${c.proofreadRounds} correction round${c.proofreadRounds===1?"":"s"}` : ""});
-
-  const fm = latest("SUBMISSION");
-  const fmPeople = [];
-  if(c.formatCoordinator) fmPeople.push(person(c.formatCoordinator, "Format coordinator"));
-  (c.assignedFormatters||[]).filter(n=>n!==c.formatCoordinator).forEach(n=>fmPeople.push(person(n, "Formatter")));
-  phases.push({key:"format", title:"Journal team — Formatting", status: st("JOURNAL_MANAGER_FORMATTING","SUBMISSION"),
-    people: fmPeople, doneAt: fm ? fm.at : null, doneLabel:"Completed",
-    approvedBy: approver(fm, fmPeople.map(x=>x.name)), approvedAt: fm ? fm.at : null});
-
-  const sb = latest("JOURNAL_SUBMITTED");
-  const sbPeople = [];
-  if(c.submissionPerson) sbPeople.push(person(c.submissionPerson, "Submission"));
-  else if(sb && sb.actor) sbPeople.push(person(sb.actor, "Submission"));
-  const jStatus = c.journalStatus ? (typeof JOURNAL_STATUS_LABEL!=="undefined" && JOURNAL_STATUS_LABEL[c.journalStatus] || c.journalStatus) : "";
-  phases.push({key:"submission", title:"Journal team — Submission", status: st("SUBMISSION","JOURNAL_SUBMITTED"),
-    people: sbPeople, doneAt: sb ? sb.at : null, doneLabel:"Submitted to journal",
-    extra: [c.journalName, jStatus].filter(Boolean).join(" • ")});
-
-  // A rejected / on-hold project shouldn't show the next step as "in progress".
-  if(c.rejected || c.onHold) phases.forEach(p=>{ if(p.status==="current") p.status = "paused"; });
-  return phases;
-}
-function workTrailHtml(c){
-  const statusPill = {done:'<span class="adm-status good">Done</span>', current:'<span class="adm-status warn">In progress</span>',
-    paused:`<span class="adm-status bad">${c.rejected?"Rejected":"On hold"}</span>`, pending:'<span class="adm-status" style="background:var(--card);color:var(--faint)">Not started</span>'};
-  const cards = workTrailPhases(c).map((p,i)=>{
-    const people = p.people.length
-      ? `<div class="wt-people">${p.people.map(x=>`<span class="wt-person" title="${esc(x.name)} — ${esc(x.what)}"><span class="adm-avatar ${p.key==="code"?"blue":(p.key==="paper"?"red":"")}" style="${p.key==="code"||p.key==="paper"?"":"background:var(--purple)"}">${initials(x.name)}</span>${esc(x.name)} <small>${esc(x.what)}</small></span>`).join("")}</div>`
-      : `<div class="wt-none">${p.status==="pending" ? "Not assigned yet" : "No name recorded"}</div>`;
-    const rows = [];
-    if(p.doneAt && p.status!=="pending") rows.push(`${esc(p.doneLabel)}: <b>${esc(tbDateTime(p.doneAt))}</b>`);
-    if(p.approvedBy && p.status==="done") rows.push(`Approved by: <b>${esc(p.approvedBy)}</b>`);
-    if(p.clientAt) rows.push(`Client approved: <b>${esc(tbDateTime(p.clientAt))}</b>`);
-    if(p.extra) rows.push(esc(p.extra));
-    return `<div class="wt-step ${p.status==="paused"?"current":p.status}">
-      <div class="wt-top"><div class="wt-title"><span class="wt-num">${p.status==="done"?"&#10003;":i+1}</span>${esc(p.title)}</div>${statusPill[p.status]||""}</div>
-      ${people}
-      ${rows.map(r=>`<div class="wt-row">${r}</div>`).join("")}
-    </div>`;
-  }).join("");
-  return `<div class="wt-flow">${cards}</div>`;
-}
-// Compact one-line version for project cards / lists: "✓ Proposal: Ravi".
-function workTrailMiniHtml(c){
-  const short = {marketing:"Marketing", proposal:"Proposal", code:"Code", paper:"Paper", proofread:"Proofread", format:"Format", submission:"Submission", clientok:"Client"};
-  const bits = workTrailPhases(c).filter(p=>p.key!=="marketing" && p.status!=="pending" && p.people.length).map(p=>{
-    const names = p.people.map(x=>x.name).join(", ");
-    return `<span class="${p.status==="done"?"done":"current"}" title="${esc(p.title)}: ${esc(names)}">${p.status==="done"?"&#10003; ":""}${short[p.key]}: ${esc(names)}</span>`;
-  });
-  return bits.length ? `<div class="wt-mini">${bits.join("")}</div>` : "";
-}
-function workTrailText(c){
-  return workTrailPhases(c).filter(p=>p.people.length && p.status!=="pending")
-    .map(p=>`${p.title}: ${p.people.map(x=>x.name).join(", ")}${p.status==="done"?" (done)":""}`).join(" | ");
-}
 function admProjDashboardTab(c){
   const stagesTotal = STAGES.length;
   const pct = Math.round(((stageIdx(c.stage)+1)/stagesTotal)*100);
@@ -8480,10 +8369,6 @@ function admProjDashboardTab(c){
           ${demoScheduleSectionHtml(c)}
         </div>
       </div>
-    </div>
-    <div class="adm-panel" style="margin:14px 0 0"><div class="adm-panel-head"><h3>Who did what</h3>
-        <span style="font-size:12px;color:var(--muted)">Each step of this project and the employee who did it</span></div>
-      <div class="adm-panel-body">${workTrailHtml(c)}</div>
     </div>
     <div class="adm-kpi-grid" style="grid-template-columns:1fr 1fr 1.3fr;margin-top:14px">
       <div class="adm-panel" style="margin:0"><div class="adm-panel-head"><h3>Progress</h3></div>
@@ -8616,8 +8501,7 @@ function tbDurationSince(iso){
 }
 function admProjTaskBoardTab(c){
   const curIdx = stageIdx(c.stage);
-  let displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
-  if(!needsJournal(c)) displayStages = displayStages.filter(s=>!JOURNAL_ONLY_STAGES.includes(s));
+  const displayStages = serviceConf(c).hasImplementation ? STAGES : STAGES.filter(s=>!PROPOSAL_IMPL_STAGES.includes(s));
   // Every time this client reached each stage (newest first), from the stage history.
   const times = {};
   (c.stageTimes || c.history || []).forEach(h=>{ if(h.stage && h.at) (times[h.stage] = times[h.stage] || []).push(h); });
@@ -9405,7 +9289,7 @@ function mktProjectsTableHtml(){
       <h3>Projects</h3>
       <div class="adm-search"><span>&#128269;</span><input id="universalSearchInput" placeholder="Search" value="${esc(searchQuery)}" oninput="handleSearchInput(this.value)"></div>
       <div style="display:flex;gap:8px">
-        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button><button class="btn ghost small" onclick="admOpenBulkImport('projects')">Import existing projects</button>
+        <button class="btn ghost small" onclick="admOpenBulkImport('clients')">Import</button>
         <button class="btn ghost small" onclick="admExportProjectsCsv()">Export</button>
       </div>
     </div>
@@ -11144,7 +11028,7 @@ function renderClientOverview(c){
     </div>
     <div class="panel" style="padding:20px">
       <h3 style="margin-bottom:6px">Project progress</h3>
-      ${railHtml(c.stage, c)}
+      ${railHtml(c.stage)}
       ${c.demoGivenDate?`<p style="color:var(--gold);font-size:13px;margin-top:10px">Demo completed on ${fmtDate(c.demoGivenDate)}</p>`:""}
       <button class="btn ghost small" style="margin-top:12px" onclick="setClientView('status')">View full project status &#8594;</button>
     </div>
@@ -11170,7 +11054,7 @@ function renderClientProjectStatus(c){
     <div class="panel" style="padding:20px">
       <h3 style="margin-bottom:6px">Where things stand</h3>
       <p style="font-size:13.5px;margin-bottom:6px">Current stage: <b style="color:var(--gold)">${STAGE_LABEL[c.stage]||c.stage}</b></p>
-      ${railHtml(c.stage, c)}
+      ${railHtml(c.stage)}
       ${c.demoGivenDate?`<p style="color:var(--gold);font-size:13px;margin-top:10px">Demo completed on ${fmtDate(c.demoGivenDate)}</p>`:""}
     </div>
     ${clientJournalBlockHtml(c)}
@@ -11596,7 +11480,7 @@ function openDrawer(id){
         <span class="badge b-gold" style="margin-left:6px">${esc(serviceLabel(c))}</span></div>
       <button class="xbtn" onclick="closeDrawer()" aria-label="Close">&times;</button>
     </div>
-    ${railHtml(c.stage, c)}
+    ${railHtml(c.stage)}
     ${canManageInvites() ? `<div class="sec" style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div><h4 style="margin:0">Client Portal</h4><p class="pc-meta" style="margin:4px 0 0">${inviteStatusPill(c)}</p></div>
       <button class="btn ghost small" onclick="openInviteCard(${jsq(c.id)})">${c.hasClientLogin||c.inviteSentAt?"Manage invite":"Send portal invite"}</button>
@@ -11628,7 +11512,6 @@ function openDrawer(id){
       ${c.notes?`<div style="grid-column:1/-1"><b>Notes</b><p>${esc(c.notes)}</p></div>`:""}
     </div>
     ${tags(c)}
-    <div class="sec" style="margin-top:14px"><h4>Who did what</h4>${workTrailHtml(c)}</div>
     ${(isTelecaller()||role==="marketing_tl"||role==="marketing_manager") ? `<div class="sec" style="margin-top:10px">
       <h4>Project deadline</h4>
       ${c.extRequested && c.extTarget==='project' ? `<div class="pc-meta" style="color:var(--gold)">Extension requested (${esc(c.extAmount)}) &mdash; waiting on Marketing TL/Manager.</div>`
@@ -13970,7 +13853,7 @@ const PERM_IMPORT = (function(){
   return { clients: mkt, referrals: mkt, payments: mkt.concat(["account_team"]),
            notes: mkt.concat(["account_team"], tech, jrn), queries: mkt.concat(tech, jrn),
            tasks: ["marketing_tl", "marketing_manager"].concat(tech, jrn),
-           team: ["marketing_tl", "marketing_manager"].concat(tech, jrn), projects: tech };
+           team: ["marketing_tl", "marketing_manager"].concat(tech, jrn) };
 })();
 function canAddClient(){ return isAdminRole() || PERM_ADD_CLIENT.includes(permRole()); }
 function canEditClient(){ return isAdminRole() || PERM_EDIT_CLIENT.includes(permRole()); }

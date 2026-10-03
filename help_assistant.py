@@ -124,7 +124,7 @@ KNOWLEDGE = [
         "this software", "about imatiz", "what is imatiz", "about the tool", "about this", "features"],
        """
 The iMatiz PM tool is iMatiz Technology's one workspace for every client project - from the first call to a completed, journal-submitted paper.
-- Services: SCI, Scopus (with or without implementation), Synopsis, Survey Synopsis and 100 Page Thesis.
+- Services: SCI, Scopus paid (with implementation), Scopus paid without implementation (also called EPORS), Synopsis, Survey Synopsis and 100 Page Thesis.
 - Every client moves Marketing -> Accounts -> Technical (proposal, code implementation, paper writing) -> Journal team (proofreading, formatting, submission) -> Completed.
 - Each team has its own dashboard showing only its own work; clients track their project in the Client Status Portal.
 - Built in: messages, calendar and demos, stage reminders, validation (AI / plagiarism check) and this AI assistant.
@@ -258,6 +258,21 @@ Telecaller: sidebar -> Add Client:
 - "Bulk import from a Google Sheet" - paste a sheet link shared as "Anyone with the link can view".
 Columns recognised: Name, Phone, Email, Domain, Address, Date, Deadline - any other column is kept as a note. Rows whose phone already exists are skipped.
 """),
+    _e({"technical_manager"} | ADMIN, "How do I import old work (old clients / old projects)?",
+       ["import old", "old work", "old data", "old clients", "old projects", "import", "upload old",
+        "template", "json", "excel", "existing work", "previous work"],
+       """
+Technical Manager: sidebar -> Import Old Work (or the "Import Old Work" button on the dashboard).
+1. Download the Excel or JSON template and fill ONE row per work.
+2. Required: Client Name, Phone or Email, Service, Status (Not Started / Ongoing / Published / Finished).
+   For Ongoing also fill Current Work (Proposal, Implementation, Paper Writing, Client Review, Proofreading,
+   Formatting, Submission, Submitted to Journal) and Assigned To (team member's name as in Team).
+3. Don't type a Client ID or Project ID - they are created for you. Same phone or email as an existing
+   client (or an earlier row) = that client's next work (CL-xxxx-S2, -S3...). Every work gets its own PRJ ID.
+4. Upload it - you see a check first (nothing saved), then click Import. Download the result to keep the new IDs.
+EPORS and "Scopus paid without implementation" are the same service. Uploading the same file again is safe.
+""",
+       ["how do i upload old data", "import old clients", "upload my old work in excel"]),
     _e(MKT | ADMIN, "How do I log a call?",
        ["log call", "call", "calls", "conversation", "follow up", "follow-up"],
        """
@@ -335,12 +350,12 @@ For SCI clients Accounts must also approve the separate Writing Fee before the p
 The "Payments - Installments" card follows the client's real plan: Registration + the installments entered for that client (+ any stage payment Accounts recorded). E.g. registration + 2 installments = x / 3. Fully paid shows "No dues - paid in full". The amount still due is shown when not fully paid, and fully paid clients don't appear in the Pending payments lists.
 """),
     _e(MONEY, "What are the services and their payments?",
-       ["service", "services", "price", "amount", "fees", "cost", "sci", "scopus", "synopsis", "thesis"],
+       ["service", "services", "price", "amount", "fees", "cost", "sci", "scopus", "epors", "synopsis", "thesis"],
        """
 Services and default suggested payments (Rs.):
 - SCI (with implementation): Registration 25,000; Start Work 25,000; Code Implementation 40,000; Writing Fee 20,000; Paper Delivery 10,000.
 - Scopus paid (with implementation): Registration 20,000; Start Work 15,000; Code 25,000; Paper Delivery 10,000.
-- Scopus (without implementation): Registration 20,000; Paper Delivery 15,000.
+- Scopus paid without implementation (EPORS): Registration 20,000; Paper Delivery 15,000. EPORS and "Scopus paid without implementation" are the same service.
 - Synopsis / Survey Synopsis: Registration 15,000; Paper Delivery 10,000.
 - 100 Page Thesis: Registration 30,000; Paper Delivery 70,000.
 Services without implementation skip the proposal / code steps.
@@ -584,7 +599,7 @@ APP_VOCAB = {
     "delivery", "approve", "approval", "rework", "payment", "payments", "installment", "invoice",
     "stage", "stages", "phase", "pipeline", "project", "projects", "demo", "deadline", "reminder",
     "team", "member", "employee", "portal", "query", "queries", "message", "messages", "inbox",
-    "backup", "import", "service", "scopus", "sci", "synopsis", "thesis", "proofreading", "formatting",
+    "backup", "import", "service", "scopus", "epors", "sci", "synopsis", "thesis", "proofreading", "formatting",
     "submission", "admin", "imatiz", "matiz", "upload", "download", "notification", "ping", "call",
     "hold", "extension", "board", "report", "status", "profile", "drawer", "calendar",
 }

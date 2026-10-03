@@ -731,7 +731,6 @@ ACTION_ROLES = {
     # Who may import which kind is decided per kind (BULK_IMPORT_ROLES) inside the handler.
     "bulk_import": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
     "bulk_import_from_url": _R_MARKETING + ("account_team",) + _R_TECH_MGMT + _R_JOURNAL,
-    "import_template": _R_TECH_MGMT,
     "assign_proposal_writer": _R_MARKETING + ("technical_manager", "technical_tl"),
     # Delivering the approved paper to the client is the Technical Manager/TL's step.
     "send_to_client": _R_TECH_MGMT + _R_MARKETING,
@@ -870,6 +869,10 @@ ACTION_ROLES = {
     "admin_clear_data": _R_ADMIN,
     "admin_import_data": _R_ADMIN,
     "admin_import_summary": _R_ADMIN,
+    # Technical Manager > Import Old Work (old spreadsheets -> pipeline, with
+    # Client ID / Project ID generated and phone/email matching for 2nd/3rd works).
+    "tm_import_template": _R_TECH_MGR,
+    "tm_import_old_work": _R_TECH_MGR,
     "send_email": _R_ADMIN + ("marketing_manager", "marketing_tl"),
     "save_my_email": _R_ALL_STAFF,
     # My profile: every login, including the Validation login (clients: CLIENT_ALLOWED_ACTIONS).
@@ -1224,16 +1227,7 @@ SERVICES = {
         "amounts": {"reg": 20000, "start": 15000, "code": 25000, "paper": 10000},
     },
     "SCOPUS_NO_IMPL": {
-        "label": "Scopus (without implementation)",
-        "hasImplementation": False,
-        "requiresWritingFee": False,
-        "amounts": {"reg": 20000, "paper": 15000},
-    },
-    # EPORS = Scopus paid WITHOUT implementation. Both names mean this service (see "aliases").
-    # Journal paper (goes to the Journal Team), no proposal / code step.
-    "EPORS": {
-        "label": "EPORS (Scopus paid without implementation)",
-        "aliases": ["EPORS", "Scopus paid without implementation"],
+        "label": "Scopus paid without implementation (EPORS)",
         "hasImplementation": False,
         "requiresWritingFee": False,
         "amounts": {"reg": 20000, "paper": 15000},
@@ -1242,24 +1236,18 @@ SERVICES = {
         "label": "Synopsis",
         "hasImplementation": False,
         "requiresWritingFee": False,
-        # Not a journal paper: delivered to the client, client accepts -> Completed.
-        "needsJournal": False,
         "amounts": {"reg": 15000, "paper": 10000},
     },
     "SURVEY_SYNOPSIS": {
         "label": "Survey Synopsis",
         "hasImplementation": False,
         "requiresWritingFee": False,
-        # Not a journal paper: delivered to the client, client accepts -> Completed.
-        "needsJournal": False,
         "amounts": {"reg": 15000, "paper": 10000},
     },
     "THESIS_100": {
         "label": "100 Page Thesis",
         "hasImplementation": False,
         "requiresWritingFee": False,
-        # Not a journal paper: delivered to the client, client accepts -> Completed.
-        "needsJournal": False,
         "amounts": {"reg": 30000, "paper": 70000},
     },
 }
@@ -1387,23 +1375,6 @@ def read_validation_document(d, required=True, label="document"):
 
 def service_conf(key):
     return SERVICES.get(key) or SERVICES[DEFAULT_SERVICE]
-
-
-def service_needs_journal(key):
-    """Synopsis / Survey Synopsis / Thesis are not journal papers: once the client
-    accepts the delivered work it is finished - there is no Journal Team stage."""
-    return service_conf(key).get("needsJournal", True)
-
-
-def finish_if_no_journal(con, c, actor):
-    """Called right after a client reaches CLIENT_ACCEPTED. For services with no
-    journal stage, close the work as COMPLETED straight away."""
-    if service_needs_journal(c["service_key"]):
-        return False
-    move_stage(con, c["id"], "COMPLETED", actor,
-               "Client accepted the work — completed (%s has no journal submission)."
-               % service_conf(c["service_key"])["label"])
-    return True
 
 
 def stageIdxServer(stage):
@@ -2361,17 +2332,6 @@ def init_db():
                         (hash_password(r["client_password"]), r["id"]))
     con.commit()
 
-    # ----- Synopsis / Survey Synopsis / Thesis have no Journal Team stage. Any that are
-    #       sitting at "Client approved - ready for Journal Team" are already finished.
-    _no_journal = [k for k, v in SERVICES.items() if not v.get("needsJournal", True)]
-    for r in con.execute("SELECT id FROM clients WHERE stage='CLIENT_ACCEPTED' AND service_key = ANY(?)",
-                         (_no_journal,)).fetchall():
-        con.execute("UPDATE clients SET stage='COMPLETED', stage_entered_at=? WHERE id=?", (now_str(), r["id"]))
-        con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                    (r["id"], "COMPLETED", "System",
-                     "Client had accepted the work — completed (this service has no journal submission)."))
-    con.commit()
-
     # ----- SECURITY: purge any expired sessions left over from a previous run. Computed
     #       in Python (rather than a SQL-side "now") so it uses the exact same clock as
     #       get_session()'s own idle-timeout check above.
@@ -2420,6 +2380,29 @@ def _excel_serial_to_iso(n):
         return None
 
 
+def _xlsx_first_sheet_path(z, names_in_zip):
+    """The first worksheet in the workbook's own tab order (workbook.xml + its rels),
+    not just the first sheet*.xml in the zip listing - a workbook re-saved by Excel
+    or with an extra "Instructions" tab can list them in any order."""
+    try:
+        wb = ET.fromstring(z.read("xl/workbook.xml"))
+        rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+        first = wb.find(XLSX_NS + "sheets/" + XLSX_NS + "sheet")
+        rid = first.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        for rel in rels:
+            if rel.get("Id") == rid:
+                target = rel.get("Target") or ""
+                path = target.lstrip("/") if target.startswith("/") else "xl/" + target
+                if path in names_in_zip:
+                    return path
+    except Exception:
+        pass
+    if "xl/worksheets/sheet1.xml" in names_in_zip:
+        return "xl/worksheets/sheet1.xml"
+    return next((n for n in names_in_zip
+                 if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")), None)
+
+
 def read_xlsx_rows(file_bytes):
     """Minimal .xlsx reader (first worksheet only), stdlib-only (zipfile + XML) -
     no openpyxl / pandas required, so this keeps working on a plain Python install."""
@@ -2436,8 +2419,7 @@ def read_xlsx_rows(file_bytes):
                 runs = si.findall(XLSX_NS + "r")
                 shared.append("".join((r.find(XLSX_NS + "t").text or "")
                                        for r in runs if r.find(XLSX_NS + "t") is not None))
-    sheet_path = next((n for n in names_in_zip
-                        if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")), None)
+    sheet_path = _xlsx_first_sheet_path(z, names_in_zip)
     if not sheet_path:
         raise ApiError("That file doesn't look like a valid .xlsx workbook.")
     root = ET.fromstring(z.read(sheet_path))
@@ -3105,7 +3087,8 @@ STAGE_EMAIL_CC_ROLES = {"TL_REVIEW": ("marketing_manager",)}
 _NOTIFY_SKIP_PREFIXES = ("get_", "list_", "ai_", "help_", "alert_tone", "login", "logout",
                          "session", "bootstrap", "chat_typing", "dm_", "export", "download",
                          "send_email", "save_settings", "save_my_email", "save_role_emails", "mail_status", "mail_test",
-                         "get_my_profile", "save_my_profile", "get_member_profile")
+                         "get_my_profile", "save_my_profile", "get_member_profile",
+                         "tm_import_")
 
 
 def _mail_configured():
@@ -4205,6 +4188,885 @@ def _import_rows(con, rows):
     return {"ok": True, "added": added, "skipped": skipped, "errors": errors[:30]}
 
 
+# =====================================================================
+# IMPORT OLD WORK  (Technical Manager > "Import Old Work")
+# ---------------------------------------------------------------------
+# Brings work that was tracked outside this tool (old spreadsheets) into the
+# pipeline in one go: not-started, ongoing, published and finished works.
+#
+# * The Technical Manager downloads a template (Excel or JSON), fills one row
+#   per WORK, and uploads it (.xlsx / .csv / .json).
+# * Client ID and Project ID are NEVER typed in the file - they are generated
+#   here, exactly like add_client does:
+#     - phone OR email matches an existing client (or an earlier row in the same
+#       file) -> same CL-ID, the row becomes that client's 2nd / 3rd ... work
+#       (CL-1003-S2, CL-1003-S3 ...);
+#     - otherwise a brand-new CL-ID.
+#     - every row (work) gets its own new PRJ-ID.
+# * Status decides where the work lands:
+#     Not Started -> Technical queue, waiting to be assigned (TECH_ASSIGNED)
+#     Ongoing     -> the stage named in "Current Work" (Proposal, Implementation,
+#                    Paper Writing, Client Review, Proofreading, Formatting,
+#                    Submission, Submitted to Journal)
+#     Published   -> Completed, journal status PUBLISHED
+#     Finished    -> Completed
+# * "Check file" runs the whole import inside a transaction and rolls it back,
+#   so the preview shows the real IDs / stages / warnings without saving.
+# * Imported works don't start the stage-reminder clock (stage_entered_at stays
+#   empty), so old data never floods anyone with "you're late" pop-ups, and no
+#   hand-off emails are sent.
+# * Re-uploading the same file is safe: a row whose client + service + topic +
+#   registration date already exists is skipped as "already imported".
+# =====================================================================
+OLD_WORK_MAX_ROWS = 2000
+
+# (field, column header in the template, extra accepted header/key spellings)
+# Header / JSON key matching ignores case, spaces and punctuation, so
+# "Client Name", "client_name", "clientName" and "CLIENT NAME *" are all the same.
+OLD_WORK_FIELDS = [
+    ("name", "Client Name", ["client", "name", "customername", "studentname", "scholarname"]),
+    ("phone", "Phone", ["phonenumber", "mobile", "mobilenumber", "mobileno", "phoneno", "contact",
+                        "contactnumber", "whatsapp", "whatsappnumber"]),
+    ("email", "Email", ["emailid", "mail", "mailid", "emailaddress"]),
+    ("altMobile", "Alternate Mobile", ["altmobile", "alternatephone", "alternatenumber", "secondarymobile"]),
+    ("institution", "Institution", ["college", "university", "organisation", "organization", "institute"]),
+    ("department", "Department", ["dept"]),
+    ("designation", "Designation", []),
+    ("address", "Address", ["city", "location", "place"]),
+    ("service", "Service", ["servicename", "servicetype", "package"]),
+    ("domain", "Domain", ["projectdomain", "area", "subject"]),
+    ("topic", "Topic / Title", ["topic", "title", "topictitle", "papertitle", "projecttitle", "worktitle"]),
+    ("status", "Status", ["workstatus", "projectstatus", "currentstatus"]),
+    ("currentWork", "Current Work", ["currentstage", "stage", "ongoingstage", "ongoingwork", "workstage"]),
+    ("assignedTo", "Assigned To", ["assignee", "assignedemployee", "employee", "employees", "writer",
+                                    "programmer", "staff", "workingby", "handledby"]),
+    ("regDate", "Registration Date", ["regdate", "registereddate", "date", "joiningdate", "startdate",
+                                      "dateofregistration"]),
+    ("deadlineDate", "Deadline", ["deadlinedate", "enddate", "duedate", "projectdeadline"]),
+    ("journalName", "Journal Name", ["journal", "journals", "targetjournal"]),
+    ("totalAmount", "Total Amount", ["total", "totalfee", "totalfees", "packageamount", "projectamount"]),
+    ("amountPaid", "Amount Paid", ["paid", "paidamount", "received", "amountreceived", "advance"]),
+    ("bdc", "BDC", ["bdcname", "telecaller", "salesperson"]),
+    ("referredBy", "Referred By", ["referral", "reference", "referredby"]),
+    ("notes", "Notes", ["remarks", "remark", "comment", "comments", "note"]),
+]
+
+
+def _ow_key(s):
+    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
+_OW_ALIAS = {}
+for _f, _label, _alts in OLD_WORK_FIELDS:
+    for _a in [_f, _label] + _alts:
+        _OW_ALIAS.setdefault(_ow_key(_a), _f)
+
+# Choices shown in the template dropdowns / instructions.
+OLD_WORK_SERVICE_CHOICES = ["SCI", "Scopus Paid", "EPORS", "Synopsis", "Survey Synopsis", "100 Page Thesis"]
+OLD_WORK_STATUS_CHOICES = ["Not Started", "Ongoing", "Published", "Finished"]
+OLD_WORK_CURRENT_CHOICES = ["Proposal", "Implementation", "Paper Writing", "Client Review",
+                            "Proofreading", "Formatting", "Submission", "Submitted to Journal"]
+
+
+def _ow_service_key(raw):
+    """Map whatever the sheet says ("EPORS", "scopus paid without impl", "SCI", ...)
+    onto a SERVICES key. EPORS and "Scopus paid without implementation" are the
+    same service (SCOPUS_NO_IMPL)."""
+    k = _ow_key(raw)
+    if not k:
+        return None
+    up = str(raw).strip().upper()
+    if up in SERVICES:
+        return up
+    for key, conf in SERVICES.items():
+        if k == _ow_key(conf["label"]):
+            return key
+    if "epors" in k or "epor" in k:
+        return "SCOPUS_NO_IMPL"
+    if "scopus" in k:
+        if "without" in k or "noimpl" in k or "nonimpl" in k or "withoutimpl" in k:
+            return "SCOPUS_NO_IMPL"
+        return "SCOPUS_PAID"
+    if "survey" in k:
+        return "SURVEY_SYNOPSIS"
+    if "synopsis" in k:
+        return "SYNOPSIS"
+    if "thesis" in k:
+        return "THESIS_100"
+    if k.startswith("sci"):
+        return "SCI"
+    return None
+
+
+def _ow_status(raw):
+    """-> ("NOT_STARTED" | "ONGOING" | "PUBLISHED" | "FINISHED" | <exact STAGE>, None)
+    or (None, error text)."""
+    s = str(raw or "").strip()
+    k = _ow_key(s)
+    if not k:
+        return None, "Status is empty - use Not Started, Ongoing, Published or Finished."
+    if k in ("notstarted", "notyetstarted", "yettostart", "new", "pending", "notstart", "tostart", "waiting"):
+        return "NOT_STARTED", None
+    if k in ("ongoing", "inprogress", "progress", "running", "working", "active", "started", "going", "wip"):
+        return "ONGOING", None
+    if k.startswith("publish"):
+        return "PUBLISHED", None
+    if k in ("finished", "finish", "completed", "complete", "done", "closed", "delivered", "over"):
+        return "FINISHED", None
+    if k in ("submitted", "submittedtojournal", "journalsubmitted", "underreview"):
+        return "JOURNAL_SUBMITTED", None
+    return None, f"Status \"{s}\" isn't recognised - use Not Started, Ongoing, Published or Finished."
+
+
+def _ow_current_work(raw):
+    """Ongoing work: which piece of work is happening right now -> a work kind."""
+    k = _ow_key(raw)
+    if not k:
+        return None
+    if "proposal" in k:
+        return "PROPOSAL"
+    if "impl" in k or "code" in k or "coding" in k or "program" in k:
+        return "IMPLEMENTATION"
+    if "proof" in k:
+        return "PROOFREADING"
+    if "format" in k:
+        return "FORMATTING"
+    if "submitted" in k or "underreview" in k or "journalreview" in k:
+        return "JOURNAL_SUBMITTED"
+    if "submission" in k or k == "submit":
+        return "SUBMISSION"
+    if "clientreview" in k or "clientapproval" in k or k == "review":
+        return "CLIENT_REVIEW"
+    if "writ" in k or "paper" in k:
+        return "PAPER_WRITING"
+    return "?"
+
+
+def _ow_phone(raw):
+    """Old sheets carry +91 / spaces / dashes / Excel numbers - keep the 10 digits."""
+    if raw is None:
+        return ""
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
+    digits = re.sub(r"\D", "", str(raw))
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits
+
+
+def _ow_date(raw):
+    """Excel serial number, 2024-03-15, 15-03-2024, 15/03/2024, 15.03.2024 -> ISO, or None."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    if isinstance(raw, (int, float)):
+        return _excel_serial_to_iso(raw)
+    s = str(raw).strip()
+    m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+        except ValueError:
+            return None
+    m = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$", s)
+    if m:
+        dd, mo, y = m.groups()
+        y = y if len(y) == 4 else "20" + y
+        try:
+            return date(int(y), int(mo), int(dd)).isoformat()
+        except ValueError:
+            return None
+    for fmt in ("%d %b %Y", "%d %B %Y", "%b %d %Y", "%B %d %Y", "%d-%b-%Y", "%d-%b-%y"):
+        try:
+            return datetime.strptime(s.replace(",", ""), fmt).date().isoformat()
+        except ValueError:
+            pass
+    return None
+
+
+def _ow_amount(raw):
+    if raw is None or str(raw).strip() == "":
+        return 0.0
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    s = re.sub(r"(?i)rs\.?|inr|₹|,|\s|/-", "", str(raw))
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _ow_records_from_rows(rows):
+    """Spreadsheet rows (first = header) -> [(rowNumber, {field: value}, [extra notes])]."""
+    if not rows:
+        return []
+    header_idx = 0
+    # Skip any title/blank lines above the real header (people paste sheets with a title row).
+    for i, r in enumerate(rows[:10]):
+        keys = {_OW_ALIAS.get(_ow_key(h)) for h in r if h is not None}
+        if "name" in keys and ("phone" in keys or "email" in keys):
+            header_idx = i
+            break
+    header = rows[header_idx]
+    mapping, extra = {}, {}
+    for i, h in enumerate(header):
+        label = str(h).strip() if h is not None else ""
+        f = _OW_ALIAS.get(_ow_key(label))
+        if f and f not in mapping.values():
+            mapping[i] = f
+        elif label:
+            extra[i] = label
+    out = []
+    for n, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
+        if not any(str(v).strip() for v in row if v is not None):
+            continue
+        rec, notes = {}, []
+        for i, v in enumerate(row):
+            if v is None or str(v).strip() == "":
+                continue
+            if i in mapping:
+                rec[mapping[i]] = v
+            elif i in extra:
+                notes.append(f"{extra[i]}: {str(v).strip()}")
+        out.append((n, rec, notes))
+    return out
+
+
+def _ow_records_from_json(text):
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ApiError(f"Invalid JSON file - problem near line {e.lineno}. Check commas and quotes.")
+    except Exception:
+        raise ApiError("Invalid JSON file.")
+    if isinstance(data, dict):
+        lst = None
+        for k in ("records", "works", "clients", "data", "rows", "projects"):
+            if isinstance(data.get(k), list):
+                lst = data[k]
+                break
+        if lst is None:
+            raise ApiError("The JSON file needs a \"records\": [ ... ] list (see the JSON template).")
+        data = lst
+    if not isinstance(data, list):
+        raise ApiError("The JSON file needs a list of records (see the JSON template).")
+    out = []
+    for n, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            out.append((n, {"__bad": True}, []))
+            continue
+        rec, notes = {}, []
+        for k, v in item.items():
+            if str(k).startswith("_") or v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            if isinstance(v, (list, tuple)):
+                v = ", ".join(str(x) for x in v)
+            elif isinstance(v, dict):
+                continue
+            f = _OW_ALIAS.get(_ow_key(k))
+            if f and f not in rec:
+                rec[f] = v
+            else:
+                notes.append(f"{k}: {str(v).strip()}")
+        out.append((n, rec, notes))
+    return out
+
+
+def _ow_employee_index(con):
+    """name / EMP-id (lower case) -> (exact name, employee role) for active staff."""
+    idx = {}
+    for r in con.execute("""SELECT name, role, emp_uid FROM employees
+                            WHERE active=1 AND (deleted_at IS NULL OR deleted_at='')"""):
+        nm = (r["name"] or "").strip()
+        if not nm:
+            continue
+        idx.setdefault(nm.lower(), (nm, r["role"]))
+        if r["emp_uid"]:
+            idx.setdefault(r["emp_uid"].strip().lower(), (nm, r["role"]))
+    return idx
+
+
+# Ongoing work kind -> (stage when someone is assigned, employee role(s) that may hold it,
+#                       stage to fall back to when nobody (valid) is named)
+def _ow_ongoing_plan(kind, has_impl):
+    if kind == "PROPOSAL":
+        return "PROPOSAL_ASSIGNED", ("PAPER_WRITER",), "TECH_ASSIGNED"
+    if kind == "IMPLEMENTATION":
+        return "IMPLEMENTATION_ASSIGNED", ("PROGRAMMER",), "PROPOSAL_APPROVED"
+    if kind == "PAPER_WRITING":
+        return "PAPERWRITER_ASSIGNED", ("PAPER_WRITER",), \
+            ("IMPLEMENTATION_APPROVED" if has_impl else "TECH_ASSIGNED")
+    if kind == "CLIENT_REVIEW":
+        return "CLIENT_REVIEW", (), "CLIENT_REVIEW"
+    if kind == "PROOFREADING":
+        return "PROOFREADING", ("JOURNAL_EMPLOYEE",), "JOURNAL_MANAGER_REVIEW"
+    if kind == "FORMATTING":
+        return "FORMATTING_IN_PROGRESS", ("JOURNAL_EMPLOYEE",), "JOURNAL_MANAGER_FORMATTING"
+    if kind == "SUBMISSION":
+        return "SUBMISSION", ("JOURNAL_EMPLOYEE",), "SUBMISSION"
+    if kind == "JOURNAL_SUBMITTED":
+        return "JOURNAL_SUBMITTED", (), "JOURNAL_SUBMITTED"
+    return None, (), None
+
+
+_OW_FALLBACK_TEXT = {
+    "TECH_ASSIGNED": "waiting in the Technical queue to be assigned",
+    "PROPOSAL_APPROVED": "waiting in \"Ready for implementation\" to be assigned",
+    "IMPLEMENTATION_APPROVED": "waiting in \"Ready to assign paper writers\"",
+    "JOURNAL_MANAGER_REVIEW": "waiting for the Journal Manager to assign proofreading",
+    "JOURNAL_MANAGER_FORMATTING": "waiting for the Journal Manager to assign formatting",
+}
+
+
+def _ow_next_ids(con):
+    n, pn = 1001, 2001
+    for r in con.execute("SELECT id, project_id FROM clients"):
+        m = re.match(r"^CL-(\d+)$", r["id"] or "")
+        if m:
+            n = max(n, int(m.group(1)) + 1)
+        m = re.match(r"^PRJ-(\d+)$", r["project_id"] or "")
+        if m:
+            pn = max(pn, int(m.group(1)) + 1)
+    return n, pn
+
+
+def import_old_work(con, records, actor, commit):
+    """Validate + insert every record. With commit=False everything is rolled back
+    afterwards (preview). Returns the per-row report."""
+    if not records:
+        raise ApiError("No rows found in that file. Fill the template below the header row and upload it again.")
+    if len(records) > OLD_WORK_MAX_ROWS:
+        raise ApiError(f"That file has {len(records)} rows - please split it into files of "
+                       f"{OLD_WORK_MAX_ROWS} rows or fewer.")
+    emp_idx = _ow_employee_index(con)
+    stage_label = STAGE_LABELS
+
+    # ----- what's already in the database (one read, then kept up to date in memory) -----
+    by_phone, by_email, fam_name, fam_members, taken_ids, existing_keys = {}, {}, {}, {}, set(), set()
+    fam_contact, batch_family_row = {}, {}   # did -> [phone, email]; did -> row number that created it
+    for r in con.execute("""SELECT id, display_id, name, phone, email, service_key, topic, reg_date
+                            FROM clients ORDER BY created_at ASC, id ASC"""):
+        did = r["display_id"] or r["id"]
+        taken_ids.add(r["id"])
+        p = _ow_phone(r["phone"])
+        if p:
+            by_phone.setdefault(p, did)
+        e = (r["email"] or "").strip().lower()
+        if e:
+            by_email.setdefault(e, did)
+        fam_name.setdefault(did, r["name"] or "")
+        fam_contact.setdefault(did, [p, (r["email"] or "").strip()])
+        if p and not fam_contact[did][0]:
+            fam_contact[did][0] = p
+        if (r["email"] or "").strip() and not fam_contact[did][1]:
+            fam_contact[did][1] = (r["email"] or "").strip()
+        fam_members.setdefault(did, []).append((r["reg_date"] or "", r["id"]))
+        existing_keys.add((did, r["service_key"] or "", _ow_key(r["topic"]), r["reg_date"] or ""))
+    next_cl, next_prj = _ow_next_ids(con)
+
+    # ----- 1. validate every row -----
+    report, ready = [], []
+    for n, rec, extra_notes in records:
+        row = {"row": n, "name": str(rec.get("name") or "").strip(), "phone": "", "email": "",
+               "service": "", "status": "", "stage": "", "stageLabel": "", "clientId": "",
+               "projectId": "", "workNo": 0, "clientIsNew": False, "result": "", "messages": []}
+        report.append(row)
+        if rec.get("__bad"):
+            row.update(result="error", messages=["This entry isn't an object { ... } - skipped."])
+            continue
+        errs, warns = [], []
+        name = row["name"]
+        if name.upper().startswith("EXAMPLE"):
+            row.update(result="skipped", messages=["Example row from the template - skipped."])
+            continue
+        if not name:
+            errs.append("Client Name is missing.")
+        phone = _ow_phone(rec.get("phone"))
+        email = str(rec.get("email") or "").strip()
+        row["phone"], row["email"] = phone, email
+        if rec.get("phone") not in (None, "") and not re.match(r"^\d{10}$", phone):
+            errs.append(f"Phone \"{rec.get('phone')}\" isn't a valid 10-digit number.")
+            phone = ""
+        if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+            errs.append(f"Email \"{email}\" isn't valid.")
+            email = ""
+        if not phone and not email and not errs:
+            errs.append("Give a Phone or an Email - it's how the client is matched and how they sign in.")
+
+        svc = _ow_service_key(rec.get("service"))
+        if not svc:
+            errs.append("Service is missing." if not str(rec.get("service") or "").strip() else
+                        f"Service \"{rec.get('service')}\" isn't recognised - use one of: "
+                        + ", ".join(OLD_WORK_SERVICE_CHOICES) + ".")
+        else:
+            row["service"] = SERVICES[svc]["label"]
+        status, s_err = _ow_status(rec.get("status"))
+        if s_err:
+            errs.append(s_err)
+        row["status"] = str(rec.get("status") or "").strip()
+
+        reg = _ow_date(rec.get("regDate"))
+        if rec.get("regDate") not in (None, "") and not reg:
+            errs.append(f"Registration Date \"{rec.get('regDate')}\" isn't a date (use YYYY-MM-DD or DD-MM-YYYY).")
+        if not reg and not errs:
+            reg = date.today().isoformat()
+            warns.append("No Registration Date - today's date was used.")
+        deadline = _ow_date(rec.get("deadlineDate"))
+        if rec.get("deadlineDate") not in (None, "") and not deadline:
+            errs.append(f"Deadline \"{rec.get('deadlineDate')}\" isn't a date (use YYYY-MM-DD or DD-MM-YYYY).")
+        no_deadline = bool(reg and not deadline)
+        if no_deadline:
+            deadline = _default_deadline(reg)
+        total = _ow_amount(rec.get("totalAmount"))
+        paid = _ow_amount(rec.get("amountPaid"))
+        if total is None:
+            errs.append(f"Total Amount \"{rec.get('totalAmount')}\" isn't a number.")
+        if paid is None:
+            errs.append(f"Amount Paid \"{rec.get('amountPaid')}\" isn't a number.")
+        if total and paid and paid > total:
+            warns.append("Amount Paid is more than the Total Amount - check the figures.")
+
+        # ----- where does this work go? -----
+        stage, assign_people, assign_roles, task_type = None, [], (), None
+        if svc and status:
+            has_impl = SERVICES[svc]["hasImplementation"]
+            if status == "NOT_STARTED":
+                stage = "TECH_ASSIGNED"
+            elif status in ("PUBLISHED", "FINISHED"):
+                stage = "COMPLETED"
+            elif status == "ONGOING" or status in STAGES:
+                if status in STAGES and status != "ONGOING":
+                    kind, stage = None, status
+                else:
+                    kind = _ow_current_work(rec.get("currentWork"))
+                    if kind == "?":
+                        errs.append(f"Current Work \"{rec.get('currentWork')}\" isn't recognised - use one of: "
+                                    + ", ".join(OLD_WORK_CURRENT_CHOICES) + ".")
+                    if not kind:
+                        kind = "PROPOSAL" if has_impl else "PAPER_WRITING"
+                        warns.append(f"Ongoing with no Current Work - treated as "
+                                     f"{'Proposal' if has_impl else 'Paper Writing'}.")
+                    if kind in ("PROPOSAL", "IMPLEMENTATION") and not has_impl:
+                        warns.append(f"{SERVICES[svc]['label']} has no proposal/implementation step - "
+                                     "placed in Paper Writing instead.")
+                        kind = "PAPER_WRITING"
+                    if kind and kind != "?":
+                        stage, assign_roles, fallback = _ow_ongoing_plan(kind, has_impl)
+                        task_type = {"PROPOSAL": "PROPOSAL", "IMPLEMENTATION": "IMPLEMENTATION",
+                                     "PAPER_WRITING": "PAPER_WRITING"}.get(kind)
+                        raw_people = [x.strip() for x in re.split(r"[,;/&]|\band\b",
+                                                                   str(rec.get("assignedTo") or ""))
+                                      if x.strip()]
+                        unknown = []
+                        for p in raw_people:
+                            hit = emp_idx.get(p.lower())
+                            if hit and (not assign_roles or hit[1] in assign_roles):
+                                if hit[0] not in assign_people:
+                                    assign_people.append(hit[0])
+                            else:
+                                unknown.append(p)
+                        if unknown:
+                            role_txt = {"PAPER_WRITER": "Paper Writer", "PROGRAMMER": "Programmer",
+                                        "JOURNAL_EMPLOYEE": "Journal team member"}
+                            who = " / ".join(role_txt.get(x, x) for x in assign_roles) or "team member"
+                            warns.append(f"\"{', '.join(unknown)}\" isn't an active {who} on the team - "
+                                         "not assigned. Add them in Team first, or assign later.")
+                        if kind == "PROPOSAL" and len(assign_people) > 1:
+                            warns.append(f"A proposal has one writer - {assign_people[0]} was used.")
+                            assign_people = assign_people[:1]
+                        if kind == "SUBMISSION" and len(assign_people) > 1:
+                            assign_people = assign_people[:1]
+                        if assign_roles and not assign_people and stage != fallback:
+                            stage = fallback
+                            warns.append("Nobody assigned - " + _OW_FALLBACK_TEXT.get(fallback, "placed in the queue") + ".")
+
+        if errs:
+            row.update(result="error", messages=errs + warns)
+            continue
+        if no_deadline and stage != "COMPLETED":
+            # Old work still open: a deadline 30 days after an old registration date would
+            # make it "overdue" the moment it lands - give it 30 days from today instead.
+            soon = (date.today() + timedelta(days=30)).isoformat()
+            if deadline < soon:
+                deadline = soon
+            warns.append(f"No Deadline - set to {deadline}. Change it from the client's profile if needed.")
+        row.update(stage=stage, stageLabel=stage_label.get(stage, stage))
+        ready.append({"row": row, "rec": rec, "extra": extra_notes, "warns": warns, "name": name,
+                      "phone": phone, "email": email, "svc": svc, "status": status, "reg": reg,
+                      "deadline": deadline, "total": total or 0.0, "paid": paid or 0.0,
+                      "stage": stage, "people": assign_people, "taskType": task_type})
+
+    # ----- 2. insert, oldest registration first, so each client's first work keeps the
+    #          plain CL-ID and later works become -S2, -S3 ... in date order -----
+    ready.sort(key=lambda x: (x["reg"], x["row"]["row"]))
+    seq = 0
+    for it in ready:
+        row, rec, warns = it["row"], it["rec"], it["warns"]
+        did = None
+        p_did = by_phone.get(it["phone"]) if it["phone"] else None
+        e_did = by_email.get(it["email"].lower()) if it["email"] else None
+        did = p_did or e_did
+        if p_did and e_did and p_did != e_did:
+            warns.append(f"Phone matches client {p_did} but email matches {e_did} - linked by phone to {p_did}.")
+        if did:
+            old_name = fam_name.get(did, "")
+            if old_name and _ow_key(old_name) != _ow_key(it["name"]):
+                warns.append(f"Phone/email already belongs to \"{old_name}\" ({did}) - added as their next work.")
+            topic_key = _ow_key(rec.get("topic"))
+            if (did, it["svc"], topic_key, it["reg"]) in existing_keys:
+                row.update(result="skipped", clientId=did,
+                           messages=["Already imported - same client, service, topic and registration date."] + warns)
+                continue
+            # fill a missing phone / email from the client we matched
+            known_phone, known_email = fam_contact.get(did, ["", ""])
+            if not it["phone"] and known_phone:
+                it["phone"] = known_phone
+                row["phone"] = known_phone
+            if not it["email"] and known_email:
+                it["email"] = known_email
+                row["email"] = known_email
+            if did in batch_family_row:
+                row["sameAsRow"] = batch_family_row[did]
+            n_sib = len(fam_members.get(did, [])) + 1
+            cid = f"{did}-S{n_sib}"
+            while cid in taken_ids:
+                n_sib += 1
+                cid = f"{did}-S{n_sib}"
+        else:
+            cid = f"CL-{next_cl}"
+            while cid in taken_ids:
+                next_cl += 1
+                cid = f"CL-{next_cl}"
+            next_cl += 1
+            did = cid
+            row["clientIsNew"] = True
+            batch_family_row[did] = row["row"]
+            if not it["phone"]:
+                warns.append("No phone number - the client record is saved with the email only.")
+        project_id = f"PRJ-{next_prj}"
+        next_prj += 1
+        taken_ids.add(cid)
+
+        notes_parts = [str(rec.get("notes") or "").strip()] + it["extra"]
+        notes = " | ".join(x for x in notes_parts if x)[:4000]
+        seq += 1
+        created_at = f"{it['reg']} 09:{(seq // 60) % 60:02d}:{seq % 60:02d}"
+        s = lambda k: str(rec.get(k) or "").strip()
+        con.execute("""INSERT INTO clients
+                       (id,display_id,project_id,name,phone,email,domain,address,notes,reg_date,deadline_date,
+                        stage,service_key,designation,institution,topic,bdc,total_amount,alt_mobile,
+                        department,referred_by,journal_name,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (cid, did, project_id, it["name"], it["phone"], it["email"], s("domain"), s("address"),
+                     notes, it["reg"], it["deadline"], it["stage"], it["svc"], s("designation"),
+                     s("institution"), s("topic"), s("bdc"), it["total"], _ow_phone(rec.get("altMobile")),
+                     s("department"), s("referredBy"), s("journalName"), created_at))
+
+        # who holds the work right now
+        people, stage = it["people"], it["stage"]
+        start = it["reg"]
+        if people:
+            if stage == "PROPOSAL_ASSIGNED":
+                con.execute("UPDATE clients SET proposal_writer=?, proposal_deadline=?, proposal_start_date=? WHERE id=?",
+                            (people[0], it["deadline"], start, cid))
+            elif stage == "IMPLEMENTATION_ASSIGNED":
+                con.execute("""UPDATE clients SET assigned_programmers=?, implementation_deadline=?,
+                               implementation_start_date=? WHERE id=?""",
+                            (",".join(people), it["deadline"], start, cid))
+            elif stage == "PAPERWRITER_ASSIGNED":
+                con.execute("UPDATE clients SET assigned_writers=?, writing_deadline=?, writing_start_date=? WHERE id=?",
+                            (",".join(people), it["deadline"], start, cid))
+            elif stage == "PROOFREADING":
+                con.execute("""UPDATE clients SET assigned_proofreaders=?, proofread_deadline=?,
+                               proofread_start_date=? WHERE id=?""",
+                            (",".join(people), it["deadline"], start, cid))
+            elif stage == "FORMATTING_IN_PROGRESS":
+                con.execute("""UPDATE clients SET assigned_formatters=?, format_deadline=?,
+                               format_start_date=? WHERE id=?""",
+                            (",".join(people), it["deadline"], start, cid))
+            elif stage == "SUBMISSION":
+                con.execute("UPDATE clients SET submission_person=? WHERE id=?", (people[0], cid))
+            if it["taskType"]:
+                label = {"PROPOSAL": "Proposal writing", "IMPLEMENTATION": "Code implementation",
+                         "PAPER_WRITING": "Paper writing"}[it["taskType"]]
+                con.execute("""INSERT INTO tasks (title, description, client_id, priority, start_date,
+                               finish_date, assigned_to, created_by, task_type)
+                               VALUES (?,?,?,?,?,?,?,?,?)""",
+                            (label, "Imported from old records.", cid, "MEDIUM", start, it["deadline"],
+                             ", ".join(people), actor, it["taskType"]))
+
+        # journal status
+        jname = s("journalName")
+        jstatus = {"PUBLISHED": "PUBLISHED", "JOURNAL_SUBMITTED": "SUBMITTED"}.get(
+            it["status"] if it["status"] == "PUBLISHED" else stage, "")
+        if jstatus:
+            con.execute("UPDATE clients SET journal_status=? WHERE id=?", (jstatus, cid))
+        if jname:
+            for jn in _split_journal_names(jname):
+                con.execute("INSERT INTO journal_targets (client_id, name, status, added_by) VALUES (?,?,?,?)",
+                            (cid, jn, jstatus, actor))
+        elif it["status"] == "PUBLISHED":
+            warns.append("Published but no Journal Name - add it later from the Journals page.")
+
+        # payments: registration = whatever was paid; the rest stays pending
+        for k in PAY_KEYS:
+            if k == "reg" and it["paid"] > 0:
+                con.execute("""INSERT INTO payments (client_id, pay_key, status, amount, pay_date)
+                               VALUES (?,?,'paid',?,?)""", (cid, k, it["paid"], it["reg"]))
+            else:
+                con.execute("INSERT INTO payments (client_id, pay_key) VALUES (?,?)", (cid, k))
+
+        status_txt = {"NOT_STARTED": "Not Started", "ONGOING": "Ongoing", "PUBLISHED": "Published",
+                      "FINISHED": "Finished"}.get(it["status"], it["status"])
+        con.execute("INSERT INTO history (client_id, stage, actor, note, created_at) VALUES (?,?,?,?,?)",
+                    (cid, stage, actor, f"Imported from old records (status: {status_txt}).", created_at))
+
+        # keep the in-memory indexes current so later rows in the same file link up
+        fam_members.setdefault(did, []).append((it["reg"], cid))
+        fam_name.setdefault(did, it["name"])
+        fam_contact.setdefault(did, [it["phone"], it["email"]])
+        if it["phone"]:
+            by_phone.setdefault(it["phone"], did)
+        if it["email"]:
+            by_email.setdefault(it["email"].lower(), did)
+        existing_keys.add((did, it["svc"], _ow_key(rec.get("topic")), it["reg"]))
+        row.update(result="added", clientId=did, projectId=project_id, recordId=cid, messages=warns)
+
+    # Work number = position inside the client's family by registration date (same rule
+    # as the "Work X of Y" badge on the dashboards).
+    for row in report:
+        if row["result"] == "added":
+            fam = sorted(fam_members.get(row["clientId"], []))
+            row["workNo"] = next((i + 1 for i, (_, rid) in enumerate(fam) if rid == row["recordId"]), 1)
+            row["workCount"] = len(fam)
+
+    if commit:
+        con.commit()
+    else:
+        con.rollback()
+    report.sort(key=lambda r: r["row"])
+    summary = {k: sum(1 for r in report if r["result"] == k) for k in ("added", "skipped", "error")}
+    summary["newClients"] = len({r["clientId"] for r in report if r["result"] == "added" and r["clientIsNew"]})
+    summary["moreWorkForExisting"] = sum(1 for r in report if r["result"] == "added" and not r["clientIsNew"]
+                                         and not r.get("sameAsRow"))
+    summary["nextWorkInFile"] = sum(1 for r in report if r["result"] == "added" and r.get("sameAsRow"))
+    teams = {}
+    for r in report:
+        if r["result"] == "added":
+            t = _stage_team(r["stage"])
+            teams[t] = teams.get(t, 0) + 1
+    return {"ok": True, "saved": bool(commit), "summary": summary, "teams": teams, "rows": report}
+
+
+# ----- template files -----------------------------------------------------------------
+_OW_EXAMPLES = [
+    {"name": "EXAMPLE - Santhosh Kumar", "phone": "9876543210", "email": "santhosh@example.com",
+     "altMobile": "", "institution": "Anna University", "department": "CSE", "designation": "PhD Scholar",
+     "address": "Chennai", "service": "Scopus Paid", "domain": "Machine Learning",
+     "topic": "Crop disease detection using CNN", "status": "Ongoing", "currentWork": "Implementation",
+     "assignedTo": "Janani", "regDate": "2024-11-04", "deadlineDate": "2025-02-28", "journalName": "",
+     "totalAmount": "70000", "amountPaid": "35000", "bdc": "Priya", "referredBy": "", "notes": "Old sheet row 12"},
+    {"name": "EXAMPLE - Santhosh Kumar", "phone": "9876543210", "email": "santhosh@example.com",
+     "altMobile": "", "institution": "Anna University", "department": "CSE", "designation": "PhD Scholar",
+     "address": "Chennai", "service": "EPORS", "domain": "Machine Learning",
+     "topic": "Survey on federated learning", "status": "Published", "currentWork": "",
+     "assignedTo": "", "regDate": "2024-03-15", "deadlineDate": "2024-07-30",
+     "journalName": "Journal of Intelligent Systems", "totalAmount": "35000", "amountPaid": "35000",
+     "bdc": "Priya", "referredBy": "", "notes": "2nd work - same phone, so same Client ID"},
+    {"name": "EXAMPLE - Divya R", "phone": "9840011002", "email": "", "altMobile": "",
+     "institution": "", "department": "", "designation": "", "address": "Madurai", "service": "SCI",
+     "domain": "IoT", "topic": "", "status": "Not Started", "currentWork": "", "assignedTo": "",
+     "regDate": "15-09-2025", "deadlineDate": "", "journalName": "", "totalAmount": "120000",
+     "amountPaid": "25000", "bdc": "", "referredBy": "", "notes": ""},
+]
+
+_OW_HELP = {
+    "name": "Required. The client's name.",
+    "phone": "10-digit mobile. Phone OR Email is required. A phone/email already in the tool = the SAME client (next work).",
+    "email": "Optional if Phone is given. Also used to match an existing client.",
+    "service": "Required. " + " / ".join(OLD_WORK_SERVICE_CHOICES) + "  (EPORS = Scopus paid without implementation)",
+    "status": "Required. " + " / ".join(OLD_WORK_STATUS_CHOICES),
+    "currentWork": "Only for Ongoing: " + " / ".join(OLD_WORK_CURRENT_CHOICES),
+    "assignedTo": "Only for Ongoing: the team member's name (or EMP-ID) exactly as in Team. Several: comma separated.",
+    "regDate": "YYYY-MM-DD or DD-MM-YYYY. Blank = today.",
+    "deadlineDate": "YYYY-MM-DD or DD-MM-YYYY. Blank = 30 days after registration.",
+    "journalName": "For Published / Submitted work. Several journals: comma separated.",
+    "totalAmount": "Numbers only, e.g. 70000",
+    "amountPaid": "What the client has paid so far, e.g. 35000",
+}
+
+
+def _xml_esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def _xlsx_col(i):
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _xlsx_sheet(rows, widths, styles=None, validations=None, freeze=True, text_cols=()):
+    """rows: list of lists of str. styles: {(r,c): styleId}. Inline strings only."""
+    styles = styles or {}
+    cols = "".join(
+        f'<col min="{i + 1}" max="{i + 1}" width="{w}" customWidth="1"'
+        + (' style="3"' if i in text_cols else "") + "/>"
+        for i, w in enumerate(widths))
+    body = []
+    for r, row in enumerate(rows):
+        cells = []
+        for c, v in enumerate(row):
+            st = styles.get((r, c), 3 if (c in text_cols and r > 0) else 0)
+            ref = f"{_xlsx_col(c)}{r + 1}"
+            sattr = f' s="{st}"' if st else ""
+            if v is None or v == "":
+                if st:
+                    cells.append(f'<c r="{ref}"{sattr}/>')
+                continue
+            cells.append(f'<c r="{ref}" t="inlineStr"{sattr}><is><t xml:space="preserve">{_xml_esc(v)}</t></is></c>')
+        ht = ' ht="30" customHeight="1"' if r == 0 else ""
+        body.append(f'<row r="{r + 1}"{ht}>{"".join(cells)}</row>')
+    pane = ('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" '
+            'activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>') if freeze else ""
+    dv = ""
+    if validations:
+        items = "".join(
+            f'<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="{ref}">'
+            f'<formula1>"{_xml_esc(",".join(choices))}"</formula1></dataValidation>'
+            for ref, choices in validations)
+        dv = f'<dataValidations count="{len(validations)}">{items}</dataValidations>'
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'{pane}<cols>{cols}</cols><sheetData>{"".join(body)}</sheetData>{dv}</worksheet>')
+
+
+def build_old_work_xlsx():
+    fields = [f for f, _, _ in OLD_WORK_FIELDS]
+    headers = [lbl + (" *" if f in ("name", "service", "status") else "") for f, lbl, _ in OLD_WORK_FIELDS]
+    data = [headers] + [[ex.get(f, "") for f in fields] for ex in _OW_EXAMPLES]
+    widths = [max(12, min(34, len(h) + 4)) for h in headers]
+    for f, w in (("name", 26), ("topic", 34), ("email", 26), ("service", 16), ("status", 14),
+                 ("currentWork", 20), ("assignedTo", 18), ("journalName", 28), ("notes", 30)):
+        widths[fields.index(f)] = w
+    styles = {(0, c): 1 for c in range(len(headers))}
+    for r in range(1, len(data)):
+        for c in range(len(headers)):
+            styles[(r, c)] = 2               # example rows in grey italics
+    col = lambda f: _xlsx_col(fields.index(f))
+    validations = [
+        (f"{col('service')}2:{col('service')}2000", OLD_WORK_SERVICE_CHOICES),
+        (f"{col('status')}2:{col('status')}2000", OLD_WORK_STATUS_CHOICES),
+        (f"{col('currentWork')}2:{col('currentWork')}2000", OLD_WORK_CURRENT_CHOICES),
+    ]
+    text_cols = (fields.index("phone"), fields.index("altMobile"))
+    sheet1 = _xlsx_sheet(data, widths, styles, validations, text_cols=text_cols)
+
+    help_rows = [["Column", "What to fill"]]
+    for f, lbl, _ in OLD_WORK_FIELDS:
+        help_rows.append([lbl, _OW_HELP.get(f, "Optional.")])
+    help_rows += [
+        ["", ""],
+        ["HOW IT WORKS", ""],
+        ["One row = one work", "A client with 2 or 3 works gets 2 or 3 rows with the SAME phone/email."],
+        ["Client ID / Project ID", "Do NOT add them - the tool creates them. Same phone/email = same Client ID "
+                                   "(2nd work = CL-xxxx-S2, 3rd = -S3). Every work gets its own Project ID."],
+        ["Example rows", "Rows whose Client Name starts with EXAMPLE are ignored - delete them or leave them."],
+        ["Not Started", "Goes to the Technical queue, waiting to be assigned."],
+        ["Ongoing", "Goes to the stage in Current Work, assigned to the person in Assigned To. "
+                    "If nobody is named, it waits in that step's 'ready to assign' queue."],
+        ["Published / Finished", "Saved as Completed (Published also sets the journal status to Published)."],
+        ["Same file twice?", "Safe - a row already imported (same client + service + topic + date) is skipped."],
+    ]
+    hstyles = {(0, 0): 1, (0, 1): 1}
+    for r, row in enumerate(help_rows):
+        if row[0] in ("HOW IT WORKS",):
+            hstyles[(r, 0)] = 1
+    sheet2 = _xlsx_sheet(help_rows, [26, 110], hstyles, freeze=True)
+
+    styles_xml = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                  '<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font>'
+                  '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+                  '<font><i/><sz val="11"/><color rgb="FF7F7F7F"/><name val="Calibri"/></font></fonts>'
+                  '<fills count="3"><fill><patternFill patternType="none"/></fill>'
+                  '<fill><patternFill patternType="gray125"/></fill>'
+                  '<fill><patternFill patternType="solid"><fgColor rgb="FF0E7490"/><bgColor indexed="64"/></patternFill></fill></fills>'
+                  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+                  '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+                  '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+                  '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+                  '<alignment vertical="center" wrapText="1"/></xf>'
+                  '<xf numFmtId="49" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>'
+                  '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
+                  '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+                  '</styleSheet>')
+    files = {
+        "[Content_Types].xml":
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '</Types>',
+        "_rels/.rels":
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>',
+        "xl/workbook.xml":
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="Old Work" sheetId="1" r:id="rId1"/>'
+            '<sheet name="Instructions" sheetId="2" r:id="rId2"/></sheets></workbook>',
+        "xl/_rels/workbook.xml.rels":
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
+            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>',
+        "xl/styles.xml": styles_xml,
+        "xl/worksheets/sheet1.xml": sheet1,
+        "xl/worksheets/sheet2.xml": sheet2,
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in files.items():
+            z.writestr(name, content)
+    return buf.getvalue()
+
+
+def build_old_work_json():
+    labels = {f: lbl for f, lbl, _ in OLD_WORK_FIELDS}
+    doc = {
+        "_instructions": {
+            "howTo": "Add one object per WORK inside \"records\". Delete the EXAMPLE records (they are ignored anyway). "
+                     "Do NOT add a client ID or project ID - the tool creates them. Same phone or email = same client "
+                     "(their 2nd / 3rd work).",
+            "required": ["name", "phone or email", "service", "status"],
+            "service": OLD_WORK_SERVICE_CHOICES,
+            "serviceNote": "EPORS = Scopus paid without implementation (same service).",
+            "status": OLD_WORK_STATUS_CHOICES,
+            "currentWork": "Only for Ongoing: " + ", ".join(OLD_WORK_CURRENT_CHOICES),
+            "dates": "YYYY-MM-DD or DD-MM-YYYY",
+            "fields": {f: f"{labels[f]} - {_OW_HELP.get(f, 'Optional.')}" for f, _, _ in OLD_WORK_FIELDS},
+        },
+        "records": [{f: ex.get(f, "") for f, _, _ in OLD_WORK_FIELDS} for ex in _OW_EXAMPLES],
+    }
+    return json.dumps(doc, indent=2, ensure_ascii=False).encode("utf-8")
+
+
 # ----------------------------------------------------------------------------
 # GENERIC BULK IMPORT (every dashboard section, not just the Telecaller's
 # "Add leads" screen) - reuses the same file/Google-Sheet reading machinery
@@ -4306,36 +5168,8 @@ def _rows_from_upload(filename, b64, csv_text):
             return list(csv.reader(io.StringIO(raw.decode("utf-8", errors="ignore"))))
         if filename.endswith(".xlsx"):
             return read_xlsx_rows(raw)
-        if filename.endswith(".json"):
-            return _json_to_rows(raw)
-        raise ApiError("Please upload a .xlsx, .csv or .json file.")
+        raise ApiError("Please upload a .xlsx or .csv file.")
     raise ApiError("No file was received.")
-
-
-def _json_to_rows(raw):
-    """A JSON upload -> the same [header, row, row...] shape a spreadsheet gives.
-    Accepts a list of objects, or {"projects": [...]} / {"rows": [...]}. A list value
-    (e.g. "Programmers": ["Arun", "Meena"]) becomes a comma-separated cell."""
-    try:
-        data = json.loads(raw.decode("utf-8-sig", errors="ignore"))
-    except Exception as e:
-        raise ApiError("That JSON file couldn't be read: %s" % e)
-    if isinstance(data, dict):
-        data = next((v for v in data.values() if isinstance(v, list)), [data])
-    if not isinstance(data, list) or not all(isinstance(x, dict) for x in data):
-        raise ApiError("The JSON file must be a list of objects, e.g. [{\"Client Name\": \"...\"}].")
-    header = []
-    for obj in data:
-        for k in obj:
-            if k not in header:
-                header.append(k)
-    def cell(v):
-        if v is None:
-            return ""
-        if isinstance(v, list):
-            return ", ".join(str(x).strip() for x in v if str(x).strip())
-        return v
-    return [header] + [[cell(obj.get(k)) for k in header] for obj in data]
 
 
 def _find_client(con, ref):
@@ -4666,7 +5500,7 @@ def _import_queries_rows(con, rows, default_client_id="", actor=""):
     return {"ok": True, "added": added, "skipped": skipped, "errors": errors[:30]}
 
 
-BULK_IMPORT_KINDS = {"clients", "notes", "referrals", "tasks", "team", "payments", "queries", "projects"}
+BULK_IMPORT_KINDS = {"clients", "notes", "referrals", "tasks", "team", "payments", "queries"}
 # Which logins may import each kind (Super Admin / MD Admin may import anything). The page
 # shows an Import button only where the login is on this list (see canImport in index.html).
 _IMP_MKT = ("telecaller", "marketing_tl", "marketing_manager")
@@ -4680,8 +5514,6 @@ BULK_IMPORT_ROLES = {
     "queries": _IMP_MKT + _IMP_TECH + _IMP_JRN,
     "tasks": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,
     "team": ("marketing_tl", "marketing_manager") + _IMP_TECH + _IMP_JRN,   # own department only
-    # Already-registered clients whose work is in progress / already published.
-    "projects": _IMP_TECH,
 }
 
 
@@ -4697,529 +5529,6 @@ def require_import_role(role_, kind):
         return
     if role_ not in BULK_IMPORT_ROLES.get(kind, ()):
         raise ApiError("Your login can't import %s." % kind, 403)
-
-
-
-# =====================================================================
-# IMPORT EXISTING PROJECTS (Technical Manager / TL)
-# ---------------------------------------------------------------------
-# For clients that were registered before this tool was used, or whose work is
-# already part-way through / already published. One row per project (work). The
-# row says where the work is now and who did each part; the project is created
-# straight at that stage with those people on it, so it shows up in the right
-# queue and in "Who did what". A row with a Client ID that already exists updates
-# that client instead (forward only - it never moves a project backwards).
-# =====================================================================
-PROJECT_IMPORT_COLUMNS = [
-    # (template header, field, example 1, example 2)
-    ("Client ID", "clientId", "", ""),
-    ("Client Name", "name", "Dr. Lakshmi R", "Mr. Suresh Babu"),
-    ("Phone", "phone", "9876543210", "9123456780"),
-    ("Email", "email", "lakshmi@example.com", ""),
-    ("Service", "service", "SCI", "Synopsis"),
-    ("Project Title", "topic", "Deep learning for crop disease detection", "Survey on IoT security"),
-    ("Institution", "institution", "Anna University", "VIT"),
-    ("Registration Date", "regDate", "2025-11-10", "2026-02-01"),
-    ("Deadline", "deadlineDate", "2026-06-30", "2026-08-15"),
-    ("Total Amount", "totalAmount", "120000", "25000"),
-    ("Registration Paid", "regAmount", "25000", "15000"),
-    ("Status", "status", "Published", "Paper writing in progress"),
-    ("Proposal Writer", "proposalWriter", "Ravi Kumar", ""),
-    ("Programmers", "programmers", "Arun Raj, Meena S", ""),
-    ("Paper Writers", "writers", "Priya N", "Ravi Kumar"),
-    ("Proofreaders", "proofreaders", "Vijay P, Anu R", ""),
-    ("Formatters", "formatters", "Kavya M", ""),
-    ("Submission Person", "submissionPerson", "Sana K", ""),
-    ("Journal Name", "journalName", "IEEE Access", ""),
-    ("Notes", "notes", "Imported from old register", ""),
-]
-PROJECT_IMPORT_ALIASES = {h.lower(): f for h, f, _, _ in PROJECT_IMPORT_COLUMNS}
-PROJECT_IMPORT_ALIASES.update({
-    "client": "name", "name": "name", "mobile": "phone", "phone number": "phone",
-    "service type": "service", "work": "service", "title": "topic", "topic": "topic",
-    "project": "topic", "project name": "topic", "college": "institution", "university": "institution",
-    "reg date": "regDate", "date": "regDate", "deadline date": "deadlineDate", "total": "totalAmount",
-    "amount": "totalAmount", "reg amount": "regAmount", "registration amount": "regAmount",
-    "current status": "status", "stage": "status", "proposal by": "proposalWriter",
-    "programmer": "programmers", "code by": "programmers", "paper writer": "writers",
-    "writer": "writers", "writers": "writers", "proofreader": "proofreaders", "formatter": "formatters",
-    "submitted by": "submissionPerson", "submission": "submissionPerson", "journal": "journalName",
-    "cl id": "clientId", "clientid": "clientId", "id": "clientId",
-})
-
-# Status the Technical Manager types -> (pipeline stage, journal status)
-PROJECT_IMPORT_STATUSES = [
-    ("Not started", "TECH_ASSIGNED", ""),
-    ("Proposal in progress", "PROPOSAL_ASSIGNED", ""),
-    ("Proposal with client", "PROPOSAL_CLIENT_REVIEW", ""),
-    ("Proposal approved", "PROPOSAL_APPROVED", ""),
-    ("Code in progress", "IMPLEMENTATION_ASSIGNED", ""),
-    ("Code with client", "IMPLEMENTATION_CLIENT_REVIEW", ""),
-    ("Code approved", "IMPLEMENTATION_APPROVED", ""),
-    ("Paper writing in progress", "PAPERWRITER_ASSIGNED", ""),
-    ("Paper with client", "CLIENT_REVIEW", ""),
-    ("Client accepted", "CLIENT_ACCEPTED", ""),
-    ("Proofreading", "PROOFREADING", ""),
-    ("Formatting", "FORMATTING_IN_PROGRESS", ""),
-    ("Ready for submission", "SUBMISSION", ""),
-    ("Submitted to journal", "JOURNAL_SUBMITTED", "SUBMITTED"),
-    ("Under review", "JOURNAL_SUBMITTED", "UNDER_REVIEW"),
-    ("Revision requested", "JOURNAL_SUBMITTED", "REVISION_REQUESTED"),
-    ("Accepted", "COMPLETED", "ACCEPTED"),
-    ("Published", "COMPLETED", "PUBLISHED"),
-    ("Completed", "COMPLETED", ""),
-]
-_STATUS_LOOKUP = {k.lower(): (st, js) for k, st, js in PROJECT_IMPORT_STATUSES}
-_STATUS_LOOKUP.update({st.lower(): (st, "") for st in STAGES})
-_PROPOSAL_CODE_STAGES = set(STAGES[STAGES.index("PROPOSAL_ASSIGNED"):STAGES.index("IMPLEMENTATION_APPROVED") + 1])
-_JOURNAL_STAGES = set(STAGES[STAGES.index("JOURNAL_MANAGER_REVIEW"):STAGES.index("JOURNAL_SUBMITTED") + 1])
-
-
-def _service_key_from_text(text):
-    t = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
-    if not t:
-        return None
-    norm = lambda x: re.sub(r"[^a-z0-9]+", " ", (x or "").lower()).strip()
-    for k, v in SERVICES.items():
-        if t in [norm(k), norm(v["label"])] + [norm(a) for a in v.get("aliases", [])]:
-            return k
-    # EPORS / "Scopus paid ... without implementation" - checked before the general Scopus rule
-    if "epors" in t.split() or ("scopus" in t and "paid" in t and ("without" in t or "no impl" in t)):
-        return "EPORS"
-    if "thesis" in t:
-        return "THESIS_100"
-    if "survey" in t:
-        return "SURVEY_SYNOPSIS"
-    if "synopsis" in t:
-        return "SYNOPSIS"
-    if "sci" == t or t.startswith("sci "):
-        return "SCI"
-    if "scopus" in t:
-        return "SCOPUS_NO_IMPL" if ("without" in t or "no impl" in t or "no " in t) else "SCOPUS_PAID"
-    return None
-
-
-def _split_people(v):
-    return [x.strip() for x in re.split(r"[,;/\n]+", v or "") if x.strip()]
-
-
-def _next_client_ids(con, phone, email):
-    """Same CL-/PRJ- numbering as add_client (a known phone/email joins that client's family)."""
-    fam = con.execute("""SELECT display_id, id FROM clients
-                         WHERE (phone<>'' AND LOWER(REPLACE(phone,' ',''))=?)
-                            OR (email<>'' AND ?<>'' AND LOWER(email)=LOWER(?))
-                         ORDER BY created_at ASC, id ASC""",
-                      (phone.replace(" ", "").lower(), email, email)).fetchall()
-    if fam:
-        display_id = fam[0]["display_id"] or fam[0]["id"]
-        n = con.execute("SELECT COUNT(*) c FROM clients WHERE display_id=?", (display_id,)).fetchone()["c"]
-        cid = f"{display_id}-S{n + 1}"
-    else:
-        n = 1001
-        for r in con.execute("SELECT id FROM clients"):
-            m = re.match(r"^CL-(\d+)$", r["id"])
-            if m:
-                n = max(n, int(m.group(1)) + 1)
-        cid = display_id = f"CL-{n}"
-    pn = 2001
-    for r in con.execute("SELECT project_id FROM clients"):
-        m = re.match(r"^PRJ-(\d+)$", r["project_id"] or "")
-        if m:
-            pn = max(pn, int(m.group(1)) + 1)
-    return cid, display_id, f"PRJ-{pn}"
-
-
-def _import_date(v, default=""):
-    if v in (None, ""):
-        return default
-    if isinstance(v, (int, float)):
-        return _excel_serial_to_iso(v) or default
-    sv = str(v).strip()
-    if re.match(r"^\d+(\.0+)?$", sv) and len(sv) <= 6:          # Excel serial typed as text
-        return _excel_serial_to_iso(float(sv)) or default
-    out = _normalize_date_str(sv)
-    return out if re.match(r"^\d{4}-\d{2}-\d{2}$", out) else default
-
-
-def _import_amount(v):
-    try:
-        return float(str(v).replace(",", "").replace("Rs.", "").replace("Rs", "").strip()) if str(v or "").strip() else 0.0
-    except ValueError:
-        return None
-
-
-SKIP_VALUE = "__skip__"
-
-
-def _clean_mapping(mapping):
-    """{"service": {"EPORS": "SCOPUS_PAID"}, "status": {"Done": "Published"}} from the page;
-    anything that isn't a known service key / status label (or skip) is dropped."""
-    out = {"service": {}, "status": {}}
-    if not isinstance(mapping, dict):
-        return out
-    statuses = {k.lower(): k for k, _, _ in PROJECT_IMPORT_STATUSES}
-    for raw, target in (mapping.get("service") or {}).items():
-        t = str(target or "")
-        if t == SKIP_VALUE or t in SERVICES:
-            out["service"][str(raw).strip().lower()] = t
-    for raw, target in (mapping.get("status") or {}).items():
-        t = str(target or "")
-        if t == SKIP_VALUE or t.lower() in statuses:
-            out["status"][str(raw).strip().lower()] = SKIP_VALUE if t == SKIP_VALUE else statuses[t.lower()]
-    return out
-
-
-def _import_projects_rows(con, rows, actor, mapping=None):
-    if not rows or len(rows) < 2:
-        raise ApiError("The file has no project rows under the header row.")
-    mapping = _clean_mapping(mapping)
-    BLANK = "(blank)"
-    # keep raw cell values (dates may be Excel serial numbers)
-    header = [(str(h).strip().lower() if h is not None else "") for h in rows[0]]
-    hdr_map = {i: PROJECT_IMPORT_ALIASES.get(h) for i, h in enumerate(header)}
-    if "name" not in hdr_map.values() or "status" not in hdr_map.values():
-        raise ApiError("Use the template: the header row needs at least 'Client Name', 'Phone', "
-                       "'Service' and 'Status' columns.")
-    # ---------- First pass: any Service / Status words this tool doesn't know? Ask the
-    #            person ONCE what each means (e.g. "EPORS" -> which service) instead of
-    #            failing every row with the same error. Nothing is imported until then.
-    unknown = {"service": {}, "status": {}}
-    f_idx = {}
-    for i, f in hdr_map.items():
-        if f and f not in f_idx:
-            f_idx[f] = i
-    def cell(raw_row, field):
-        i = f_idx.get(field)
-        if i is None or i >= len(raw_row) or raw_row[i] is None:
-            return ""
-        return str(raw_row[i]).strip()
-    for raw_row in rows[1:]:
-        if not any((str(v).strip() if v is not None else "") for v in raw_row):
-            continue
-        sv = cell(raw_row, "status")
-        key = sv.lower() or BLANK.lower()
-        if key not in _STATUS_LOOKUP and key not in mapping["status"]:
-            unknown["status"][sv or BLANK] = unknown["status"].get(sv or BLANK, 0) + 1
-        if not cell(raw_row, "clientId"):
-            sv = cell(raw_row, "service")
-            key = sv.lower() or BLANK.lower()
-            if not _service_key_from_text(sv) and key not in mapping["service"]:
-                unknown["service"][sv or BLANK] = unknown["service"].get(sv or BLANK, 0) + 1
-    if unknown["service"] or unknown["status"]:
-        return {"ok": True, "needsMapping": True, "unknown": unknown,
-                "services": [{"key": k, "label": v["label"]} for k, v in SERVICES.items()],
-                "statuses": [k for k, _, _ in PROJECT_IMPORT_STATUSES],
-                "added": 0, "updated": 0, "skipped": 0, "errors": [], "warnings": []}
-
-    team = {}
-    for r in con.execute("SELECT name, role, team_type FROM employees WHERE active=1 AND deleted_at IS NULL"):
-        team.setdefault(r["name"].strip().lower(), (r["name"], r["role"], r["team_type"] or ""))
-    who = "Imported by " + (actor or "Technical Manager")
-    added, updated, skipped, errors, warnings = 0, 0, 0, [], []
-
-    for idx, raw in enumerate(rows[1:], start=2):
-        rec = {}
-        for i, val in enumerate(raw):
-            f = hdr_map.get(i)
-            if f and val not in (None, ""):
-                rec[f] = val if f in ("regDate", "deadlineDate") else str(val).strip()
-        if not any(str(v).strip() for v in rec.values()):
-            continue
-        label = rec.get("name") or rec.get("clientId") or f"row {idx}"
-        def fail(msg):
-            errors.append(f"Row {idx} ({label}): {msg}")
-
-        # ---------- where is the work now? (apply what the person chose for unknown words)
-        st_word = (rec.get("status") or "").strip()
-        mapped = mapping["status"].get(st_word.lower() or BLANK.lower())
-        if mapped == SKIP_VALUE:
-            skipped += 1; continue
-        if mapped:
-            rec["status"] = mapped
-        st = _STATUS_LOOKUP.get((rec.get("status") or "").strip().lower())
-        if not st:
-            fail("unknown Status '%s'. Use one of: %s." % (rec.get("status", ""),
-                 ", ".join(k for k, _, _ in PROJECT_IMPORT_STATUSES))); skipped += 1; continue
-        stage, journal_status = st
-
-        existing = None
-        if rec.get("clientId"):
-            existing = con.execute("SELECT * FROM clients WHERE id=? OR project_id=?",
-                                   (rec["clientId"], rec["clientId"])).fetchone()
-            if not existing:
-                fail("Client ID %s was not found — leave Client ID blank to add a new client." % rec["clientId"])
-                skipped += 1; continue
-        svc = existing["service_key"] if existing else _service_key_from_text(rec.get("service"))
-        if not existing and not svc:
-            chosen = mapping["service"].get((rec.get("service") or "").strip().lower() or BLANK.lower())
-            if chosen == SKIP_VALUE:
-                skipped += 1; continue
-            svc = chosen
-        if not svc:
-            fail("unknown Service '%s'. Use one of: %s." % (rec.get("service", ""),
-                 ", ".join(v["label"] for v in SERVICES.values()))); skipped += 1; continue
-        conf = service_conf(svc)
-        if stage in _PROPOSAL_CODE_STAGES and not conf["hasImplementation"]:
-            fail("%s has no proposal / code step, so Status can't be '%s'." % (conf["label"], rec["status"]))
-            skipped += 1; continue
-        if not conf.get("needsJournal", True):
-            if stage in _JOURNAL_STAGES or journal_status:
-                fail("%s has no journal submission — use 'Paper with client', 'Client accepted' or "
-                     "'Completed'." % conf["label"]); skipped += 1; continue
-            if stage == "CLIENT_ACCEPTED":
-                stage = "COMPLETED"
-        if stage == "CLIENT_ACCEPTED" and (rec.get("journalName") or "").strip():
-            stage = "JOURNAL_MANAGER_REVIEW"   # client accepted + journal named = already with the Journal Team
-
-        # ---------- people
-        ppl = {k: _split_people(rec.get(k)) for k in
-               ("proposalWriter", "programmers", "writers", "proofreaders", "formatters", "submissionPerson")}
-        if len(ppl["proposalWriter"]) > 1:
-            ppl["proposalWriter"] = ppl["proposalWriter"][:1]
-        # canonical spelling from the Team list when the name matches
-        for k, lst in ppl.items():
-            ppl[k] = [team.get(n.lower(), (n,))[0] for n in lst]
-        si = STAGES.index(stage)
-        # The person doing the CURRENT step must be a real, active team member (they log in
-        # and do it). Earlier, finished steps may name anyone (people may have left since).
-        need = None
-        if stage in ("PROPOSAL_ASSIGNED",):
-            need = ("proposalWriter", "PAPER_WRITER", "", "Proposal Writer")
-        elif stage == "IMPLEMENTATION_ASSIGNED":
-            need = ("programmers", "PROGRAMMER", "", "Programmers")
-        elif stage == "PAPERWRITER_ASSIGNED":
-            need = ("writers", "PAPER_WRITER", "", "Paper Writers")
-        elif stage == "PROOFREADING":
-            need = ("proofreaders", "JOURNAL_EMPLOYEE", "PROOFREAD", "Proofreaders")
-        elif stage == "FORMATTING_IN_PROGRESS":
-            need = ("formatters", "JOURNAL_EMPLOYEE", "FORMAT", "Formatters")
-        if need:
-            field, erole, ttype, col = need
-            if not ppl[field]:
-                fail("Status '%s' needs the %s column filled (who is doing it now)." % (rec["status"], col))
-                skipped += 1; continue
-            bad = [n for n in ppl[field] if not (n.lower() in team and team[n.lower()][1] == erole
-                                                 and ttype in team[n.lower()][2])]
-            if bad:
-                fail("%s: %s %s not an active %s on the Team list." % (col, ", ".join(bad),
-                     "is" if len(bad) == 1 else "are", col[:-1].lower() if col.endswith("s") else col.lower()))
-                skipped += 1; continue
-        for k, lst in ppl.items():
-            unknown = [n for n in lst if n.lower() not in team]
-            if unknown and not (need and need[0] == k):
-                warnings.append(f"Row {idx} ({label}): {', '.join(unknown)} not on the Team list — kept as written.")
-
-        # ---------- dates & money
-        reg = _import_date(rec.get("regDate"), date.today().isoformat())
-        deadline = _import_date(rec.get("deadlineDate"), _default_deadline(reg))
-        total = _import_amount(rec.get("totalAmount"))
-        reg_amt = _import_amount(rec.get("regAmount"))
-        if total is None or reg_amt is None:
-            fail("Total Amount / Registration Paid must be numbers."); skipped += 1; continue
-
-        if existing:
-            cur = STAGES.index(existing["stage"]) if existing["stage"] in STAGES else 0
-            if si < cur:
-                fail("this client is already further along (%s) — import never moves a project back."
-                     % STAGE_LABELS.get(existing["stage"], existing["stage"])); skipped += 1; continue
-            cid = existing["id"]
-        else:
-            name = (rec.get("name") or "").strip()
-            phone = re.sub(r"\D", "", rec.get("phone") or "")
-            if phone.startswith("91") and len(phone) == 12:
-                phone = phone[2:]
-            if not name or not re.match(r"^\d{10}$", phone):
-                fail("Client Name and a 10-digit Phone are required."); skipped += 1; continue
-            email = (rec.get("email") or "").strip()
-            if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
-                fail("Email '%s' isn't valid." % email); skipped += 1; continue
-            dup = con.execute("""SELECT id FROM clients WHERE REPLACE(phone,' ','')=? AND service_key=?
-                                 AND LOWER(name)=LOWER(?)""", (phone, svc, name)).fetchone()
-            if dup:
-                fail("already in the tool as %s (same name, phone and service). To update it, put %s in "
-                     "the Client ID column." % (dup["id"], dup["id"])); skipped += 1; continue
-            cid, display_id, project_id = _next_client_ids(con, phone, email)
-            topic = (rec.get("topic") or "").strip()
-            con.execute("""INSERT INTO clients (id, display_id, project_id, name, phone, email, domain, topic,
-                               institution, notes, reg_date, deadline_date, stage, service_key, total_amount)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'NEW',?,?)""",
-                        (cid, display_id, project_id, name, phone, email, topic, topic,
-                         (rec.get("institution") or "").strip(), (rec.get("notes") or "").strip(),
-                         reg, deadline, svc, total))
-            for k in PAY_KEYS:
-                if k == "reg" and reg_amt:
-                    con.execute("""INSERT INTO payments (client_id, pay_key, status, amount, pay_date)
-                                   VALUES (?,?,'paid',?,?)""", (cid, k, reg_amt, reg))
-                else:
-                    con.execute("INSERT INTO payments (client_id, pay_key) VALUES (?,?)", (cid, k))
-            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                        (cid, "NEW", who, "Already-registered client, added by import."))
-
-        # ---------- who did what (only fill what the row gives; never wipe existing names)
-        sets, vals = [], []
-        def put(col, v):
-            if v:
-                sets.append(col + "=?"); vals.append(v)
-        put("proposal_writer", ",".join(ppl["proposalWriter"]))
-        put("assigned_programmers", ",".join(ppl["programmers"]))
-        put("assigned_writers", ",".join(ppl["writers"]))
-        if ppl["proofreaders"]:
-            put("proofread_coordinator", ppl["proofreaders"][0])
-            put("assigned_proofreaders", ",".join(ppl["proofreaders"]))
-        if ppl["formatters"]:
-            put("format_coordinator", ppl["formatters"][0])
-            put("assigned_formatters", ",".join(ppl["formatters"]))
-        put("submission_person", ",".join(ppl["submissionPerson"]))
-        put("journal_name", (rec.get("journalName") or "").strip())
-        put("journal_status", journal_status)
-        if stage == "PROPOSAL_ASSIGNED":
-            put("proposal_deadline", deadline)
-        if stage == "IMPLEMENTATION_ASSIGNED":
-            put("implementation_deadline", deadline)
-        if stage == "PAPERWRITER_ASSIGNED":
-            put("writing_deadline", deadline)
-        if si >= STAGES.index("CLIENT_ACCEPTED"):
-            put("client_approved_at", now_str())
-        if sets:
-            con.execute("UPDATE clients SET %s WHERE id=?" % ", ".join(sets), vals + [cid])
-        status_txt = rec.get("status", "")
-        if not existing or existing["stage"] != stage:
-            move_stage(con, cid, stage, who, "Imported existing project — status: %s." % status_txt)
-        else:
-            con.execute("INSERT INTO history (client_id, stage, actor, note) VALUES (?,?,?,?)",
-                        (cid, stage, who, "Import updated the team / journal details."))
-        if existing:
-            updated += 1
-        else:
-            added += 1
-    con.commit()
-    return {"ok": True, "added": added, "updated": updated, "skipped": skipped,
-            "errors": errors, "warnings": warnings}
-
-
-def _xlsx_col(i):
-    s = ""
-    i += 1
-    while i:
-        i, r = divmod(i - 1, 26)
-        s = chr(65 + r) + s
-    return s
-
-
-def build_projects_template_xlsx():
-    """Excel template (stdlib only): sheet 1 'Projects' with headers + 2 examples and
-    drop-down lists on Service / Status; sheet 2 'Allowed values'."""
-    from xml.sax.saxutils import escape as xesc
-    heads = [h for h, _, _, _ in PROJECT_IMPORT_COLUMNS]
-    ex1 = [e1 for _, _, e1, _ in PROJECT_IMPORT_COLUMNS]
-    ex2 = [e2 for _, _, _, e2 in PROJECT_IMPORT_COLUMNS]
-    services = [v["label"] for v in SERVICES.values()]
-    statuses = [k for k, _, _ in PROJECT_IMPORT_STATUSES]
-
-    def row_xml(r, cells, style=0):
-        out = []
-        for i, v in enumerate(cells):
-            if v == "":
-                continue
-            st = f' s="{style}"' if style else ""
-            out.append(f'<c r="{_xlsx_col(i)}{r}" t="inlineStr"{st}><is><t>{xesc(str(v))}</t></is></c>')
-        return f'<row r="{r}">{"".join(out)}</row>'
-
-    widths = "".join(f'<col min="{i+1}" max="{i+1}" width="{max(14, min(42, len(h) + 6))}" customWidth="1"/>'
-                     for i, h in enumerate(heads))
-    s_col, st_col = _xlsx_col(heads.index("Service")), _xlsx_col(heads.index("Status"))
-    sheet1 = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-              '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
-              f'<cols>{widths}</cols><sheetData>'
-              + row_xml(1, heads, 1) + row_xml(2, ex1) + row_xml(3, ex2) +
-              '</sheetData><dataValidations count="2">'
-              f'<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="{s_col}2:{s_col}2000">'
-              f"<formula1>'Allowed values'!$A$2:$A${len(services)+1}</formula1></dataValidation>"
-              f'<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="{st_col}2:{st_col}2000">'
-              f"<formula1>'Allowed values'!$B$2:$B${len(statuses)+1}</formula1></dataValidation>"
-              '</dataValidations></worksheet>')
-    help_rows = [row_xml(1, ["Service", "Status", "How to fill"], 1)]
-    tips = ["One row per project (work).",
-            "Client ID: leave blank for a new client; put an existing ID (e.g. CL-1003) to update it.",
-            "Several people: separate names with commas, e.g. Arun Raj, Meena S.",
-            "Proofreaders / Formatters: the first name is the coordinator.",
-            "Names should match the Team list. The person on the CURRENT step must be an active team member.",
-            "Dates: YYYY-MM-DD (e.g. 2026-03-31) or DD/MM/YYYY.",
-            "Synopsis / Survey Synopsis / Thesis have no journal: use Paper with client, Client accepted or Completed.",
-            "Delete the two example rows before importing."]
-    for i in range(max(len(services), len(statuses), len(tips))):
-        help_rows.append(row_xml(i + 2, [services[i] if i < len(services) else "",
-                                         statuses[i] if i < len(statuses) else "",
-                                         tips[i] if i < len(tips) else ""]))
-    sheet2 = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-              '<cols><col min="1" max="1" width="34" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/>'
-              '<col min="3" max="3" width="100" customWidth="1"/></cols>'
-              f'<sheetData>{"".join(help_rows)}</sheetData></worksheet>')
-    files = {
-        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            '<Default Extension="xml" ContentType="application/xml"/>'
-            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-            '</Types>',
-        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-            '</Relationships>',
-        "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
-            '<sheet name="Projects" sheetId="1" r:id="rId1"/><sheet name="Allowed values" sheetId="2" r:id="rId2"/>'
-            '</sheets></workbook>',
-        "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
-            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-            '</Relationships>',
-        "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>'
-            '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
-            '<fill><patternFill patternType="solid"><fgColor rgb="FF0E7490"/><bgColor indexed="64"/></patternFill></fill></fills>'
-            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
-            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-            '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
-            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
-            '</styleSheet>',
-        "xl/worksheets/sheet1.xml": sheet1,
-        "xl/worksheets/sheet2.xml": sheet2,
-    }
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels",
-                     "xl/styles.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"]:
-            z.writestr(name, files[name])
-    return buf.getvalue()
-
-
-def build_projects_template_json():
-    ex = []
-    for col in (2, 3):
-        obj = {}
-        for h, f, e1, e2 in PROJECT_IMPORT_COLUMNS:
-            v = e1 if col == 2 else e2
-            if f in ("programmers", "writers", "proofreaders", "formatters"):
-                v = _split_people(v)
-            obj[h] = v
-        ex.append(obj)
-    return json.dumps({"_help": {
-        "Service": [v["label"] for v in SERVICES.values()],
-        "Status": [k for k, _, _ in PROJECT_IMPORT_STATUSES],
-        "Notes": "One object per project. Client ID blank = new client. Name lists can be arrays. "
-                 "Proofreaders/Formatters: first name is the coordinator. Delete the examples."},
-        "projects": ex}, indent=2, ensure_ascii=False).encode("utf-8")
 
 
 def _dispatch_bulk_import(con, kind, rows, d):
@@ -5239,8 +5548,6 @@ def _dispatch_bulk_import(con, kind, rows, d):
         return _import_payments_rows(con, rows)
     if kind == "queries":
         return _import_queries_rows(con, rows, default_client_id, actor)
-    if kind == "projects":
-        return _import_projects_rows(con, rows, actor or "Technical Manager", d.get("mapping"))
     raise ApiError("Unknown import type.")
 
 
@@ -6131,7 +6438,6 @@ def _handle_action_core(action, d, ip=""):
                     "clientReferrals": client_refs, "workSends": sends_out,
                     "services": {k: {"label": v["label"], "hasImplementation": v["hasImplementation"],
                                       "requiresWritingFee": v.get("requiresWritingFee", False),
-                                      "needsJournal": v.get("needsJournal", True),
                                       "amounts": v["amounts"]} for k, v in SERVICES.items()},
                     "stageReminders": reminder_settings(con) if (d.get("role") or "") != "client" else None}
 
@@ -6492,19 +6798,6 @@ def _handle_action_core(action, d, ip=""):
             require_import_role((d.get("role") or "").strip(), kind)
             rows = _rows_from_upload(d.get("filename"), d.get("contentBase64"), d.get("csvText"))
             return _dispatch_bulk_import(con, kind, rows, d)
-
-        if action == "import_template":
-            if (d.get("kind") or "") != "projects":
-                raise ApiError("No template for that import type.")
-            require_import_role((d.get("role") or "").strip(), "projects")
-            fmt = (d.get("format") or "xlsx").lower()
-            if fmt == "json":
-                data, name, mime = build_projects_template_json(), "existing-projects-template.json", "application/json"
-            else:
-                data, name = build_projects_template_xlsx(), "existing-projects-template.xlsx"
-                mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            return {"ok": True, "filename": name, "mime": mime,
-                    "contentBase64": base64.b64encode(data).decode("ascii")}
 
         if action == "bulk_import_from_url":
             kind = (d.get("kind") or "").strip()
@@ -8090,7 +8383,6 @@ def _handle_action_core(action, d, ip=""):
             con.execute("UPDATE clients SET client_approved_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id=?",
                         (c["id"],))
             move_stage(con, c["id"], "CLIENT_ACCEPTED", "Client", "Client approved the paper.")
-            finish_if_no_journal(con, c, "Client")
             con.commit()
             return {"ok": True}
 
@@ -8126,7 +8418,6 @@ def _handle_action_core(action, d, ip=""):
                         (c["id"],))
             move_stage(con, c["id"], "CLIENT_ACCEPTED", actor,
                        "Continued without waiting for the client's approval — " + note)
-            finish_if_no_journal(con, c, actor)
             con.commit()
             return {"ok": True}
 
@@ -8204,9 +8495,6 @@ def _handle_action_core(action, d, ip=""):
         #       name(s).
         if action == "select_journal":
             c = get_client(con, d.get("clientId") or "")
-            if not service_needs_journal(c["service_key"]):
-                raise ApiError(service_conf(c["service_key"])["label"] + " has no journal submission — "
-                               "it is completed once the client accepts it.")
             if c["stage"] != "CLIENT_ACCEPTED":
                 raise ApiError("This client isn't ready to be sent to the Journal Team yet — "
                                 "the client needs to approve the delivered paper first.")
@@ -9975,6 +10263,45 @@ def _handle_action_core(action, d, ip=""):
             con.commit()
             return {"ok": True, "table": table, **result}
 
+        # ----- Technical Manager > Import Old Work -----------------------------------
+        if action == "tm_import_template":
+            fmt = (d.get("format") or "xlsx").strip().lower()
+            if fmt == "json":
+                raw, name, mime = build_old_work_json(), "imatiz-old-work-template.json", "application/json"
+            elif fmt == "xlsx":
+                raw, name = build_old_work_xlsx(), "imatiz-old-work-template.xlsx"
+                mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            else:
+                raise ApiError("Pick Excel or JSON.")
+            return {"ok": True, "fileName": name, "mime": mime,
+                    "fileData": base64.b64encode(raw).decode("ascii")}
+
+        if action == "tm_import_old_work":
+            filename = (d.get("fileName") or "").strip()
+            low = filename.lower()
+            if low.endswith(".json"):
+                text = d.get("jsonText")
+                if not isinstance(text, str):
+                    try:
+                        text = base64.b64decode(d.get("fileData") or "").decode("utf-8-sig")
+                    except Exception:
+                        raise ApiError("Could not read that JSON file.")
+                records = _ow_records_from_json(text)
+            elif low.endswith((".xlsx", ".csv", ".tsv")):
+                rows = _rows_from_upload(filename, d.get("fileData") or "", None)
+                records = _ow_records_from_rows(rows)
+            elif low.endswith(".xls"):
+                raise ApiError("Old .xls files can't be read - open it in Excel and \"Save As\" .xlsx, then upload again.")
+            else:
+                raise ApiError("Upload the filled template as .xlsx, .csv or .json.")
+            actor = {"technical_manager": "Technical Manager", "md_admin": "MD / Admin",
+                     "super_admin": "Super Admin"}.get(d.get("role") or "", "Technical Manager") + " (import)"
+            try:
+                return import_old_work(con, records, actor, commit=bool(d.get("commit")))
+            except Exception:
+                con.rollback()
+                raise
+
         if action == "admin_import_summary":
             # Where the restored clients now sit, team by team — shown after an upload.
             counts = {"marketing": 0, "accounts": 0, "technical": 0, "journal": 0, "completed": 0}
@@ -10390,7 +10717,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY_BYTES:
-                return self._json({"error": "That request is too large."}, 413)
+                return self._json({"error": "Error 413 \u2013 File Too Large."}, 413)
             raw = self.rfile.read(length) if length else b""
             try:
                 data = json.loads(raw or b"{}")
@@ -10531,8 +10858,8 @@ class Handler(BaseHTTPRequestHandler):
             if DEBUG:
                 self._json({"error": "Server error: " + str(e)}, 500)
             else:
-                self._json({"error": "Something went wrong on our end. Please try again. "
-                                      "(reference %s)" % ref}, 500)
+                # Short and plain; the reference + full traceback are in the server log.
+                self._json({"error": "Error 500 \u2013 Internal Server Error."}, 500)
         finally:
             set_principal(None)
 
@@ -10681,7 +11008,7 @@ def app(environ, start_response):
     if length > MAX_BODY_BYTES:
         start_response("413 Payload Too Large",
                        [("Content-Type", "application/json")])
-        return [b'{"error": "That request is too large."}']
+        return [b'{"error": "Error 413 - File Too Large."}']
     body = environ["wsgi.input"].read(length) if length else b""
 
     # Behind Render's proxy the real client IP is in X-Forwarded-For. Only the
